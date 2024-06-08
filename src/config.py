@@ -1,7 +1,11 @@
 MODEL = "gpt-4o"
-FILE_NAME = "/home/msun415/api.txt"
-IMG_DIR = "/home/msun415/SynTreeNet/induction/minnesota/"
+FILE_NAME = "/home/msun415/induction/data/api_cora.txt"
+IMG_DIR = "/home/msun415/induction/data/cora/"
 NONTERMS = ['gray']
-LABELS = ['r','g','b','c']
+LABELS = ['red','orange','yellow','green','cyan','blue','violet']
 SEED = 0
 MAX_ATTEMPTS = 5
+SCALE = 50
+NODE_SIZE = 1000
+FONT_SIZE = 20
+LAYOUT = 'kamada_kawai_layout'

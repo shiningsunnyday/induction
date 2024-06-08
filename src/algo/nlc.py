@@ -10,15 +10,18 @@ from src.api.get_motifs import *
 
 
 def learn_grammar(g):
+    os.makedirs(IMG_DIR, exist_ok=True)
     # wipe clean IMG_DIR
     for f in os.listdir(IMG_DIR):
+        if 'base.png' in f:
+            continue
         if os.path.isfile(os.path.join(IMG_DIR, f)):
             os.remove(os.path.join(IMG_DIR, f))
     g = deepcopy(g)
     grammar = NLCGrammar()
     iter = 0
     path = os.path.join(IMG_DIR, "base.png")
-    draw_graph(g, path)
+    # draw_graph(g, path)    
     while len(g) > 1:
         iter += 1
         IMAGE_PATHS = [path]
@@ -37,11 +40,11 @@ def learn_grammar(g):
                 good = True
                 break
         if not good:
-            rule = NLCRule('gray', g, lower)
+            rule = NLCRule('black', g, None)
             rule_no = len(grammar.rules)
             rule.visualize(os.path.join(IMG_DIR, f"rule_{rule_no}.png"))            
             grammar.add_rule(rule)
-            break
+            break        
         try:
             compats = [best_ism.nodes[n] for n in best_clique]
         except:

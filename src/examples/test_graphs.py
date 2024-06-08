@@ -1,6 +1,8 @@
 from src.config import LABELS
 import networkx as nx
 import numpy as np
+import pygsp as gsp
+from pygsp import graphs
 
 def create_random_graph(labels=LABELS):
     g = nx.random_regular_graph(3, 20, seed=SEED)
@@ -21,4 +23,13 @@ def create_test_graph(num):
             g.add_edge(*e)
     else:
         pass
+    return g
+
+
+def create_minnesota():
+    minn = graphs.Minnesota()
+    g = minn.to_networkx()
+    for n in g:
+        g.nodes[n]['label'] = 'r'
+    # draw_graph(g, os.path.join(IMG_DIR, 'base.png'))
     return g

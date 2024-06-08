@@ -130,14 +130,16 @@ def find_embedding(subgraphs, graph):
     best_clique = None
     max_len = 0
     for subgraph in subgraphs:
+        if len(subgraph) == 1:
+            continue
+        breakpoint()
         ism_subgraph = find_iso(subgraph, graph)
         if len(ism_subgraph) == 0:
             continue
         print(subgraph.nodes, ism_subgraph.nodes)
         max_cliques = list(nx.find_cliques(ism_subgraph))
-        better = False
-        if len(subgraph) > 1:
-            better = len(max_cliques[0]) > max_len       
+        better = False        
+        better = len(max_cliques[0]) > max_len       
         if better:
             max_len = len(max_cliques[0])
             best_ism = ism_subgraph    
