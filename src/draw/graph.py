@@ -21,4 +21,3 @@ def draw_graph(g, path, scale=SCALE, node_size=NODE_SIZE, font_size=FONT_SIZE, l
     os.makedirs(os.path.dirname(path), exist_ok=True)
     fig.savefig(path, bbox_inches='tight')
     print(os.path.abspath(path))
-    

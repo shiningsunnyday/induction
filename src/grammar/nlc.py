@@ -22,6 +22,10 @@ class NLCRule:
         self.subgraph = subgraph
         self.embedding = embedding
 
+
+    def __call__(self, graph):
+        pass
+
     
     def visualize(self, path):
         g = nx.Graph()
@@ -101,11 +105,11 @@ def find_iso(subgraph, graph):
     gm = GraphMatcher(graph, subgraph, node_match=lambda d1, d2: d1['label']==d2['label'])
     isms = list(gm.subgraph_isomorphisms_iter())
     insets = []
-    outsets = []
+    outsets = []    
     for i, ismA in enumerate(isms):
         insets.append(inoutset(graph, ismA))
         outsets.append(inoutset(graph, ismA, False))    
-    ism_graph = nx.Graph()
+    ism_graph = nx.Graph()    
     for i, ism in enumerate(isms):
         if not (insets[i] & outsets[i]):
             ism_graph.add_node(i, ism=list(ism), ins=insets[i], out=outsets[i])
@@ -132,18 +136,20 @@ def find_embedding(subgraphs, graph):
     for subgraph in subgraphs:
         if len(subgraph) == 1:
             continue
-        breakpoint()
+        if min([subgraph.nodes[n]['label'] == 'gray' for n in subgraph]):
+            continue
         ism_subgraph = find_iso(subgraph, graph)
         if len(ism_subgraph) == 0:
             continue
         print(subgraph.nodes, ism_subgraph.nodes)
-        max_cliques = list(nx.find_cliques(ism_subgraph))
-        better = False        
-        better = len(max_cliques[0]) > max_len       
+        max_clique = list(nx.approximation.max_clique(ism_subgraph))
+        # max_clique = list(nx.find_cliques(ism_subgraph))
+        better = False
+        better = len(max_clique)*len(subgraph) > max_len
         if better:
-            max_len = len(max_cliques[0])
+            max_len = len(max_clique)*len(subgraph)
             best_ism = ism_subgraph    
-            best_clique = max_cliques[0]
+            best_clique = max_clique
     # ism_subgraph: compatibility graph
     # best_ism: best subgraph
     # best cliques: best clique in ism_subgraph for best_ism

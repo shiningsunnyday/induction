@@ -1,16 +1,17 @@
-from src.algo import nlc
+from src.algo import nlc, mining
 from src.examples import *
-import json
+from src.draw.color import to_hex, CMAP
 import networkx as nx
+from src.config import RADIUS
+
 
 def main():
-    g = nx.node_link_graph(json.load(open('/home/msun415/induction/data/nx/cora.json')))
-    labels = list(set([g.nodes[n]['label'] for n in g]))
-    assert len(labels) == len(LABELS)
-    lookup = dict(zip(labels, LABELS))
-    for n in g:
-        g.nodes[n]['label'] = lookup[g.nodes[n]['label']]
-    grammar = nlc.learn_grammar(g)    
+    # g = load_cora()
+    g = create_test_graph(1)
+    # g = debug()
+    grammar, model = nlc.learn_grammar(g)
+    # grammar, model = mining.learn_stochastic_grammar(g)    
+    model.sample()
 
 if __name__ == "__main__":    
     breakpoint()
