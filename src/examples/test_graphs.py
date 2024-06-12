@@ -54,6 +54,7 @@ def load_cora():
             lookup[val] = len(lookup)    
         g.nodes[n]['label'] = to_hex(CMAP(lookup[val]))    
     assert len(lookup) <= CMAP.N
+    g = nx.relabel_nodes(g, {n: i for i, n in enumerate(list(g))})
     return g    
 
 

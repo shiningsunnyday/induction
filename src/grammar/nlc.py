@@ -1,5 +1,6 @@
+from typing import List, Dict, Any
 from src.draw.graph import draw_graph
-from src.config import IMG_DIR
+from src.config import IMG_DIR, NONTERMS
 import os
 from networkx.algorithms.isomorphism import GraphMatcher
 from PIL import Image
@@ -8,6 +9,8 @@ import networkx as nx
 import matplotlib.pyplot as plt
 from matplotlib.patches import FancyArrowPatch
 import uuid
+from copy import deepcopy
+from itertools import product
 
 class NLCGrammar:
     def __init__(self):
@@ -16,6 +19,7 @@ class NLCGrammar:
     def add_rule(self, rule):
         self.rules.append(rule)
 
+
 class NLCRule:
     def __init__(self, nt, subgraph, embedding):
         self.nt = nt
@@ -23,10 +27,24 @@ class NLCRule:
         self.embedding = embedding
 
 
-    def __call__(self, graph):
-        pass
+    def __call__(self, g, n): 
+        old_nos = list(g)
+        index = old_nos.index(n)
+        neis = [old_nos.index(m) for m in g[n]]        
+        no = len(g)
+        g = nx.disjoint_union(g, self.subgraph)
+        if self.embedding is not None:
+            A = [list(g)[nei] for nei in neis]
+            B = list(g)[no:]
+            for (a, b) in product(A, B):
+                c = (g.nodes[b]['label'], g.nodes[a]['label'])
+                if c in self.embedding:
+                    g.add_edge(a, b)
+        g.remove_node(list(g)[index])
+        g = nx.relabel_nodes(g, mapping={n: i for i, n in enumerate(list(g))})
+        return g
 
-    
+
     def visualize(self, path):
         g = nx.Graph()
         g.add_node(0, label=self.nt)        
@@ -69,6 +87,54 @@ class NLCRule:
                                 transform=ax2.transAxes)  # Ensure the arrow uses the axis coordinates
         ax2.add_patch(arrow)
         fig.savefig(path, bbox_inches='tight')
+
+
+class NLCNode:
+    def __init__(self, id: int, attrs: Dict[str, Any]=None, children: List['NLCNode']=None):
+        self.id = id
+        self.attrs = attrs if attrs is not None else {}
+        self.children = children if children is not None else []
+    
+
+    def add_child(self, node):
+        print("add edge", self.id, node.id)
+        self.children.append(node)
+
+
+
+class NLCModel:
+    def __init__(self, graph):
+        self.graph = graph
+
+
+    def __generate__(self, node, grammar, res):
+        rule_no = node.attrs['rule']
+        rule = grammar.rules[rule_no]                
+        new_res = []
+        for g in res:
+            # try every non-terminal
+            for n in g:
+                if g.nodes[n]['label'] == rule.nt:                                        
+                    new_res.append(rule(g, n))        
+        res = new_res
+        res = [r for r in res if nx.is_connected(r)]
+        for c in node.children:
+            res = self.__generate__(c, grammar, res)
+        return res
+
+
+    def generate(self, grammar):
+        g = nx.Graph()
+        g.add_node(0, label='black')        
+        res = [g]
+        res = self.__generate__(self.graph, grammar, res)
+        # prune unique
+        gen_dir = os.path.join(IMG_DIR, "generate/")
+        os.makedirs(gen_dir, exist_ok=True)
+        for i, g in enumerate(res):
+            draw_graph(g, os.path.join(gen_dir, f'graph_{i}.png'))
+                
+
 
 
 def get_groups(content):
@@ -128,6 +194,15 @@ def find_iso(subgraph, graph):
     return ism_graph
 
 
+def boundary(g):
+    bad = False
+    for a, b in g.edges:
+        if g.nodes[a]['label'] in NONTERMS and g.nodes[b]['label'] in NONTERMS:
+            bad = True
+            break
+    return bad
+
+
 
 def find_embedding(subgraphs, graph):
     best_ism = None
@@ -136,7 +211,7 @@ def find_embedding(subgraphs, graph):
     for subgraph in subgraphs:
         if len(subgraph) == 1:
             continue
-        if min([subgraph.nodes[n]['label'] == 'gray' for n in subgraph]):
+        if boundary(subgraph):
             continue
         ism_subgraph = find_iso(subgraph, graph)
         if len(ism_subgraph) == 0:

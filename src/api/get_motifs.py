@@ -24,7 +24,7 @@ def encode(img_array):
 
 def get_motifs(image_paths):
     models = list(openai.Model.list()['data'])
-    print(sorted([m['id'] for m in models]))
+    # print(sorted([m['id'] for m in models]))
     prompt = ''.join(open(FILE_NAME).readlines())    
     base64_images = []
     images = []
@@ -60,8 +60,8 @@ def get_motifs(image_paths):
                                                                } for base64_image in base64_images
                                                           ]}],
                                        )
-    print(prompt)
-    print("=====PROMPT ABOVE, RESPONSE BELOW=====")
+    # print(prompt)
+    # print("=====PROMPT ABOVE, RESPONSE BELOW=====")
     res = completion.choices[0].message.content
-    print(res)
+    # print(res)
     return res
