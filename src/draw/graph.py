@@ -15,9 +15,14 @@ def draw_graph(g, path, scale=SCALE, node_size=NODE_SIZE, font_size=FONT_SIZE, l
     w, l = pos_np.max(axis=0)-pos_np.min(axis=0)
     w = max(w, 1)
     l = max(l, 1)
+    if 'scale' in g.graph:
+        scale = g.graph['scale']    
+    if 'font_size' in g.graph:
+        font_size = g.graph['font_size']
     fig = plt.Figure(figsize=(scale*w, scale*l))
     ax = fig.add_subplot(1,1,1)    
     colors = []
+    node_sizes = []
     for n in g:
         if 'label' in g.nodes[n]:
             c = to_rgba(g.nodes[n]['label'])
@@ -25,13 +30,18 @@ def draw_graph(g, path, scale=SCALE, node_size=NODE_SIZE, font_size=FONT_SIZE, l
             c = to_rgba('r')
         if 'alpha' in g.nodes[n]:
             c = c[:-1] + (g.nodes[n]['alpha'],)
+        if 'node_size' in g.nodes[n]:
+            n_size = g.nodes[n]['node_size']
+            node_sizes.append(n_size)
+        else:
+            node_sizes.append(node_size)
         colors.append(c)
     labels = {n: n for n in g}
     nx.draw_networkx_nodes(g, 
                            ax=ax, 
                            pos=pos, 
                            node_color=colors, 
-                           node_size=node_size)
+                           node_size=node_sizes)
     nx.draw_networkx_labels(g,
                             ax=ax,
                             pos=pos,

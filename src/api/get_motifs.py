@@ -23,7 +23,7 @@ def encode(img_array):
 
 
 def get_motifs(image_paths):
-    models = list(openai.Model.list()['data'])
+    # models = list(openai.Model.list()['data'])
     # print(sorted([m['id'] for m in models]))
     prompt = ''.join(open(FILE_NAME).readlines())    
     base64_images = []
@@ -32,18 +32,19 @@ def get_motifs(image_paths):
         with open(image_path, "rb") as image_file:
             image = image_file.read()
             image = np.array(Image.open(image_path))
-            imgs = [image]
-            while imgs:
-                image = imgs.pop(-1)
-                if image.size > MAX_SIZE:
-                    if image.shape[0] > image.shape[1]:
-                        imgs.append(image[:image.shape[0]//2])
-                        imgs.append(image[image.shape[0]//2:])
-                    else:
-                        imgs.append(image[:,:image.shape[1]//2])
-                        imgs.append(image[:,image.shape[1]//2:])
-                else:
-                    images.append(image)
+            # imgs = [image]
+            # while imgs:
+            #     image = imgs.pop(-1)
+            #     if image.size > MAX_SIZE:
+            #         if image.shape[0] > image.shape[1]:
+            #             imgs.append(image[:image.shape[0]//2])
+            #             imgs.append(image[image.shape[0]//2:])
+            #         else:
+            #             imgs.append(image[:,:image.shape[1]//2])
+            #             imgs.append(image[:,image.shape[1]//2:])
+            #     else:
+            #         images.append(image)
+            images.append(image)
 
     for image in images:
         image = encode(image)
@@ -63,5 +64,5 @@ def get_motifs(image_paths):
     # print(prompt)
     # print("=====PROMPT ABOVE, RESPONSE BELOW=====")
     res = completion.choices[0].message.content
-    # print(res)
+    print(res)
     return res

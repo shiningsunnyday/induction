@@ -16,7 +16,6 @@ def term(g):
 
 def obtain_motifs(g, path):
     breakpoint() 
-
     return best_ism, best_clique, good  
 
 
