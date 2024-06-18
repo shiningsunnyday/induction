@@ -5,36 +5,19 @@ import numpy as np
 import pickle
 from copy import deepcopy
 from functools import reduce
-from src.grammar.nlc import *
+from src.grammar.nce import *
 from src.draw.graph import *
 from src.api.get_motifs import *
-from src.algo.utils import *
 
 
 def term(g):
     return min([g.nodes[n]['label'] == 'gray' for n in g])
 
 
-def obtain_motifs(g, path, IMAGE_PATHS):
-    good = False
-    for _ in range(MAX_ATTEMPTS):
-        content = get_motifs(IMAGE_PATHS)
-        groups = get_groups(content)
-        if len(groups) == 0:
-            continue
-        subgraphs = [nx.induced_subgraph(g, group) for group in groups]
-        subgraphs = sum([[nx.induced_subgraph(subgraph, comp) for comp in nx.connected_components(subgraph)] for subgraph in subgraphs], [])
-        for i, subgraph in enumerate(subgraphs):
-            draw_graph(subgraph, path.replace(".png", f"{i}_subgraph.png"))
-        best_ism, best_clique = find_embedding(subgraphs, g)
-        if best_ism is not None:
-            good = True
-            break  
+def obtain_motifs(g, path):
+    breakpoint() 
+
     return best_ism, best_clique, good  
-
-
-def partition_graph(g, path):
-    return [path]    
 
 
 def rewire_graph(g, new_n, nodes, anno):
@@ -48,66 +31,60 @@ def rewire_graph(g, new_n, nodes, anno):
                 anno[new_n].add_child(anno[n])                
                 print(f"new edge between {new_n} and {n}")    
     for subnei in subneis:
-        g.add_edge(new_n, subnei)
+        g.add_edge(new_n, subnei)     
 
 
-def init_grammar(cache_iter, cache_path):
+
+def learn_grammar(g):
+    os.makedirs(IMG_DIR, exist_ok=True)
+    os.makedirs(CACHE_DIR, exist_ok=True)    
+    cache_path = None
+    cache_iter = 0
+    for f in os.listdir(CACHE_DIR):
+        if int(f.split('.pkl')[0]) > cache_iter:
+            cache_iter = int(f.split('.pkl')[0])
+            cache_path = os.path.join(CACHE_DIR, f"{cache_iter}.pkl")
     if cache_iter == 0:
         g = deepcopy(g)
         # wipe clean IMG_DIR
         for f in os.listdir(IMG_DIR):
             if os.path.isfile(os.path.join(IMG_DIR, f)):
                 os.remove(os.path.join(IMG_DIR, f))        
-        grammar = NLCGrammar()                
-        draw_graph(g, path)               
+        grammar = NCEGrammar()
+        iter = 0
+        path = os.path.join(IMG_DIR, "base.png")
+        draw_graph(g, path)       
         anno = {} # annotation for model 
     else:
         grammar, anno, g = pickle.load(open(cache_path, 'rb'))
         iter = cache_iter  
         path = os.path.join(IMG_DIR, f'api_{iter}.png')
-        assert os.path.exists(path)
-    return grammar, anno
-
-
-
-def find_next(g):
-    type_set = set([type(n) for n in g])
-    if type_set == {'int'}:
-        return max(list(g))+1    
-    else:
-        return str(max(list(map(int, g)))+1)
-
-
-
-def terminate(g, grammar, anno):
-    nodes = list(g)
-    new_n = find_next(g)
-    rule_no = len(grammar.rules)
-    anno[new_n] = NLCNode(new_n, attrs={'rule': rule_no})
-    rule = NLCRule('black', deepcopy(g), None)                        
-    rule.visualize(os.path.join(IMG_DIR, f"rule_{rule_no}.png"))            
-    grammar.add_rule(rule)
-    rewire_graph(g, new_n, nodes, anno)
-    model = anno[new_n]    
-    return g, grammar, model
-
-
-def learn_grammar(g):
-    cache_iter, cache_path = setup()
-    grammar, anno = init_grammar(cache_iter, cache_path)
-    path = os.path.join(IMG_DIR, "base.png")
-    iter = 0
+        assert os.path.exists(path)    
+    breakpoint()
     while len(g) > 1:
         iter += 1
-        img_paths = partition_graph(g, path)
+        IMAGE_PATHS = [path]
         end = term(g)
         if not end:
-            best_ism, best_clique, good = obtain_motifs(g, path, img_paths)
+            best_ism, best_clique, good = obtain_motifs(g, path)
             end = end or not good
         if end:
-            g, grammar, model = terminate(g, grammar, anno)
-            break
-        compats = [best_ism.nodes[n] for n in best_clique]
+            nodes = list(g)
+            new_n = max(list(g))+1            
+            rule_no = len(grammar.rules)
+            anno[new_n] = NLCNode(new_n, attrs={'rule':rule_no})
+            rule = NCERule('black', deepcopy(g), None)                        
+            rule.visualize(os.path.join(IMG_DIR, f"rule_{rule_no}.png"))            
+            grammar.add_rule(rule)
+            rewire_graph(g, new_n, nodes, anno)
+            model = anno[new_n]
+            break        
+        try:
+            compats = [best_ism.nodes[n] for n in best_clique]
+        except:
+            print("failed")
+            print(best_clique)
+            print(best_ism)
         lower = reduce(lambda x,y: x|y, [compat['ins'] for compat in compats])
         # L2 = set([(x,y) for x, y in product(LABELS, LABELS)])
         # ous = reduce(lambda x,y: x&y, [compat['out'] for compat in compats])
@@ -130,12 +107,20 @@ def learn_grammar(g):
             if boundary(g):
                 g = g_cache
                 anno = anno_cache
-                continue
+                continue       
             else:
                 change = True
         if not change:
-            g, grammar, model = terminate(g, grammar, model)
-            break
+            nodes = list(g)
+            new_n = max(list(g))+1            
+            rule_no = len(grammar.rules)
+            anno[new_n] = NLCNode(new_n, attrs={'rule':rule_no})
+            rule = NLCRule('black', deepcopy(g), None)                        
+            rule.visualize(os.path.join(IMG_DIR, f"rule_{rule_no}.png"))            
+            grammar.add_rule(rule)
+            rewire_graph(g, new_n, nodes, anno)
+            model = anno[new_n]
+            break               
         path = os.path.join(IMG_DIR, f'api_{iter}.png')
         draw_graph(g, path)   
         rule = NLCRule('gray', deepcopy(rhs_graph), lower)        

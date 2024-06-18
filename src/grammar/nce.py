@@ -1,6 +1,6 @@
 from typing import List, Dict, Any
 from src.draw.graph import draw_graph
-from src.config import IMG_DIR, NONTERMS
+from src.config import IMG_DIR, NONTERMS, SCALE
 import os
 from networkx.algorithms.isomorphism import GraphMatcher
 from PIL import Image
@@ -12,7 +12,7 @@ import uuid
 from copy import deepcopy
 from itertools import product
 
-class NLCGrammar:
+class NCEGrammar:
     def __init__(self):
         self.rules = []
     
@@ -20,7 +20,7 @@ class NLCGrammar:
         self.rules.append(rule)
 
 
-class NLCRule:
+class NCERule:
     def __init__(self, nt, subgraph, embedding):
         self.nt = nt
         self.subgraph = subgraph
@@ -28,30 +28,23 @@ class NLCRule:
 
 
     def __call__(self, g, n): 
-        old_nos = list(g)
-        index = old_nos.index(n)
-        neis = [old_nos.index(m) for m in g[n]]        
-        no = len(g)
-        g = nx.disjoint_union(g, self.subgraph)
-        if self.embedding is not None:
-            A = [list(g)[nei] for nei in neis]
-            B = list(g)[no:]
-            for (a, b) in product(A, B):
-                c = (g.nodes[b]['label'], g.nodes[a]['label'])
-                if c in self.embedding:
-                    g.add_edge(a, b)
-        g.remove_node(list(g)[index])
-        g = nx.relabel_nodes(g, mapping={n: i for i, n in enumerate(list(g))})
-        return g
+        raise NotImplementedError
 
 
     def visualize(self, path):
         g = nx.Graph()
         g.add_node(0, label=self.nt)        
         lhs_path = os.path.join(IMG_DIR, f"{uuid.uuid4()}.png")
-        draw_graph(g, lhs_path)
+        draw_graph(g, lhs_path, scale=5)
         rhs_path = os.path.join(IMG_DIR, f"{uuid.uuid4()}.png")
-        draw_graph(self.subgraph, rhs_path)
+        g = nx.Graph(self.subgraph)
+        if self.embedding is not None:
+            for e in self.embedding:
+                ind, c = e
+                n = list(self.subgraph)[ind]
+                g.add_node(f"{ind}{c}", label=c, alpha=0.5)
+                g.add_edge(f"{ind}{c}", n, style='dashed')
+        draw_graph(g, rhs_path, scale=10)
         self.draw_fig(lhs_path, rhs_path, path)
 
     
@@ -86,11 +79,11 @@ class NLCRule:
                                 lw=3,  # Set line width to make the arrow thicker
                                 transform=ax2.transAxes)  # Ensure the arrow uses the axis coordinates
         ax2.add_patch(arrow)
-        fig.savefig(path, bbox_inches='tight')
+        fig.savefig(path, bbox_inches='tight', dpi=300)
 
 
-class NLCNode:
-    def __init__(self, id: int, attrs: Dict[str, Any]=None, children: List['NLCNode']=None):
+class NCENode:
+    def __init__(self, id: int, attrs: Dict[str, Any]=None, children: List['NCENode']=None):
         self.id = id
         self.attrs = attrs if attrs is not None else {}
         self.children = children if children is not None else []
@@ -102,69 +95,19 @@ class NLCNode:
 
 
 
-class NLCModel:
+class NCEModel:
     def __init__(self, graph):
         self.graph = graph
 
 
     def __generate__(self, node, grammar, res):
-        rule_no = node.attrs['rule']
-        rule = grammar.rules[rule_no]                
-        new_res = []
-        for g in res:
-            # try every non-terminal
-            for n in g:
-                if g.nodes[n]['label'] == rule.nt:                                        
-                    new_res.append(rule(g, n))
-        res = new_res
-        res = [r for r in res if nx.is_connected(r)]
-        # try every order
-        from itertools import permutations
-        res_all = []
-        for child_order in permutations(node.children):
-            res_cur = deepcopy(res)
-            for c in child_order:
-                res_cur = self.__generate__(c, grammar, res_cur)
-            res_all += res_cur
-        return res_all
+        pass
 
 
     def generate(self, grammar):
-        g = nx.Graph()
-        g.add_node(0, label='black')        
-        res = [g]
-        res = self.__generate__(self.graph, grammar, res)
-        # prune unique
-        new_res = []
-        for r_new in res:
-            if not nx.is_connected(r_new):
-                continue
-            exist = False
-            for r_old in new_res:
-                if nx.is_isomorphic(r_new, r_old, node_match=lambda d1, d2: d1['label']==d2['label']):
-                    exist = True
-                    break
-            if not exist:
-                new_res.append(r_new)
-
-        gen_dir = os.path.join(IMG_DIR, "generate/")
-        os.makedirs(gen_dir, exist_ok=True)
-        for i, g in enumerate(new_res):
-            draw_graph(g, os.path.join(gen_dir, f'graph_{i}.png'))
+        pass
                 
 
-
-
-def get_groups(content):
-    groups = []
-    for l in content.split():
-        l_str = l.replace(' ','').split(',')
-        try:
-            l_arr = list(map(int, l_str))
-        except:
-            continue
-        groups.append(l_arr)
-    return groups
 
 
 def neis(graph, nodes):
@@ -176,12 +119,11 @@ def neis(graph, nodes):
 def inoutset(graph, nodes, inset=True):
     out_ns = neis(graph, nodes)    
     res = set()
-    for x in nodes:
+    for i, x in enumerate(nodes):
         for y in out_ns:
             if inset and graph.has_edge(x, y) or not inset and not graph.has_edge(x, y):
-                label_x = graph.nodes[x]['label']
                 label_y = graph.nodes[y]['label']
-                res.add((label_x, label_y))
+                res.add((i, label_y))
     return res
 
 
@@ -192,7 +134,7 @@ def find_iso(subgraph, graph):
     outsets = []    
     for i, ismA in enumerate(isms):
         insets.append(inoutset(graph, ismA))
-        outsets.append(inoutset(graph, ismA, False))    
+        outsets.append(inoutset(graph, ismA, False))        
     ism_graph = nx.Graph()    
     for i, ism in enumerate(isms):
         if not (insets[i] & outsets[i]):
@@ -229,8 +171,8 @@ def find_embedding(subgraphs, graph):
     for subgraph in subgraphs:
         if len(subgraph) == 1:
             continue
-        if boundary(subgraph):
-            continue
+        # if boundary(subgraph):
+        #     continue
         ism_subgraph = find_iso(subgraph, graph)
         if len(ism_subgraph) == 0:
             continue

@@ -1,10 +1,12 @@
-from src.config import LABELS, SEED, RADIUS
+from src.config import SEED, RADIUS
 import networkx as nx
 import numpy as np
 import pygsp as gsp
 from pygsp import graphs
 import json
 from src.draw.color import to_hex, CMAP
+
+LABELS = ['r','g','b','c']
 
 def create_random_graph(labels=LABELS):
     g = nx.random_regular_graph(3, 20, seed=SEED)
@@ -17,12 +19,17 @@ def create_random_graph(labels=LABELS):
 def create_test_graph(num):
     if num == 1:
         g = nx.Graph()
-        labels = ['r','g','b','c','b','r','g','b','c','b','g','r','c','b']
-        edges = [(0,1),(1,2),(2,3),(3,0),(1,4),(4,5),(5,6),(6,7),(7,8),(8,5),(6,9),(9,10),(10,11),(11,12),(12,13),(13,10)]
+        labels = ['r','g','b','c','r','r','g','b','c','b','g','r','c','b']
+        labels[5], labels[6] = labels[6], labels[5]
+        labels[8], labels[7] = labels[7], labels[8]
+        labels[12], labels[10] = labels[10], labels[12]
+        labels[11], labels[10], labels[13], labels[12] = labels[12], labels[11], labels[10], labels[13]
+        edges = [(1, 2), (2, 3), (3, 4), (4, 1), (2, 5), (5, 6), (6, 7), (7, 8), (8, 9), (9, 6), (7, 10), (10, 11), (11, 12), (12, 13), (13, 14), (14, 11)]
         for i in range(14):
-            g.add_node(i, label=labels[i])
+            g.add_node(i+1, label=labels[i])
         for e in edges:
             g.add_edge(*e)
+        g = nx.relabel_nodes(g, {n: n for n in g})
     else:
         pass
     return g
@@ -45,17 +52,25 @@ def load_cora():
     
     conn = list(nx.connected_components(g))[0]
     print(len(conn), "nodes")
-    g = nx.Graph(nx.induced_subgraph(g, conn))    
-    lookup = {}        
-    for n in g:
+    g = nx.Graph(nx.induced_subgraph(g, conn))        
+    lookup = {}
+    for n in list(sorted(g)):
         ego_g = nx.ego_graph(g, n, radius=RADIUS)
         val = nx.weisfeiler_lehman_graph_hash(ego_g, iterations=2)
+        # val = g.nodes[n]['label']
+        # nei_labels = [g.nodes[n]['label'] for n in ego_g]
+        # nei_labels, counts = np.unique(nei_labels, return_counts=True)
+        # nei_labels = [nei_label for (nei_label, count) in zip(nei_labels, counts) if count > 1]
+        # labels = sorted(list(set(nei_labels)))
+        # labels = ','.join(labels)
+        # val = f"{val}_{labels}"
         if val not in lookup:
             lookup[val] = len(lookup)    
         g.nodes[n]['label'] = to_hex(CMAP(lookup[val]))    
-    assert len(lookup) <= CMAP.N
-    g = nx.relabel_nodes(g, {n: i for i, n in enumerate(list(g))})
-    return g    
+    assert len(lookup) <= CMAP.N, f"{len(lookup)} exceeds {CMAP.N} colors"
+    g = nx.relabel_nodes(g, {n: str(i+1) for i, n in enumerate(list(g))})
+    print(len(lookup), "labels")
+    return g
 
 
 def debug():
