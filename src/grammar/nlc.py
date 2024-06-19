@@ -51,7 +51,7 @@ class NLCGrammar:
                 out_label = cur.nodes[cur_nei]['label']
                 for cur_node in rhs:
                     in_label = cur.nodes[cur_node]['label']
-                    if (out_label, in_label) in rule.embedding:
+                    if (in_label, out_label) in rule.embedding:
                         cur.add_edge(cur_nei, cur_node)
             cur.remove_node(node)
         return cur
