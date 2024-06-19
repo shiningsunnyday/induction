@@ -81,37 +81,19 @@ def init_grammar(g, cache_iter, cache_path):
             if os.path.isfile(os.path.join(IMG_DIR, f)):
                 os.remove(os.path.join(IMG_DIR, f))        
         grammar = NLCGrammar()
-        path = os.path.join(IMG_DIR, f'{METHOD}_0.png')
+        # path = os.path.join(IMG_DIR, f'{METHOD}_0.png')
         # draw_graph(g, path)
         anno = {} # annotation for model 
         iter = 0
     else:
         grammar, anno, g = pickle.load(open(cache_path, 'rb'))
         iter = cache_iter  
-        path = os.path.join(IMG_DIR, f'{METHOD}_0.png')
-        assert os.path.exists(path)
-    return grammar, anno, iter
+        # path = os.path.join(IMG_DIR, f'{METHOD}_0.png')
+    return g, grammar, anno, iter
 
 
 
-def find_next(g):
-    type_set = set([type(n) for n in g])
-    if type_set == {'int'}:
-        return max(list(g))+1    
-    else:
-        return str(max(list(map(int, g)))+1)
-
-
-def find_max(g):
-    type_set = set([type(n) for n in g])
-    if type_set == {'int'}:
-        return max(list(g))  
-    else:
-        return str(max(list(map(int, g))))
-
-
-
-def terminate(g, grammar, anno):
+def terminate(g, grammar, anno, iter):
     nodes = list(g)
     new_n = find_next(g)
     rule_no = len(grammar.rules)
@@ -121,6 +103,8 @@ def terminate(g, grammar, anno):
     grammar.add_rule(rule)
     rewire_graph(g, new_n, nodes, anno)
     model = anno[new_n]    
+    cache_path = os.path.join(CACHE_DIR, f"{iter}.pkl")                
+    pickle.dump((grammar, anno, g), open(cache_path, 'wb+'))        
     return g, grammar, model
 
 
@@ -156,27 +140,27 @@ def update_graph(g, anno, best_ism, best_clique, grammar):
             continue
         else:
             change = True  
-    return change  
+    return g, change
 
 
 
 def learn_grammar(g):
     cache_iter, cache_path = setup()    
-    grammar, anno, iter = init_grammar(g, cache_iter, cache_path)    
+    g, grammar, anno, iter = init_grammar(g, cache_iter, cache_path)    
     while len(g) > 1:
         iter += 1
         img_paths = partition_graph(g, iter)        
         if term(g):
-            g, grammar, model = terminate(g, grammar, anno)
+            g, grammar, model = terminate(g, grammar, anno, iter)
             break        
         best_ism, best_clique = obtain_motifs(g, img_paths)
         if best_ism is None:
-            g, grammar, model = terminate(g, grammar, anno)
+            g, grammar, model = terminate(g, grammar, anno, iter)
             break                
         extract_rule(g, best_ism, best_clique, grammar)              
-        change = update_graph(g, anno, best_ism, best_clique, grammar)        
+        g, change = update_graph(g, anno, best_ism, best_clique, grammar)        
         if not change:
-            g, grammar, model = terminate(g, grammar, anno)
+            g, grammar, model = terminate(g, grammar, anno, iter)
             break
         path = os.path.join(IMG_DIR, f'{METHOD}_{iter}.png')
         draw_graph(g, path)   

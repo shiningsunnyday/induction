@@ -11,13 +11,61 @@ from matplotlib.patches import FancyArrowPatch
 import uuid
 from copy import deepcopy
 from itertools import product
+import random
 
 class NLCGrammar:
     def __init__(self):
         self.rules = []
-    
+
+
     def add_rule(self, rule):
         self.rules.append(rule)
+
+
+    def __sample__(self):        
+        # find the initial rule
+        rule_indices = list(range(len(self.rules)))
+        for i, rule in enumerate(self.rules):
+            if rule.nt == 'black':
+                cur = nx.Graph(rule.subgraph)
+                num_nts = sum([cur.nodes[n]['label'] == 'gray' for n in cur])
+                rule_indices.remove(i)
+                break
+        while num_nts > 0:          
+            gray_nodes = list(filter(lambda x: cur.nodes[x]['label'] == 'gray', cur))
+            node = random.choice(gray_nodes)
+            ind = random.choice(rule_indices)
+            rule = self.rules[ind]
+            rhs = nx.Graph(rule.subgraph)            
+            start = find_next(cur)
+            node_map = {}
+            for n in rhs:
+                node_map[n] = start                
+                start = next(start)
+                num_nts += (rhs.nodes[n]['label'] == 'gray')
+            num_nts -= 1
+            rhs = nx.relabel_nodes(rhs, node_map)
+            cur = nx.union(cur, rhs)            
+            cur_neis = neis(cur, [node])
+            for cur_nei in cur_neis:
+                out_label = cur.nodes[cur_nei]['label']
+                for cur_node in rhs:
+                    in_label = cur.nodes[cur_node]['label']
+                    if (out_label, in_label) in rule.embedding:
+                        cur.add_edge(cur_nei, cur_node)
+            cur.remove_node(node)
+        return cur
+
+
+    def generate(self, num_samples=3):
+        res = []
+        while len(res) < num_samples:
+            print(len(res))
+            sample = self.__sample__()
+            if nx.is_connected(sample):
+                res.append(sample)                
+        return res
+            
 
 
 class NLCRule:
@@ -248,3 +296,28 @@ def find_embedding(subgraphs, graph):
     # best cliques: best clique in ism_subgraph for best_ism
     # return best_ism, best_clique
     return best_ism, best_clique
+
+
+def find_next(g):
+    all_int = np.all([isinstance(n, int) for n in g])
+    if all_int:
+        return max(list(g))+1    
+    else:
+        return str(max(list(map(int, g)))+1)
+
+
+def next(n):
+    if isinstance(n, str):
+        return str(int(n)+1)
+    else:
+        return n+1
+
+
+
+def find_max(g):
+    all_int = np.all([isinstance(n, int) for n in g])
+    if all_int:
+        return max(list(g))   
+    else:
+        return str(max(list(map(int, g))))
+    
