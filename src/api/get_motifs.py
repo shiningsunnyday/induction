@@ -1,4 +1,4 @@
-from src.config import FILE_NAME, MODEL, MAX_SIZE, IMG_DIR
+from src.config import FILE_NAME, MODEL, MAX_SIZE, IMG_DIR, MAX_IMAGES
 import io
 import base64
 import uuid
@@ -22,12 +22,9 @@ def encode(img_array):
     return base64_image
 
 
-def get_motifs(image_paths):
-    # models = list(openai.Model.list()['data'])
-    # print(sorted([m['id'] for m in models]))
-    prompt = ''.join(open(FILE_NAME).readlines())    
+def prepare_images(image_paths):
     base64_images = []
-    images = []
+    images = []    
     for image_path in image_paths:
         with open(image_path, "rb") as image_file:
             image = image_file.read()
@@ -50,19 +47,31 @@ def get_motifs(image_paths):
         image = encode(image)
         if image is not None:
             base64_images.append(image)
-    print(f"{len(base64_images)} patches")
-    completion = openai.ChatCompletion.create(model=MODEL, 
-                                            messages=[{"role": "user", 
-                                                     "content": [
-                                                         {"type": "text",
-                                                          "text": prompt}]+[
-                                                              {"type": "image_url",
-                                                               "image_url": {"url": f"data:image/jpeg;base64,{base64_image}"}
-                                                               } for base64_image in base64_images
-                                                          ]}],
-                                       )
-    # print(prompt)
-    # print("=====PROMPT ABOVE, RESPONSE BELOW=====")
-    res = completion.choices[0].message.content
-    print(res)
-    return res
+    return base64_images
+
+
+
+def get_motifs(image_paths):
+    # models = list(openai.Model.list()['data'])
+    # print(sorted([m['id'] for m in models]))
+    prompt = ''.join(open(FILE_NAME).readlines())    
+    ans = ""
+    for i in range((len(image_paths)+MAX_IMAGES-1)//MAX_IMAGES):
+        base64_images = prepare_images(image_paths[MAX_IMAGES*i:MAX_IMAGES*(i+1)])
+        print(f"{len(base64_images)} patches")
+        completion = openai.ChatCompletion.create(model=MODEL, 
+                                                messages=[{"role": "user", 
+                                                        "content": [
+                                                            {"type": "text",
+                                                            "text": prompt}]+[
+                                                                {"type": "image_url",
+                                                                "image_url": {"url": f"data:image/jpeg;base64,{base64_image}"}
+                                                                } for base64_image in base64_images
+                                                            ]}],
+                                        )
+        # print(prompt)
+        # print("=====PROMPT ABOVE, RESPONSE BELOW=====")
+        res = completion.choices[0].message.content
+        print(res)
+        ans += f"{res}\n"
+    return ans

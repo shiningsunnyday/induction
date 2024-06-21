@@ -1,3 +1,4 @@
+from .common import *
 from typing import List, Dict, Any
 from src.draw.graph import draw_graph
 from src.config import IMG_DIR, NONTERMS
@@ -12,6 +13,7 @@ import uuid
 from copy import deepcopy
 from itertools import product
 import random
+from .utils import *
 
 class NLCGrammar:
     def __init__(self):
@@ -62,8 +64,16 @@ class NLCGrammar:
         while len(res) < num_samples:
             print(len(res))
             sample = self.__sample__()
-            if nx.is_connected(sample):
-                res.append(sample)                
+            if not nx.is_connected(sample):
+                continue
+            exist = False
+            for r in res:
+                if nx.is_isomorphic(sample, r):
+                    exist = True
+                    break
+            if exist:
+                continue
+            res.append(sample)                
         return res
             
 
@@ -202,25 +212,6 @@ class NLCModel:
                 
 
 
-
-def get_groups(content):
-    groups = []
-    for l in content.split():
-        l_str = l.replace(' ','').split(',')
-        try:
-            l_arr = list(map(int, l_str))
-        except:
-            continue
-        groups.append(l_arr)
-    return groups
-
-
-def neis(graph, nodes):
-    ns = sum([list(graph[n]) for n in nodes], [])
-    out_neis = list(set([n for n in ns if n not in nodes]))
-    return out_neis
-
-
 def inoutset(graph, nodes, inset=True):
     out_ns = neis(graph, nodes)    
     res = set()
@@ -259,65 +250,3 @@ def find_iso(subgraph, graph):
                 ism_graph.add_edge(i, j)
     return ism_graph
 
-
-def boundary(g):
-    bad = False
-    for a, b in g.edges:
-        if g.nodes[a]['label'] in NONTERMS and g.nodes[b]['label'] in NONTERMS:
-            bad = True
-            break
-    return bad
-
-
-
-def find_embedding(subgraphs, graph):
-    best_ism = None
-    best_clique = None
-    max_len = 0
-    for subgraph in subgraphs:
-        if len(subgraph) == 1:
-            continue
-        if boundary(subgraph):
-            continue
-        ism_subgraph = find_iso(subgraph, graph)
-        if len(ism_subgraph) == 0:
-            continue
-        print(subgraph.nodes, ism_subgraph.nodes)
-        max_clique = list(nx.approximation.max_clique(ism_subgraph))
-        # max_clique = list(nx.find_cliques(ism_subgraph))
-        better = False
-        better = len(max_clique)*len(subgraph) > max_len
-        if better:
-            max_len = len(max_clique)*len(subgraph)
-            best_ism = ism_subgraph    
-            best_clique = max_clique
-    # ism_subgraph: compatibility graph
-    # best_ism: best subgraph
-    # best cliques: best clique in ism_subgraph for best_ism
-    # return best_ism, best_clique
-    return best_ism, best_clique
-
-
-def find_next(g):
-    all_int = np.all([isinstance(n, int) for n in g])
-    if all_int:
-        return max(list(g))+1    
-    else:
-        return str(max(list(map(int, g)))+1)
-
-
-def next(n):
-    if isinstance(n, str):
-        return str(int(n)+1)
-    else:
-        return n+1
-
-
-
-def find_max(g):
-    all_int = np.all([isinstance(n, int) for n in g])
-    if all_int:
-        return max(list(g))   
-    else:
-        return str(max(list(map(int, g))))
-    

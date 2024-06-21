@@ -18,7 +18,9 @@ def load_data():
     elif DATASET == 'test':
         g = create_test_graph(1)
     elif DATASET == 'debug':
-        g = debug()    
+        g = debug()   
+    elif DATASET == 'house':
+        g = create_house_graph()
     else:
         raise NotImplementedError
     return g
@@ -30,13 +32,13 @@ def main(args):
     gr, model = grammar.learn_grammar(g)
     # grammar, model = nlc.learn_grammar(g)
     # grammar, model = mining.learn_stochastic_grammar(g)    
-    model.generate(gr)
+    # model.generate(gr)
     samples = gr.generate()
     gen_dir = os.path.join(IMG_DIR, "generate/")
     os.makedirs(gen_dir, exist_ok=True)
     for i, g in enumerate(samples):
         draw_graph(g, os.path.join(gen_dir, f'graph_{i}.png'))                
-    breakpoint()
+    breakpoint()    
 
 
 if __name__ == "__main__":        

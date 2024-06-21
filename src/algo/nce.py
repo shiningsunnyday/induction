@@ -1,4 +1,4 @@
-from src.config import IMG_DIR, CACHE_DIR, MAX_ATTEMPTS, NONTERMS
+from src.config import *
 import os
 import networkx as nx
 import numpy as np
@@ -8,125 +8,92 @@ from functools import reduce
 from src.grammar.nce import *
 from src.draw.graph import *
 from src.api.get_motifs import *
+from src.algo.utils import *
+from src.algo.common import *
+from src.grammar.common import *
+from src.grammar.utils import *
 
 
-def term(g):
-    return min([g.nodes[n]['label'] == 'gray' for n in g])
+def terminate(g, grammar, anno, iter):
+    nodes = list(g)
+    new_n = find_next(g)
+    rule_no = len(grammar.rules)    
+    anno[new_n] = NCENode(new_n, attrs={'rule': rule_no})    
+    rule = NCERule('black', deepcopy(g), None)                        
+    rule.visualize(os.path.join(IMG_DIR, f"rule_{rule_no}.png"))            
+    grammar.add_rule(rule)    
+    g.add_node(new_n, label='black') # annotate which rule was applied to model
+    rewire_graph(g, new_n, nodes, anno)
+    model = anno[new_n]    
+    cache_path = os.path.join(CACHE_DIR, f"{iter}.pkl")                
+    pickle.dump((grammar, anno, g), open(cache_path, 'wb+'))        
+    return g, grammar, model
 
 
-def obtain_motifs(g, path):
-    breakpoint() 
-    return best_ism, best_clique, good  
+def extract_rule(g, best_ism, best_clique, grammar):    
+    compats = [best_ism.nodes[n] for n in best_clique]
+    lower = reduce(lambda x,y: x|y, [compat['ins'] for compat in compats])
+    # L2 = set([(x,y) for x, y in product(LABELS, LABELS)])
+    # ous = reduce(lambda x,y: x&y, [compat['out'] for compat in compats])
+    # upper = L2 - ous
+    nodes_induce = best_ism.nodes[list(best_ism)[0]]['ism']
+    rhs_graph = deepcopy(nx.induced_subgraph(g, nodes_induce))
+    color = 'gray'
+    if len(rhs_graph) == len(g):
+        color = 'black'
+    rule = NCERule(color, deepcopy(rhs_graph), lower)   
+    rule_no = len(grammar.rules)     
+    rule.visualize(os.path.join(IMG_DIR, f"rule_{rule_no}.png"))
+    grammar.add_rule(rule) 
 
 
-def rewire_graph(g, new_n, nodes, anno):
-    subneis = [n for n in neis(g, nodes)]
-    for n in nodes:
-        label = g.nodes[n]['label']
-        g.remove_node(n)
-        # if n is annotated, add edge to model
-        if n in anno:
-            if label in NONTERMS:
-                anno[new_n].add_child(anno[n])                
-                print(f"new edge between {new_n} and {n}")    
-    for subnei in subneis:
-        g.add_edge(new_n, subnei)     
+def update_graph(g, anno, best_ism, best_clique, grammar):
+    change = False
+    for c in best_clique:
+        g_cache = deepcopy(g)
+        anno_cache = deepcopy(anno)
+        ism = best_ism.nodes[c]
+        nodes = ism['ism']    
+        new_n = find_next(g)
+        g.add_node(new_n, label='gray') # annotate which rule was applied to model
+        anno[new_n] = NCENode(new_n, attrs={'rule': len(grammar.rules)-1})        
+        print(f"{new_n} new node")                   
+        rewire_graph(g, new_n, nodes, anno)           
+        if boundary(g):
+            g = g_cache
+            anno = anno_cache
+            continue
+        else:
+            change = True  
+    return g, change
 
 
 
 def learn_grammar(g):
-    os.makedirs(IMG_DIR, exist_ok=True)
-    os.makedirs(CACHE_DIR, exist_ok=True)    
-    cache_path = None
-    cache_iter = 0
-    for f in os.listdir(CACHE_DIR):
-        if int(f.split('.pkl')[0]) > cache_iter:
-            cache_iter = int(f.split('.pkl')[0])
-            cache_path = os.path.join(CACHE_DIR, f"{cache_iter}.pkl")
-    if cache_iter == 0:
-        g = deepcopy(g)
-        # wipe clean IMG_DIR
-        for f in os.listdir(IMG_DIR):
-            if os.path.isfile(os.path.join(IMG_DIR, f)):
-                os.remove(os.path.join(IMG_DIR, f))        
-        grammar = NCEGrammar()
-        iter = 0
-        path = os.path.join(IMG_DIR, "base.png")
-        draw_graph(g, path)       
-        anno = {} # annotation for model 
-    else:
-        grammar, anno, g = pickle.load(open(cache_path, 'rb'))
-        iter = cache_iter  
-        path = os.path.join(IMG_DIR, f'api_{iter}.png')
-        assert os.path.exists(path)    
+    cache_iter, cache_path = setup()    
+    g, grammar, anno, iter = init_grammar(g, cache_iter, cache_path, NCEGrammar)    
     breakpoint()
-    while len(g) > 1:
+    while not term(g):
         iter += 1
-        IMAGE_PATHS = [path]
-        end = term(g)
-        if not end:
-            best_ism, best_clique, good = obtain_motifs(g, path)
-            end = end or not good
-        if end:
-            nodes = list(g)
-            new_n = max(list(g))+1            
-            rule_no = len(grammar.rules)
-            anno[new_n] = NLCNode(new_n, attrs={'rule':rule_no})
-            rule = NCERule('black', deepcopy(g), None)                        
-            rule.visualize(os.path.join(IMG_DIR, f"rule_{rule_no}.png"))            
-            grammar.add_rule(rule)
-            rewire_graph(g, new_n, nodes, anno)
-            model = anno[new_n]
+        img_paths = partition_graph(g, iter)        
+        if term(g):
+            g, grammar, model = terminate(g, grammar, anno, iter)
             break        
-        try:
-            compats = [best_ism.nodes[n] for n in best_clique]
-        except:
-            print("failed")
-            print(best_clique)
-            print(best_ism)
-        lower = reduce(lambda x,y: x|y, [compat['ins'] for compat in compats])
-        # L2 = set([(x,y) for x, y in product(LABELS, LABELS)])
-        # ous = reduce(lambda x,y: x&y, [compat['out'] for compat in compats])
-        # upper = L2 - ous
-        nodes_induce = best_ism.nodes[list(best_ism)[0]]['ism']
-        rhs_graph = deepcopy(nx.induced_subgraph(g, nodes_induce))
-        rule_no = len(grammar.rules)
-        change = False
-        for c in best_clique:
-            g_cache = deepcopy(g)
-            anno_cache = deepcopy(anno)
-            ism = best_ism.nodes[c]
-            nodes = ism['ism']    
-            new_n = max(list(g))+1
-            g.add_node(new_n, label='gray') # annotate which rule was applied to model
-            anno[new_n] = NLCNode(new_n, attrs={'rule': rule_no})
-            model = anno[new_n]
-            print(f"{new_n} new node")                   
-            rewire_graph(g, new_n, nodes, anno)           
-            if boundary(g):
-                g = g_cache
-                anno = anno_cache
-                continue       
-            else:
-                change = True
+        all_subgraphs = obtain_motifs(g, img_paths)
+        best_ism, best_clique = find_embedding(all_subgraphs, g, find_iso=find_iso)
+        if best_ism is None:            
+            g, grammar, model = terminate(g, grammar, anno, iter)
+            break                
+        extract_rule(g, best_ism, best_clique, grammar)              
+        g, change = update_graph(g, anno, best_ism, best_clique, grammar)        
         if not change:
-            nodes = list(g)
-            new_n = max(list(g))+1            
-            rule_no = len(grammar.rules)
-            anno[new_n] = NLCNode(new_n, attrs={'rule':rule_no})
-            rule = NLCRule('black', deepcopy(g), None)                        
-            rule.visualize(os.path.join(IMG_DIR, f"rule_{rule_no}.png"))            
-            grammar.add_rule(rule)
-            rewire_graph(g, new_n, nodes, anno)
-            model = anno[new_n]
-            break               
-        path = os.path.join(IMG_DIR, f'api_{iter}.png')
+            g, grammar, model = terminate(g, grammar, anno, iter)
+            break
+        path = os.path.join(IMG_DIR, f'{METHOD}_{iter}.png')
         draw_graph(g, path)   
-        rule = NLCRule('gray', deepcopy(rhs_graph), lower)        
-        rule.visualize(os.path.join(IMG_DIR, f"rule_{rule_no}.png"))
-        grammar.add_rule(rule)
         cache_path = os.path.join(CACHE_DIR, f"{iter}.pkl")                
         pickle.dump((grammar, anno, g), open(cache_path, 'wb+'))    
+    model = anno[find_max(anno)]
     draw_tree(model, os.path.join(IMG_DIR, f"model_{iter}.png"))
-    model = NLCModel(model)
+    model = NCEModel(model)
     return grammar, model

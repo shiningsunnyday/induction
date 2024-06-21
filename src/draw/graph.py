@@ -6,11 +6,55 @@ from matplotlib.colors import to_rgba
 from src.config import SEED, SCALE, NODE_SIZE, FONT_SIZE, LAYOUT
 from src.draw.utils import hierarchy_pos
 
-def draw_graph(g, path, scale=SCALE, node_size=NODE_SIZE, font_size=FONT_SIZE, layout=LAYOUT):
-    if layout == 'spring_layout':
-        pos = getattr(nx, layout)(g, seed=SEED)
+
+
+def draw_custom_arrows(ax, pos, edge, color_1='blue', color_2='green', arrow_1_pos=0.25, arrow_2_pos=0.75, rev1=False, rev2=False, arrowstyle='-|>', arrowsize=10):
+    start, end = pos[edge[0]], pos[edge[1]]
+    line = np.array([start, end])
+    mid_point = (start + end) / 2
+    first_half = (start + mid_point) / 2
+    second_half = (mid_point + end) / 2    
+    # Draw first half in color_1
+    ax.plot([start[0], mid_point[0]], [start[1], mid_point[1]], color=color_1, linewidth=1.0)
+    # Draw second half in color_2
+    ax.plot([mid_point[0], end[0]], [mid_point[1], end[1]], color=color_2, linewidth=1.0)
+
+    # Draw the first arrow at arrow_1_pos
+    arrow_pos_1 = (1 - arrow_1_pos) * start + arrow_1_pos * end    
+    if rev1:
+        ax.annotate('',
+                    xy=arrow_pos_1, xycoords='data',
+                    xytext=start, textcoords='data',
+                    arrowprops=dict(arrowstyle=arrowstyle, color=color_1, lw=2, shrinkA=0, shrinkB=0, mutation_scale=arrowsize))
     else:
-        pos = getattr(nx, layout)(g)
+        ax.annotate('',
+                    xy=arrow_pos_1, xycoords='data',
+                    xytext=mid_point, textcoords='data',
+                    arrowprops=dict(arrowstyle=arrowstyle, color=color_1, lw=2, shrinkA=0, shrinkB=0, mutation_scale=arrowsize))
+
+    # Draw the second arrow at arrow_2_pos
+    arrow_pos_2 = (1 - arrow_2_pos) * start + arrow_2_pos * end
+    if rev2:
+        ax.annotate('',
+                    xy=arrow_pos_2, xycoords='data',
+                    xytext=mid_point, textcoords='data',
+                    arrowprops=dict(arrowstyle=arrowstyle, color=color_2, lw=2, shrinkA=0, shrinkB=0, mutation_scale=arrowsize))
+    else:
+        ax.annotate('',
+                    xy=arrow_pos_2, xycoords='data',
+                    xytext=end, textcoords='data',
+                    arrowprops=dict(arrowstyle=arrowstyle, color=color_2, lw=2, shrinkA=0, shrinkB=0, mutation_scale=arrowsize))
+
+
+
+
+def draw_graph(g, path, scale=SCALE, node_size=NODE_SIZE, font_size=FONT_SIZE, layout=LAYOUT):
+    if 'layout' in g.graph:
+        layout = g.graph['layout']
+    if layout == 'spring_layout':
+        pos = getattr(nx, layout)(nx.Graph(g), seed=SEED)
+    else:
+        pos = getattr(nx, layout)(nx.Graph(g))
     pos_np = np.array([v for v in pos.values()])
     w, l = pos_np.max(axis=0)-pos_np.min(axis=0)
     w = max(w, 1)
@@ -47,19 +91,32 @@ def draw_graph(g, path, scale=SCALE, node_size=NODE_SIZE, font_size=FONT_SIZE, l
                             pos=pos,
                             labels=labels,
                             font_size=font_size)
-    dashed_edges = []
     for u, v, dic in g.edges(data=True):    
-        if 'style' in dic and dic['style'] == 'dashed':
-            dashed_edges.append((u, v))
-    nx.draw_networkx_edges(g, 
-                           ax=ax,
-                           pos=pos,
-                           edgelist=set(g.edges()) - set(dashed_edges))
-    nx.draw_networkx_edges(g,
-                           ax=ax,
-                           pos=pos,
-                           edgelist=dashed_edges,
-                           style='dashed')
+        style = dic.get('style', 'solid')
+        alpha = dic.get('alpha', 1.0)        
+        if 'label' in dic:                              
+            label = dic['label']
+            loc = 0.5
+            arrowprops = dict(arrowstyle="->", color=label, lw=1.5)
+            mid = loc*pos[u]+(1-loc)*pos[v]
+            ax.annotate('', xy=mid, xytext=pos[u], arrowprops=arrowprops)
+            ax.text(mid[0], mid[1], '', fontsize=12, color=label)              
+            nx.draw_networkx_edges(g, 
+                                ax=ax,
+                                pos=pos,
+                                edgelist=[(u, v)],
+                                style=style,
+                                alpha=alpha,
+                                edge_color=label)            
+        else:
+            label1 = dic['label1']
+            label2 = dic['label2']
+            loc1 = dic['loc1']
+            loc2 = dic['loc2']
+            rev1 = dic['reverse1']
+            rev2 = dic['reverse2']
+            draw_custom_arrows(ax, pos, (u, v), label1, label2, loc1, loc2, rev1, rev2)
+
     os.makedirs(os.path.dirname(path), exist_ok=True)
     fig.savefig(path, bbox_inches='tight')
     print(os.path.abspath(path))

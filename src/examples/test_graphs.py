@@ -73,6 +73,36 @@ def load_cora():
     return g
 
 
+def create_house_graph():    
+    # g = nx.DiGraph()
+    # edge_list = [(0,1),(0,2,'red'),
+    #              (1,2),
+    #              (2,3),(2,4,'red'),
+    #              (3,4),
+    #              (4,5),(4,6,'red'),
+    #              (5,6),
+    #              (7,6),(7,8,'red'),
+    #              (8,4),(8,9,'red'),
+    #              (9,2),(9,10,'red'),
+    #              (10,0,'blue'),
+    #              (11,10),(11,12,'red'),
+    #              (12,13,'red'),
+    #              (13,14,'red'),
+    #              (14,7,'blue')]
+    # for a, b, *e in edge_list:
+    #     if len(e) == 1:
+    #         e = e[0]
+    #     else:
+    #         e = 'green'
+    #     g.add_edge(a, b, label=e)
+    # for n in g:
+    #     g.nodes[n]['label'] = 'cyan'
+    # g = nx.relabel_nodes(g, {n: str(i+1) for i, n in enumerate(list(g))})
+    # return g
+    EDNCEGrammar()
+
+
+
 def debug():
     g = nx.Graph()
     g.add_node(0, label='#e1d8e1ff')
