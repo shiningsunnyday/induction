@@ -27,12 +27,20 @@ def neis(graph, nodes, direction=['out']):
 def get_groups(content, dtype=int):
     groups = []
     for l in content.split():
+        if ':' in l:
+            index, l = l.split(':')
+            index = int(index)
+        else:
+            index = -1
         l_str = l.replace(' ','').split(',')
         try:
             l_arr = list(map(dtype, l_str))
         except:
             continue
-        groups.append(l_arr)
+        if index != -1:
+            groups.append({'index': index, 'group': l_arr})
+        else:
+            groups.append(l_arr)
     return groups
 
 

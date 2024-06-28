@@ -17,6 +17,16 @@ from src.grammar.utils import *
 import random
 
 
+def specification(graph):
+    if 'ckt' in DATASET:
+        types = set()
+        for n in graph:
+            types.add(graph.nodes[n]['type'])
+        return 'input' in types and 'output' in types
+    return True
+    # if 'ckt' in 
+
+
 class EDNCEGrammar(NLCGrammar):    
     def __sample__(self):
         # find the initial rule
@@ -53,7 +63,7 @@ class EDNCEGrammar(NLCGrammar):
         return res
 
 
-    def generate(self, num_samples=10):
+    def generate(self, num_samples=20):
         gen_dir = os.path.join(IMG_DIR, "generate/")
         os.makedirs(gen_dir, exist_ok=True)             
         res = []
@@ -71,13 +81,17 @@ class EDNCEGrammar(NLCGrammar):
             exist = False
             if not nx.is_connected(nx.Graph(sample)):
                 continue
+            # for circuits
+            if not specification(sample):
+                continue
             for r in res:
                 if nx.is_isomorphic(sample, r):
                     exist = True
                     break
             if exist:
                 continue                    
-            draw_graph(sample, os.path.join(gen_dir, f'graph_{len(res)}.png'), node_size=2000)
+            # draw_graph(sample, os.path.join(gen_dir, f'graph_{len(res)}.png'), node_size=2000)
+            draw_circuit(sample, os.path.join(gen_dir, f'graph_{len(res)}.png'))
             res.append(sample)                    
         return res
 
@@ -141,7 +155,7 @@ class EDNCERule:
                     name = f"{x},{mu},{p}/{q},{d}/{d_}"
                     g.add_node(name, label=mu, alpha=0.5)              
                 g.add_edge(n, name, style='dashed', 
-                           reverse1=d_=='in', 
+                           reverse1=d=='in', 
                            reverse2=d_=='in', 
                            label1=q, loc1=1/4, 
                            label2=p, loc2=3/4)

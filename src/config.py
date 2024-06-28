@@ -76,7 +76,7 @@ CACHE_DIR = f"/home/msun415/induction/cache/{METHOD}_{DATASET}_{GRAMMAR}/"
 
 
 ### CKT
-TERMS = ['yellow', 'lawngreen', 'cyan', 'lightblue', 'deepskyblue', 'dogerblue', 'silver', 'light_grey', 'orchid', 'pink']
+TERMS = ['yellow', 'lawngreen', 'cyan', 'lightblue', 'deepskyblue', 'dodgerblue', 'silver', 'light_grey', 'orchid', 'pink']
 NONTERMS = ['gray','black']
 NONFINAL = ['gray']
 FINAL = ['black']
@@ -86,7 +86,7 @@ CKT_LOOKUP = {
     '+gm+': 'cyan',
     '-gm+': 'lightblue',
     '+gm-': 'deepskyblue',
-    '-gm-': 'dogerblue',
+    '-gm-': 'dodgerblue',
     'sudo_in': 'silver',
     'sudo_out': 'light_grey',
     'input': 'orchid',
@@ -98,7 +98,7 @@ INVERSE_LOOKUP = {
     'cyan': '+gm+',
     'lightblue': '-gm+',
     'deepskyblue': '+gm-',
-    'dogerblue': '-gm-',
+    'dodgerblue': '-gm-',
     'silver': 'sudo_in',
     'light_grey': 'sudo_out',
     'orchid': 'input',
@@ -119,8 +119,10 @@ FONT_SIZE = 20
 MAX_SIZE = 3000*3000*4
 LAYOUT = 'kamada_kawai_layout'
 # LAYOUT = 'spring_layout'
+TITLE_FONT_SIZE = 50
 PARTITION_SIZE = 50
 PARTITION_SCALE = 5
+POS_EPSILON = 1
 PARTITION_NODE_SIZE = 500
 MAX_IMAGES = 5
 

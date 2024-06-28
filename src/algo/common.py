@@ -19,7 +19,15 @@ def obtain_motifs(g, img_paths):
         # groups = [['6', '7', '8', '15']]
         # groups = [['4','5','9','14']]
         # groups = [['16','10','3']]
-        induced_subgraphs = [nx.induced_subgraph(g, group) for group in groups]
+        induced_subgraphs = []
+        for group in groups:
+            if isinstance(group, dict):
+                assert list(group.keys()) == ['index', 'group']
+                index = group['index']
+                group = [f"{index}:{n}" for n in group['group']]
+            subgraph = nx.induced_subgraph(g, group)
+            if len(subgraph):
+                induced_subgraphs.append(subgraph)        
         subgraphs = []
         for subgraph in induced_subgraphs:
             undirected_subgraph = nx.Graph(subgraph)
@@ -33,7 +41,22 @@ def partition_graph(g, iter):
     """
     Takes a graph g, splits into partition based on PARTITON_SIZE
     Visualizes one image per partition, and outputs the paths
-    """    
+    If g is already a set of connected components, recursively call
+    each component separately
+    """
+    node_sets = list(nx.connected_components(nx.Graph(g)))
+    if len(node_sets) > 1: # separate graphs
+        res = []
+        for i, node_set in enumerate(node_sets):
+            conn_g = nx.induced_subgraph(g, node_set)
+            conn_g = conn_g.__class__(conn_g)    
+            assert len(set([n.split(':')[0] for n in conn_g])) == 1
+            index = list(conn_g)[0].split(':')[0]
+            conn_g.graph['title'] = f"Graph #{index}"
+            res_g = partition_graph(conn_g, f"{iter}_comp={i}")
+            res += res_g
+        return res
+        
     img_paths = []
     all_nodes = list(g)
     for i in range((len(g)+PARTITION_SIZE-1)//PARTITION_SIZE):
@@ -52,7 +75,7 @@ def partition_graph(g, iter):
             for b in one_hop_neis:
                 if subgraph.has_edge(a, b):
                     subgraph.remove_edge(a, b)
-        img_path = os.path.join(IMG_DIR, f'{METHOD}_{iter}_{i}.png')
+        img_path = os.path.join(IMG_DIR, f'{METHOD}_iter={iter}_partition={i}.png')
         draw_graph(subgraph, img_path)
         img_paths.append(img_path)
     return img_paths

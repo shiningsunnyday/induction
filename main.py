@@ -31,7 +31,9 @@ def load_data():
 
 def main(args):    
     g = load_data()    
-    gr, model = grammar.learn_grammar(g)
+    import pickle
+    gr, _, _ = pickle.load(open('/home/msun415/induction/cache/api_ckt_ednce/7.pkl', 'rb'))
+    # gr, model = grammar.learn_grammar(g)
     # grammar, model = nlc.learn_grammar(g)
     # grammar, model = mining.learn_stochastic_grammar(g)    
     # model.generate(gr)

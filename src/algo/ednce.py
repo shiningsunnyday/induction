@@ -95,9 +95,9 @@ def learn_grammar(g):
     cache_iter, cache_path = setup()    
     g, grammar, anno, iter = init_grammar(g, cache_iter, cache_path, EDNCEGrammar)
     while not term(g):
-        iter += 1
-        img_paths = partition_graph(g, iter)                 
-        all_subgraphs = obtain_motifs(g, img_paths)
+        iter += 1        
+        img_paths = partition_graph(g, iter)                         
+        all_subgraphs = obtain_motifs(g, img_paths)        
         best_ism, best_clique = find_embedding(all_subgraphs, g, find_iso=find_iso, edges=True)
         if best_ism is None:                        
             break

@@ -9,6 +9,7 @@ from src.grammar.ednce import EDNCEGrammar, EDNCERule
 from src.draw.graph import draw_graph
 from networkx.readwrite import json_graph
 import os
+from tqdm import tqdm
 
 
 LABELS = ['r','g','b','c']
@@ -173,20 +174,41 @@ def create_house_graph():
 
 
 def load_ckt():
+    """
+    Load all ckts, and do union over all the graphs
+    Combine graph-level attrs of individual graphs into a graph-level attr lookup
+    """
     data_dir = '/home/msun415/induction/data/nx/ckt/'
+    whole_g = nx.DiGraph()
+    best_i = 0
+    max_size = 0
     for i in range(9000):
         fpath = os.path.join(data_dir, f"{i}.json")
         data = json.load(open(fpath))
-        g = json_graph.node_link_graph(data)
-        breakpoint()
-        lookup = CKT_LOOKUP    
+        g = json_graph.node_link_graph(data) 
+        if len(g) > max_size:
+            max_size = len(g)
+            best_i = i
+    for i in [best_i]:
+        fpath = os.path.join(data_dir, f"{i}.json")
+        data = json.load(open(fpath))
+        g = json_graph.node_link_graph(data)                
+        # if g.graph['fom'] < 320:
+        #     continue
+        lookup = CKT_LOOKUP
         for n in g:        
             g.nodes[n]['type'] = list(lookup)[g.nodes[n]['type']]
             g.nodes[n]['label'] = lookup[g.nodes[n]['type']]
         for e in g.edges:
             g.edges[e]['label'] = 'black'
-
-    return g
+        for attr in g.graph:
+            if attr == 'index':
+                continue
+            # whole_g.graph[f"{i}:{attr}"] = g.graph[attr]        
+        # node_map = {n: f"{i}:{n}" for n in g}
+        # g = nx.relabel_nodes(g, node_map)
+        whole_g = nx.union(whole_g, g)            
+    return whole_g
 
 
 def debug():
