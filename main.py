@@ -21,6 +21,8 @@ def load_data():
         g = debug()   
     elif DATASET == 'house':
         g = create_house_graph()
+    elif DATASET == 'ckt':
+        g = load_ckt()
     else:
         raise NotImplementedError
     return g
@@ -34,10 +36,6 @@ def main(args):
     # grammar, model = mining.learn_stochastic_grammar(g)    
     # model.generate(gr)
     samples = gr.generate()
-    gen_dir = os.path.join(IMG_DIR, "generate/")
-    os.makedirs(gen_dir, exist_ok=True)
-    for i, g in enumerate(samples):
-        draw_graph(g, os.path.join(gen_dir, f'graph_{i}.png'))                
     breakpoint()    
 
 

@@ -1,8 +1,8 @@
 from typing import List, Dict, Any
-from src.draw.graph import draw_graph
-from src.config import IMG_DIR, NONTERMS, SCALE, FINAL, NONFINAL
+from src.draw.graph import draw_graph, draw_circuit
+from src.config import *
 import os
-from networkx.algorithms.isomorphism import GraphMatcher
+from networkx.algorithms.isomorphism import DiGraphMatcher
 from PIL import Image
 import numpy as np
 import networkx as nx
@@ -21,37 +21,64 @@ class EDNCEGrammar(NLCGrammar):
     def __sample__(self):
         # find the initial rule
         rule_indices = list(range(len(self.rules)))        
-        for i, rule in enumerate(self.rules):
-            if rule.nt == 'black':
-                cur = nx.DiGraph(rule.subgraph)                
-                rule_indices.remove(i)
-                break
-        num_nts = sum([cur.nodes[n]['label'] in NONTERMS for n in cur])
-        while num_nts > 0:          
-            gray_nodes = list(filter(lambda x: cur.nodes[x]['label'] in NONTERMS, cur))
+        rules = self.search_rules('black')
+        assert len(rules) == 1
+        cur = rules[0].subgraph
+        num_nts = len(self.search_nts(cur, NONTERMS))
+        iters = 0
+        while num_nts > 0:   
+            if iters >= 100:
+                return None       
+            gray_nodes = self.search_nts(cur, ['gray'])
             node = random.choice(gray_nodes)
             ind = random.choice(rule_indices)
             rule = self.rules[ind]
             cur = rule(cur, node)
-            num_nts = sum([cur.nodes[n]['label'] in NONTERMS for n in cur])
+            num_nts = len(self.search_nts(cur, NONTERMS))
+            iters += 1
         return cur
+    
+
+    def search_rules(self, nt):
+        rules = []        
+        for i, rule in enumerate(self.rules):
+            if rule.nt == nt:
+                rules.append(rule)    
+        return rules
+    
+
+    @staticmethod
+    def search_nts(cur, nts):
+        res = list(filter(lambda x: cur.nodes[x]['label'] in nts, cur))
+        return res
 
 
-    def generate(self, num_samples=30):
+    def generate(self, num_samples=10):
+        gen_dir = os.path.join(IMG_DIR, "generate/")
+        os.makedirs(gen_dir, exist_ok=True)             
         res = []
         while len(res) < num_samples:
             print(len(res))
             sample = self.__sample__()
+            if sample is None:
+                continue
+            bad = False
+            for e in sample.edges:
+                if sample.edges[e]['label'] in NONFINAL:
+                    bad = True
+            if bad:
+                continue
             exist = False
             if not nx.is_connected(nx.Graph(sample)):
-                continue            
+                continue
             for r in res:
                 if nx.is_isomorphic(sample, r):
                     exist = True
                     break
             if exist:
-                continue
-            res.append(sample)                
+                continue                    
+            draw_graph(sample, os.path.join(gen_dir, f'graph_{len(res)}.png'), node_size=2000)
+            res.append(sample)                    
         return res
 
 
@@ -82,20 +109,21 @@ class EDNCERule:
                 else:
                     d = 'in'
                     p = cur[cur_nei][node]['label']
-                for emb in self.embedding:
-                    mu_e, p_e, q_e, i_e, d_e, d__e = emb
-                    if mu_e == mu and p_e == p and i_e == i and d_e == d:
-                        if d__e == 'in':
-                            cur.add_edge(cur_nei, cur_node, label=q_e)
-                        else:
-                            cur.add_edge(cur_node, cur_nei, label=q_e)            
+                if self.embedding is not None:
+                    for emb in self.embedding:
+                        mu_e, p_e, q_e, i_e, d_e, d__e = emb
+                        if mu_e == mu and p_e == p and i_e == i and d_e == d:
+                            if d__e == 'in':
+                                cur.add_edge(cur_nei, cur_node, label=q_e)
+                            else:
+                                cur.add_edge(cur_node, cur_nei, label=q_e)            
         cur.remove_node(node)
         return cur
 
 
     def visualize(self, path):
         g = nx.Graph()
-        g.add_node(0, label=self.nt)        
+        g.add_node(0, label=self.nt)
         lhs_path = os.path.join(IMG_DIR, f"{uuid.uuid4()}.png")
         draw_graph(g, lhs_path, scale=5)
         rhs_path = os.path.join(IMG_DIR, f"{uuid.uuid4()}.png")
@@ -104,15 +132,20 @@ class EDNCERule:
         if self.embedding is not None:
             for e in self.embedding:
                 mu, p, q, x, d, d_ = e
-                n = list(self.subgraph)[x]
-                name = f"{x},{mu},{p}/{q},{d}/{d_}"
-                g.add_node(name, label=mu, alpha=0.5)              
+                n = list(self.subgraph)[x]                
+                if 'INVERSE_LOOKUP' in globals() and mu in INVERSE_LOOKUP:
+                    type_ = INVERSE_LOOKUP[mu]
+                    name = f"{x},{type_},{p}/{q},{d}/{d_}"
+                    g.add_node(name, label=mu, type=type_, alpha=0.5)              
+                else:
+                    name = f"{x},{mu},{p}/{q},{d}/{d_}"
+                    g.add_node(name, label=mu, alpha=0.5)              
                 g.add_edge(n, name, style='dashed', 
                            reverse1=d_=='in', 
                            reverse2=d_=='in', 
                            label1=q, loc1=1/4, 
                            label2=p, loc2=3/4)
-        draw_graph(g, rhs_path, scale=10)
+        draw_graph(g, rhs_path, scale=RULE_SCALE, node_size=RULE_NODE_SIZE, font_size=RULE_FONT_SIZE)
         self.draw_fig(lhs_path, rhs_path, path)
 
     
@@ -288,8 +321,8 @@ def touching(graph, ismA, ismB):
 
 
 
-def find_iso(subgraph, graph):
-    gm = GraphMatcher(graph, subgraph, 
+def find_iso(subgraph, graph):    
+    gm = DiGraphMatcher(graph, subgraph, 
                       node_match=lambda d1, d2: d1.get('label','#')==d2.get('label','#'),
                       edge_match=lambda d1, d2: d1.get('label','#')==d2.get('label','#'))
     isms = list(gm.subgraph_isomorphisms_iter())  
@@ -312,5 +345,5 @@ def find_iso(subgraph, graph):
             outset_j = ism_graph.nodes[j]['out']
             overlap = (inset_i | inset_j) & (outset_i | outset_j)
             if not touch and not overlap:
-                ism_graph.add_edge(i, j)    
+                ism_graph.add_edge(i, j)
     return ism_graph

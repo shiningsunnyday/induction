@@ -1,10 +1,15 @@
-from src.config import SEED, RADIUS
+from src.config import SEED, RADIUS, CKT_LOOKUP
 import networkx as nx
 import numpy as np
 import pygsp as gsp
 from pygsp import graphs
 import json
 from src.draw.color import to_hex, CMAP
+from src.grammar.ednce import EDNCEGrammar, EDNCERule
+from src.draw.graph import draw_graph
+from networkx.readwrite import json_graph
+import os
+
 
 LABELS = ['r','g','b','c']
 
@@ -73,7 +78,21 @@ def load_cora():
     return g
 
 
-def create_house_graph():    
+def create_house_graph(): 
+    def construct_house(grammar, K):
+        rule1 = grammar.rules[0]
+        rule2 = grammar.rules[1]
+        rule3 = grammar.rules[2]
+        g = nx.DiGraph()
+        g.add_node('0', label='black')
+        K = 2
+        g = rule1(g, '0')    
+        for k in range(K):
+            nt = grammar.search_nts(g, ['gray'])[0]
+            g = rule2(g, nt)
+        nt = grammar.search_nts(g, ['gray'])[0]
+        g = rule3(g, nt)        
+        return g
     # g = nx.DiGraph()
     # edge_list = [(0,1),(0,2,'red'),
     #              (1,2),
@@ -96,11 +115,78 @@ def create_house_graph():
     #         e = 'green'
     #     g.add_edge(a, b, label=e)
     # for n in g:
-    #     g.nodes[n]['label'] = 'cyan'
-    # g = nx.relabel_nodes(g, {n: str(i+1) for i, n in enumerate(list(g))})
-    # return g
-    EDNCEGrammar()
+    #     g.nodes[n]['label'] = 'cyan'    
+    # in the textbook, edge labels are {h,r,a,b,*} where {h,r} are non-final
+    # in the textbook, node labels are {S,X,#} where {S,X} are non-terminal
+    # we do the mapping {h,r,a,b,*} -> {black,gray,red,blue,green}
+    # {S,X,#} -> {black,gray,cyan}
+    # (0,3,h)
+    grammar = EDNCEGrammar()
+    subg1 = nx.DiGraph()
+    subg1.add_node(0, label='cyan')
+    subg1.add_node(1, label='cyan')
+    subg1.add_node(2, label='cyan')
+    subg1.add_node(3, label='gray')
+    subg1.add_edge(0, 3, label='black')
+    subg1.add_edge(1, 0, label='blue')
+    subg1.add_edge(2, 1, label='green')
+    subg1.add_edge(2, 3, label='gray')
+    subg1.add_edge(3, 1, label='black')
+    rule1 = EDNCERule('black', subg1, set())
+    grammar.add_rule(rule1)
+    subg2 = nx.DiGraph()
+    subg2.add_node(0, label='cyan')
+    subg2.add_node(1, label='cyan')
+    subg2.add_node(2, label='cyan')
+    subg2.add_node(3, label='cyan')
+    subg2.add_node(4, label='gray')
+    subg2.add_edge(0, 1, label='green')
+    subg2.add_edge(1, 4, label='black')
+    subg2.add_edge(2, 1, label='green')
+    subg2.add_edge(3, 4, label='gray')
+    subg2.add_edge(4, 2, label='black')
+    emb2 = set()
+    emb2.add(('cyan', 'black', 'green', 0, 'in', 'in'))
+    emb2.add(('cyan', 'black', 'red', 1, 'in', 'in'))
+    emb2.add(('cyan', 'black', 'red', 2, 'out', 'out'))
+    emb2.add(('cyan', 'gray', 'red', 3, 'in', 'in'))
+    subg3 = nx.DiGraph()
+    subg3.add_node(0, label='cyan')
+    subg3.add_node(1, label='cyan')
+    subg3.add_node(2, label='cyan')
+    subg3.add_node(3, label='cyan')
+    subg3.add_edge(0, 1, label='green')
+    subg3.add_edge(2, 1, label='green')
+    subg3.add_edge(3, 2, label='blue')
+    emb3 = emb2
+    rule2 = EDNCERule('gray', subg2, emb2)
+    rule3 = EDNCERule('gray', subg3, emb3)
+    grammar.add_rule(rule2)
+    grammar.add_rule(rule3)
+    g = nx.DiGraph()
+    for size in [4]:
+        house = construct_house(grammar, size)
+        g = nx.disjoint_union(g, house)
+    g = nx.relabel_nodes(g, {n: str(i+1) for i, n in enumerate(list(g))})
+    return g
 
+
+
+def load_ckt():
+    data_dir = '/home/msun415/induction/data/nx/ckt/'
+    for i in range(9000):
+        fpath = os.path.join(data_dir, f"{i}.json")
+        data = json.load(open(fpath))
+        g = json_graph.node_link_graph(data)
+        breakpoint()
+        lookup = CKT_LOOKUP    
+        for n in g:        
+            g.nodes[n]['type'] = list(lookup)[g.nodes[n]['type']]
+            g.nodes[n]['label'] = lookup[g.nodes[n]['type']]
+        for e in g.edges:
+            g.edges[e]['label'] = 'black'
+
+    return g
 
 
 def debug():
