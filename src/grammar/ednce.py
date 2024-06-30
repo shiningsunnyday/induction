@@ -15,16 +15,44 @@ from .nlc import NLCGrammar, NLCModel
 from src.grammar.common import *
 from src.grammar.utils import *
 import random
+from collections import Counter
 
 
 def specification(graph):
     if 'ckt' in DATASET:
-        types = set()
-        for n in graph:
-            types.add(graph.nodes[n]['type'])
-        return 'input' in types and 'output' in types
+        type_count = Counter([graph.nodes[n]['type'] for n in graph])
+        return type_count['input'] == 1 and type_count['output'] == 1
     return True
     # if 'ckt' in 
+
+def find_start_node(graph):
+    in_n_ind = [graph.nodes[n]['type'] for n in graph].index('input')
+    in_n = list(graph)[in_n_ind]
+    return in_n
+
+
+def postprocess(graph):
+    def dfs(n, vis, edges):    
+        vis[n] = -1
+        out = False    
+        for nei in graph[n]:
+            if vis[nei]:
+                continue
+            if graph.nodes[nei]['type'] == 'output':
+                out = True
+                edges.append((n, nei))
+            elif dfs(nei, vis, edges):
+                out = True
+                edges.append((n, nei))
+        vis[n] = 1
+        return out
+    in_n = find_start_node(graph)
+    edges = []
+    vis = {n: 0 for n in graph}
+    dfs(in_n, vis, edges)
+    graph = nx.edge_subgraph(graph, edges)
+    return graph
+
 
 
 class EDNCEGrammar(NLCGrammar):    
@@ -35,7 +63,7 @@ class EDNCEGrammar(NLCGrammar):
         assert len(rules) == 1
         cur = rules[0].subgraph
         num_nts = len(self.search_nts(cur, NONTERMS))
-        iters = 0
+        iters = 0        
         while num_nts > 0:   
             if iters >= 100:
                 return None       
@@ -64,6 +92,8 @@ class EDNCEGrammar(NLCGrammar):
 
 
     def generate(self, num_samples=20):
+        random.seed(SEED)
+        np.random.seed(SEED)        
         gen_dir = os.path.join(IMG_DIR, "generate/")
         os.makedirs(gen_dir, exist_ok=True)             
         res = []
@@ -71,27 +101,42 @@ class EDNCEGrammar(NLCGrammar):
             print(len(res))
             sample = self.__sample__()
             if sample is None:
+                print("sample is None")
                 continue
             bad = False
             for e in sample.edges:
                 if sample.edges[e]['label'] in NONFINAL:
                     bad = True
             if bad:
+                print("non-final nodes or edges")
                 continue
             exist = False
-            if not nx.is_connected(nx.Graph(sample)):
-                continue
             # for circuits
             if not specification(sample):
+                print("doesn't meet spec")
+                continue
+            if not nx.is_connected(nx.Graph(sample)):
+                print("not connected")
+                continue
+            try:
+                nx.find_cycle(sample, find_start_node(sample))
+                print("has cycle")
+                continue
+            except:
+                pass
+            if 'ckt' in DATASET:    
+                sample = postprocess(sample)
+            if len(sample) == 0:
                 continue
             for r in res:
                 if nx.is_isomorphic(sample, r):
                     exist = True
                     break
             if exist:
+                print("isomorphic to existing")
                 continue                    
-            # draw_graph(sample, os.path.join(gen_dir, f'graph_{len(res)}.png'), node_size=2000)
-            draw_circuit(sample, os.path.join(gen_dir, f'graph_{len(res)}.png'))
+            draw_graph(sample, os.path.join(gen_dir, f'graph_{len(res)}.png'), node_size=NODE_SIZE)
+            # draw_circuit(sample, os.path.join(gen_dir, f'graph_{len(res)}.png'))
             res.append(sample)                    
         return res
 

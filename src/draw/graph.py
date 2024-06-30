@@ -86,6 +86,8 @@ def draw_graph(g, path, scale=SCALE, node_size=NODE_SIZE, font_size=FONT_SIZE, l
         if ax is None:
             fig = plt.Figure(figsize=(scale*w, scale*l))
             ax_ = fig.add_subplot(1,1,1)
+        else:
+            ax_ = ax
         if 'scale' in g.graph:
             scale = g.graph['scale']    
         if 'font_size' in g.graph:
@@ -132,17 +134,21 @@ def draw_graph(g, path, scale=SCALE, node_size=NODE_SIZE, font_size=FONT_SIZE, l
             if 'label' in dic:                              
                 label = dic['label']
                 loc = 0.5
-                arrowprops = dict(arrowstyle="->", color=label, lw=1.5)
-                mid = loc*pos[u]+(1-loc)*pos[v]
-                ax_.annotate('', xy=mid, xytext=pos[u], arrowprops=arrowprops)
-                ax_.text(mid[0], mid[1], '', fontsize=12, color=label)              
+                # arrowprops = dict(arrowstyle="->", color=label, lw=EDGE_THICKNESS)
+                # mid = loc*pos[u]+(1-loc)*pos[v]
+                # ax_.annotate('', xy=mid, xytext=pos[u], arrowprops=arrowprops)
+                # ax_.text(mid[0], mid[1], '', fontsize=12, color=label)              
                 nx.draw_networkx_edges(g, 
                                     ax=ax_,
                                     pos=pos,
                                     edgelist=[(u, v)],
                                     style=style,
                                     alpha=alpha,
-                                    edge_color=label)            
+                                    edge_color=label,
+                                    width=EDGE_THICKNESS,
+                                    node_size=node_size,
+                                    arrowsize=ARROW_SIZE,
+                                    arrows=True)
             else:
                 label1 = dic['label1']
                 label2 = dic['label2']
@@ -161,39 +167,7 @@ def draw_graph(g, path, scale=SCALE, node_size=NODE_SIZE, font_size=FONT_SIZE, l
 
 
 def add_node(graph, node_id, label, shape='box', style='filled'):
-    if label == 8:  
-        label = 'input'
-        color = 'orchid'
-    elif label == 9:
-        label = 'output'
-        color = 'pink'
-    elif label == 0:
-        label = 'R'
-        color = 'yellow'
-    elif label == 1:
-        label = 'C'
-        color = 'lawngreen'
-    elif label == 2:
-        label = '+gm+'
-        color = 'cyan'
-    elif label == 3:
-        label = '-gm+'
-        color = 'lightblue'
-    elif label == 4:
-        label = '+gm-'
-        color = 'deepskyblue'
-    elif label == 5:
-        label = '-gm-'
-        color = 'dodgerblue'
-    elif label == 6:
-        label = 'sudo_in'
-        color = 'silver'
-    elif label == 7:
-        label = 'sudo_out'
-        color = 'light_grey'
-    else:
-        label = ''
-        color = 'aliceblue'
+    color = CKT_LOOKUP[label]
     label = f"({node_id}) {label}"
     # label = f"{label}"    
     graph.add_node(
@@ -202,7 +176,11 @@ def add_node(graph, node_id, label, shape='box', style='filled'):
 
 
 
-def draw_circuit(g, path, title=''):
+def draw_circuit(nx_g, path, title=''):
+    g = igraph.Graph(directed=True)
+    nx_g = nx.relabel_nodes(nx_g, {n: i for (i, n) in enumerate(nx_g)})
+    g.add_vertices(nx_g.nodes())
+    g.add_edges(nx_g.edges())
     graph = pgv.AGraph(directed=True, strict=True, fontname='Helvetica', arrowtype='open')
     if title:
         graph.graph_attr["label"] = title
@@ -213,7 +191,7 @@ def draw_circuit(g, path, title=''):
         graph.draw(path)
         return
     for idx in range(g.vcount()):
-        add_node(graph, idx, g.vs[idx]['type'])
+        add_node(graph, idx, g.vs[idx]['name']['type'])
     for idx in range(g.vcount()):
         for node in g.get_adjlist(igraph.IN)[idx]:
             graph.add_edge(node, idx, weight=0)

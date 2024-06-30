@@ -3,9 +3,9 @@ DATASET = 'ckt'
 GRAMMAR = 'ednce'
 
 MODEL = "gpt-4o"
-FILE_NAME = f"/home/msun415/induction/data/{METHOD}_{DATASET}_{GRAMMAR}.txt"
-IMG_DIR = f"/home/msun415/induction/data/{METHOD}_{DATASET}_{GRAMMAR}/"
-CACHE_DIR = f"/home/msun415/induction/cache/{METHOD}_{DATASET}_{GRAMMAR}/"
+FILE_NAME = f"/Users/msun415/Documents/GitHub/induction/data/{METHOD}_{DATASET}_{GRAMMAR}.txt"
+IMG_DIR = f"/Users/msun415/Documents/GitHub/induction/data/{METHOD}_{DATASET}_{GRAMMAR}/"
+CACHE_DIR = f"/Users/msun415/Documents/GitHub/induction/cache/{METHOD}_{DATASET}_{GRAMMAR}/"
 
 ### HOUSE
 # TERMS = ['cyan']
@@ -76,7 +76,7 @@ CACHE_DIR = f"/home/msun415/induction/cache/{METHOD}_{DATASET}_{GRAMMAR}/"
 
 
 ### CKT
-TERMS = ['yellow', 'lawngreen', 'cyan', 'lightblue', 'deepskyblue', 'dodgerblue', 'silver', 'light_grey', 'orchid', 'pink']
+TERMS = ['yellow', 'lawngreen', 'cyan', 'lightblue', 'deepskyblue', 'dodgerblue', 'silver', 'lightgrey', 'orchid', 'pink']
 NONTERMS = ['gray','black']
 NONFINAL = ['gray']
 FINAL = ['black']
@@ -106,12 +106,14 @@ INVERSE_LOOKUP = {
 }
 
 
-SEED = 0
+SEED = 5
 NUM_ATTEMPTS = 1
 
 # VISUALIZATION
-SCALE = 7.5
-NODE_SIZE = 50000
+SCALE = 5
+NODE_SIZE = 4000
+EDGE_THICKNESS = 2
+ARROW_SIZE = 20
 RULE_SCALE = 5
 RULE_NODE_SIZE = 500
 RULE_FONT_SIZE = 10

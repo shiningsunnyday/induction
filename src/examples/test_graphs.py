@@ -51,7 +51,8 @@ def create_minnesota():
 
 
 def load_cora():
-    g = nx.node_link_graph(json.load(open('/home/msun415/induction/data/nx/cora.json')))
+    cwd = os.getcwd()
+    g = nx.node_link_graph(json.load(open(f'{cwd}/data/nx/cora.json')))
     # labels = list(set([g.nodes[n]['label'] for n in g]))
     # assert len(labels) == len(LABELS)
     # lookup = dict(zip(labels, LABELS))
@@ -178,7 +179,8 @@ def load_ckt():
     Load all ckts, and do union over all the graphs
     Combine graph-level attrs of individual graphs into a graph-level attr lookup
     """
-    data_dir = '/home/msun415/induction/data/nx/ckt/'
+    cwd = os.getcwd()
+    data_dir = f'{cwd}/data/nx/ckt/'
     whole_g = nx.DiGraph()
     best_i = 0
     max_size = 0
@@ -189,6 +191,7 @@ def load_ckt():
         if len(g) > max_size:
             max_size = len(g)
             best_i = i
+    print(best_i)
     for i in [best_i]:
         fpath = os.path.join(data_dir, f"{i}.json")
         data = json.load(open(fpath))

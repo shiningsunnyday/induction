@@ -34,13 +34,16 @@ def terminate(g, grammar, anno, iter):
 def extract_rule(g, best_ism, best_clique, grammar):    
     compats = [best_ism.nodes[n] for n in best_clique]
     lower = reduce(lambda x,y: x|y, [compat['ins'] for compat in compats])
-    # L2 = set([(x,y) for x, y in product(LABELS, LABELS)])
+    nodes_induce = best_ism.nodes[list(best_clique)[0]]['ism']
+    rhs_graph = g.__class__(nx.induced_subgraph(g, nodes_induce))      
+    # L2 = set(list(product(TERMS+NONTERMS, FINAL+NONFINAL, FINAL+NONFINAL, range(len(rhs_graph)), ['in', 'out'], ['in', 'out'])))
     # ous = reduce(lambda x,y: x&y, [compat['out'] for compat in compats])
     # upper = L2 - ous
-    nodes_induce = best_ism.nodes[list(best_clique)[0]]['ism']
-    rhs_graph = g.__class__(nx.induced_subgraph(g, nodes_induce))    
+    # # don't add unneccessary non-final edges
+    # upper = set(u for u in upper if u in lower or u[2] in FINAL)            
     color = 'gray'    
     rule = EDNCERule(color, rhs_graph, lower)
+    # rule = EDNCERule(color, rhs_graph, upper)
     rule_no = len(grammar.rules)     
     rule.visualize(os.path.join(IMG_DIR, f"rule_{rule_no}.png"))
     grammar.add_rule(rule) 
