@@ -53,10 +53,10 @@ def draw_custom_arrows(ax, pos, edge, color_1='blue', color_2='green', arrow_1_p
 def draw_graph(g, path, scale=SCALE, node_size=NODE_SIZE, font_size=FONT_SIZE, layout=LAYOUT, ax=None):
     conns = list(nx.connected_components(nx.Graph(g)))
     if len(conns) > 1:
-        assert np.all(':' in n for n in g) or np.all(':' not in n for n in g)
-        fig = plt.Figure()
+        assert np.all(':' in n for n in g) or np.all(':' not in n for n in g)                
         num_rows = int(np.sqrt(len(conns)-1))+1
-        num_cols = len(conns)-len(conns)//num_rows        
+        num_cols = num_rows
+        fig = plt.Figure(figsize=(num_rows*DIM_SCALE, num_cols*DIM_SCALE))
         for j, conn in enumerate(conns):
             ax_ = fig.add_subplot(num_rows, num_cols, j+1)
             g_conn = nx.induced_subgraph(g, conn)

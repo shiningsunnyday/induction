@@ -77,7 +77,7 @@ CACHE_DIR = f"/Users/msun415/Documents/GitHub/induction/cache/{METHOD}_{DATASET}
 
 ### CKT
 TERMS = ['yellow', 'lawngreen', 'cyan', 'lightblue', 'deepskyblue', 'dodgerblue', 'silver', 'lightgrey', 'orchid', 'pink']
-NONTERMS = ['gray','black']
+NONTERMS = ['gray','black'] # assumes last one is init symbol S
 NONFINAL = ['gray']
 FINAL = ['black']
 CKT_LOOKUP = {
@@ -111,6 +111,7 @@ NUM_ATTEMPTS = 1
 
 # VISUALIZATION
 SCALE = 5
+DIM_SCALE = 7.5
 NODE_SIZE = 4000
 EDGE_THICKNESS = 2
 ARROW_SIZE = 20

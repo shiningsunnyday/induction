@@ -10,6 +10,7 @@ from src.draw.graph import draw_graph
 import os
 from src.config import RADIUS
 from argparse import ArgumentParser
+import pickle
 
 
 def load_data():
@@ -30,9 +31,8 @@ def load_data():
 
 
 def main(args):    
-    g = load_data()    
-    import pickle
-    gr, _, _ = pickle.load(open(f'{os.getcwd()}/cache/api_ckt_ednce/6.pkl', 'rb'))
+    g = load_data() 
+    gr, _, _ = pickle.load(open(f'{os.getcwd()}/cache/api_ckt_ednce/9.pkl', 'rb'))
     # gr, model = grammar.learn_grammar(g)
     # grammar, model = nlc.learn_grammar(g)
     # grammar, model = mining.learn_stochastic_grammar(g)    

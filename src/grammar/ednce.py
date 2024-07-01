@@ -58,21 +58,30 @@ def postprocess(graph):
 class EDNCEGrammar(NLCGrammar):    
     def __sample__(self):
         # find the initial rule
-        rule_indices = list(range(len(self.rules)))        
-        rules = self.search_rules('black')
-        assert len(rules) == 1
-        cur = rules[0].subgraph
+        rules = self.search_rules('gray')
+        init_rules = self.search_rules('black')
+        start_rule = random.choice(init_rules)        
+        cur = start_rule.subgraph
+        assert not check_input_xor_output(cur)
         num_nts = len(self.search_nts(cur, NONTERMS))
-        iters = 0        
+        iters = 0   
+        gen_dir = os.path.join(IMG_DIR, "generate/")
         while num_nts > 0:   
             if iters >= 100:
                 return None       
             gray_nodes = self.search_nts(cur, ['gray'])
-            node = random.choice(gray_nodes)
-            ind = random.choice(rule_indices)
-            rule = self.rules[ind]
-            cur = rule(cur, node)
-            num_nts = len(self.search_nts(cur, NONTERMS))
+            # attempt to keep graph connected
+            updated = False
+            for node in np.random.permutation(gray_nodes):                
+                for rule in np.random.permutation(rules):            
+                    res = rule(cur, node)                  
+                    if nx.is_connected(nx.Graph(res)):
+                        updated = True
+                        cur = res
+                        break
+                if updated:
+                    break
+            num_nts = len(self.search_nts(cur, 'gray'))
             iters += 1
         return cur
     
@@ -112,18 +121,9 @@ class EDNCEGrammar(NLCGrammar):
                 continue
             exist = False
             # for circuits
-            if not specification(sample):
-                print("doesn't meet spec")
-                continue
             if not nx.is_connected(nx.Graph(sample)):
                 print("not connected")
                 continue
-            try:
-                nx.find_cycle(sample, find_start_node(sample))
-                print("has cycle")
-                continue
-            except:
-                pass
             if 'ckt' in DATASET:    
                 sample = postprocess(sample)
             if len(sample) == 0:
@@ -149,15 +149,18 @@ class EDNCERule:
 
 
     def __call__(self, cur, node): 
-        rhs = nx.DiGraph(self.subgraph)            
-        start = find_next(cur)
+        rhs = nx.DiGraph(self.subgraph)
+        if ':' in node:
+            start = find_next(cur, node[:node.index(':')+1])
+        else:
+            start = find_next(cur)
         node_map = {}
         for n in rhs:
-            node_map[n] = start                
-            start = next(start)     
+            node_map[n] = start
+            start = next(start)
         inv_node_map = {v: k for k, v in node_map.items()}
         rhs = nx.relabel_nodes(rhs, node_map)
-        cur = nx.union(cur, rhs)            
+        cur = nx.union(cur, rhs)
         cur_neis = neis(cur, [node], direction=['in','out'])
         for cur_nei in cur_neis:
             mu = cur.nodes[cur_nei]['label']

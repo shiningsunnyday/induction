@@ -1,5 +1,18 @@
 import networkx as nx
-from src.config import NONTERMS
+from src.config import *
+
+
+def check_input_xor_output(subgraph):
+    inp_outp = []
+    for n in subgraph:
+        if 'type' in subgraph.nodes[n]:
+            type_ = subgraph.nodes[n]['type']
+            inp_outp.append(type_ in ['input', 'output'])
+        else:
+            assert subgraph.nodes[n]['label'] in NONTERMS
+    return sum(inp_outp) == 1        
+
+
 
 def boundary(g):
     bad = False
@@ -50,10 +63,16 @@ def find_embedding(subgraphs, graph, find_iso, edges=False):
     best_clique = None
     max_len = 0
     for subgraph in subgraphs:
+        # general concerns
         if len(subgraph) == 1:
             continue
         if boundary(subgraph):
             continue
+        # domain-specific concerns
+        if 'ckt' in DATASET:
+            if check_input_xor_output(subgraph):
+                continue
+
         ism_subgraph = find_iso(subgraph, graph)        
         if len(ism_subgraph) == 0:
             continue

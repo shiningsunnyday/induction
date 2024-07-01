@@ -15,19 +15,42 @@ from src.grammar.utils import *
 
 
 def terminate(g, grammar, anno, iter):
-    nodes = list(g)
-    new_n = find_next(g)
-    rule_no = len(grammar.rules)    
-    anno[new_n] = EDNCENode(new_n, attrs={'rule': rule_no})    
-    g_copy = g.__class__(g)
-    rule = EDNCERule('black', g_copy, None)                        
-    rule.visualize(os.path.join(IMG_DIR, f"rule_{rule_no}.png"))            
-    grammar.add_rule(rule)   
-    g.add_node(new_n, label='black') # annotate which rule was applied to model 
-    rewire_graph(g, new_n, nodes, anno)
-    model = anno[new_n]    
+    # create a rule for each connected component
+    conns = list(nx.connected_components(nx.Graph(g)))
+    if len(conns) == 1:
+        nodes = list(g)
+        new_n = find_next(g)
+        rule_no = len(grammar.rules)    
+        anno[new_n] = EDNCENode(new_n, attrs={'rule': rule_no})    
+        g_copy = g.__class__(g)
+        rule = EDNCERule('black', g_copy, None)                        
+        rule.visualize(os.path.join(IMG_DIR, f"rule_{rule_no}.png"))            
+        grammar.add_rule(rule)   
+        g.add_node(new_n, label='black') # annotate which rule was applied to model 
+        rewire_graph(g, new_n, nodes, anno)
+        model = anno[new_n]    
+        cache_path = os.path.join(CACHE_DIR, f"{iter}.pkl")                
+        pickle.dump((grammar, anno, g), open(cache_path, 'wb+')) 
+    else:
+        model = []
+        for conn in conns:
+            prefixes = [n.split(':')[0] for n in conn]
+            assert len(set(prefixes)) == 1
+            prefix = prefixes[0]+':'
+            conn_g = g.__class__(nx.induced_subgraph(g, conn))
+            new_n = find_next(conn_g, prefix)
+            rule_no = len(grammar.rules)
+            anno[new_n] = EDNCENode(new_n, attrs={'rule': rule_no})    
+            conn_g_copy = conn_g.__class__(conn_g)
+            rule = EDNCERule('black', conn_g_copy, None)               
+            rule.visualize(os.path.join(IMG_DIR, f"rule_{rule_no}.png")) 
+            grammar.add_rule(rule)  
+            g.add_node(new_n, label='black') # annotate which rule was applied to model
+            nodes = conn
+            rewire_graph(g, new_n, nodes, anno)
+            model.append(anno[new_n])
     cache_path = os.path.join(CACHE_DIR, f"{iter}.pkl")                
-    pickle.dump((grammar, anno, g), open(cache_path, 'wb+'))        
+    pickle.dump((grammar, anno, g), open(cache_path, 'wb+'))
     return g, grammar, model
 
 
@@ -78,7 +101,10 @@ def update_graph(g, anno, best_ism, best_clique, grammar):
         nodes = ism['ism']    
         dirs = ism['dirs']        
         ps = ism['ps']
-        new_n = find_next(g)
+        assert len(set([n.split(':')[0] for n in nodes])) == 1
+        no = nodes[0].split(':')[0]
+        prefix = f"{no}:"
+        new_n = find_next(g, prefix=prefix)
         g.add_node(new_n, label='gray') # annotate which rule was applied to model
         anno[new_n] = EDNCENode(new_n, attrs={'rule': len(grammar.rules)-1})
         print(f"{new_n} new node")                   
@@ -109,11 +135,15 @@ def learn_grammar(g):
         if not change:
             break
         path = os.path.join(IMG_DIR, f'{METHOD}_{iter}.png')
-        draw_graph(g, path)   
+        draw_graph(g, path)
         cache_path = os.path.join(CACHE_DIR, f"{iter}.pkl")                
         pickle.dump((grammar, anno, g), open(cache_path, 'wb+'))    
     g, grammar, model = terminate(g, grammar, anno, iter)            
-    model = anno[find_max(anno)]
-    draw_tree(model, os.path.join(IMG_DIR, f"model_{iter}.png"))
+    if isinstance(model, list):
+        for j, m in enumerate(model):
+            draw_tree(m, os.path.join(IMG_DIR, f"model_{iter}_{j}.png"))
+    else:
+        model = anno[find_max(anno)]
+        draw_tree(model, os.path.join(IMG_DIR, f"model_{iter}.png"))
     model = EDNCEModel(model)
     return grammar, model
