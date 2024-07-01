@@ -1,5 +1,7 @@
 import networkx as nx
 from src.config import *
+import igraph
+from copy import deepcopy
 
 
 def check_input_xor_output(subgraph):
@@ -11,6 +13,21 @@ def check_input_xor_output(subgraph):
         else:
             assert subgraph.nodes[n]['label'] in NONTERMS
     return sum(inp_outp) == 1        
+
+
+def nx_to_igraph(g):
+    g = deepcopy(g)
+    for n in g:
+        g.nodes[n]['type'] = list(CKT_LOOKUP).index(g.nodes[n]['type'])
+    for e in g.edges:
+        if '_igraph_index' in g.edges[e]:
+            g.edges[e].pop('_igraph_index')
+    for n in g:
+        if '_igraph_index' in g.nodes[n]:
+            g.nodes[n].pop('_igraph_index')
+    ig = igraph.Graph(directed=True)        
+    ig = ig.from_networkx(g)    
+    return ig
 
 
 

@@ -16,6 +16,10 @@ from src.grammar.common import *
 from src.grammar.utils import *
 import random
 from collections import Counter
+import sys
+sys.path.append(os.path.join(os.getcwd(), '../CktGNN/'))
+from utils import is_valid_Circuit, is_valid_DAG
+import igraph
 
 
 def specification(graph):
@@ -52,6 +56,7 @@ def postprocess(graph):
     dfs(in_n, vis, edges)
     graph = nx.edge_subgraph(graph, edges)
     return graph
+    
 
 
 
@@ -100,11 +105,14 @@ class EDNCEGrammar(NLCGrammar):
         return res
 
 
-    def generate(self, num_samples=20):
+    def generate(self, num_samples=7):
         random.seed(SEED)
         np.random.seed(SEED)        
         gen_dir = os.path.join(IMG_DIR, "generate/")
         os.makedirs(gen_dir, exist_ok=True)             
+        # metrics
+        is_valid_dag = []
+        is_valid_circuit = []
         res = []
         while len(res) < num_samples:
             print(len(res))
@@ -134,10 +142,15 @@ class EDNCEGrammar(NLCGrammar):
                     break
             if exist:
                 print("isomorphic to existing")
-                continue                    
+                continue                             
             draw_graph(sample, os.path.join(gen_dir, f'graph_{len(res)}.png'), node_size=NODE_SIZE)
+            isample = nx_to_igraph(sample)
+            is_valid_dag.append(is_valid_DAG(isample, subg=False))
+            is_valid_circuit.append(is_valid_Circuit(isample, subg=False))
             # draw_circuit(sample, os.path.join(gen_dir, f'graph_{len(res)}.png'))
-            res.append(sample)                    
+            res.append(sample)
+            print(f"is_valid_dag: {sum(is_valid_dag)}/{len(res)}")
+            print(f"is_valid_circuit: {sum(is_valid_circuit)}/{len(res)}")
         return res
 
 
