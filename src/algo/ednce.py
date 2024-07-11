@@ -37,13 +37,13 @@ def terminate(g, grammar, anno, iter):
             prefixes = [n.split(':')[0] for n in conn]
             assert len(set(prefixes)) == 1
             prefix = prefixes[0]+':'
-            conn_g = g.__class__(nx.induced_subgraph(g, conn))
+            conn_g = copy_graph(g, conn)
             new_n = find_next(conn_g, prefix)
             rule_no = len(grammar.rules)
             anno[new_n] = EDNCENode(new_n, attrs={'rule': rule_no})    
             conn_g_copy = conn_g.__class__(conn_g)
             rule = EDNCERule('black', conn_g_copy, None)               
-            rule.visualize(os.path.join(IMG_DIR, f"rule_{rule_no}.png")) 
+            rule.visualize(os.path.join(IMG_DIR, f"rule_{rule_no}.png"))             
             grammar.add_rule(rule)  
             g.add_node(new_n, label='black') # annotate which rule was applied to model
             nodes = conn
@@ -58,7 +58,7 @@ def extract_rule(g, best_ism, best_clique, grammar):
     compats = [best_ism.nodes[n] for n in best_clique]
     lower = reduce(lambda x,y: x|y, [compat['ins'] for compat in compats])
     nodes_induce = best_ism.nodes[list(best_clique)[0]]['ism']
-    rhs_graph = g.__class__(nx.induced_subgraph(g, nodes_induce))      
+    rhs_graph = copy_graph(g, nodes_induce)
     # L2 = set(list(product(TERMS+NONTERMS, FINAL+NONFINAL, FINAL+NONFINAL, range(len(rhs_graph)), ['in', 'out'], ['in', 'out'])))
     # ous = reduce(lambda x,y: x&y, [compat['out'] for compat in compats])
     # upper = L2 - ous
@@ -69,6 +69,7 @@ def extract_rule(g, best_ism, best_clique, grammar):
     # rule = EDNCERule(color, rhs_graph, upper)
     rule_no = len(grammar.rules)     
     rule.visualize(os.path.join(IMG_DIR, f"rule_{rule_no}.png"))
+    breakpoint()
     grammar.add_rule(rule) 
 
 

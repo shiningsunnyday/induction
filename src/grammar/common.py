@@ -30,6 +30,19 @@ def nx_to_igraph(g):
     return ig
 
 
+def copy_graph(g, nodes):
+    g_copy = g.__class__()
+    for k in g.graph:
+        g_copy.graph[k] = g.graph[k]
+    for n in nodes:
+        g_copy.add_node(n, **g.nodes[n])
+    for e in g.edges(data=True):
+        if e[0] not in nodes or e[1] not in nodes:
+            continue
+        g_copy.add_edge(e[0], e[1], **e[2])
+    return g_copy
+
+
 
 def boundary(g):
     bad = False
@@ -89,14 +102,13 @@ def find_embedding(subgraphs, graph, find_iso, edges=False):
         if 'ckt' in DATASET:
             if check_input_xor_output(subgraph):
                 continue
-
         ism_subgraph = find_iso(subgraph, graph)        
         if len(ism_subgraph) == 0:
             continue
         print(subgraph.nodes, ism_subgraph.nodes)
         max_clique = []
         for ism_conn_subgraph in nx.connected_components(ism_subgraph):
-            conn_subgraph = nx.induced_subgraph(ism_subgraph, ism_conn_subgraph)
+            conn_subgraph = copy_graph(ism_subgraph, ism_conn_subgraph)
             clique = list(nx.approximation.max_clique(conn_subgraph))
             if len(clique) > len(max_clique):
                 max_clique = clique

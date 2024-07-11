@@ -52,7 +52,7 @@ def extract_rule(g, best_ism, best_clique, grammar):
     # ous = reduce(lambda x,y: x&y, [compat['out'] for compat in compats])
     # upper = L2 - ous
     nodes_induce = best_ism.nodes[list(best_ism)[0]]['ism']
-    rhs_graph = deepcopy(nx.induced_subgraph(g, nodes_induce))
+    rhs_graph = copy_graph((g, nodes_induce))
     rule = NLCRule('gray', deepcopy(rhs_graph), lower)   
     rule_no = len(grammar.rules)     
     rule.visualize(os.path.join(IMG_DIR, f"rule_{rule_no}.png"))

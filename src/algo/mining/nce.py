@@ -48,7 +48,7 @@ def learn_grammar(g):
         #     grammar.add_rule(rule)
         #     break
         # groups = [out[i][0]['nodes'] for i in range(len(out))]
-        # subgraphs = [nx.induced_subgraph(g, group) for group in groups]
+        # subgraphs = [copy_graph(g, group) for group in groups]
 
         ## USE C SUBDUE
         tmp_path = os.path.join(IMG_DIR, f'g_{iter}.g')
@@ -86,7 +86,7 @@ def learn_grammar(g):
         # ous = reduce(lambda x,y: x&y, [compat['out'] for compat in compats])
         # upper = L2 - ous
         nodes_induce = best_ism.nodes[list(best_ism)[0]]['ism']        
-        rhs_graph = deepcopy(nx.induced_subgraph(g, nodes_induce))
+        rhs_graph = copy_graph(g, nodes_induce)
         rhs_graph = nx.relabel_nodes(rhs_graph, {n: nodes_induce.index(n) for n in rhs_graph})
         for c in best_clique:
             ism = best_ism.nodes[c]

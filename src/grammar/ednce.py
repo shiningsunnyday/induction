@@ -105,7 +105,7 @@ class EDNCEGrammar(NLCGrammar):
         return res
 
 
-    def generate(self, num_samples=7):
+    def generate(self, num_samples=100):
         random.seed(SEED)
         np.random.seed(SEED)        
         gen_dir = os.path.join(IMG_DIR, "generate/")
@@ -202,7 +202,7 @@ class EDNCERule:
         lhs_path = os.path.join(IMG_DIR, f"{uuid.uuid4()}.png")
         draw_graph(g, lhs_path, scale=5)
         rhs_path = os.path.join(IMG_DIR, f"{uuid.uuid4()}.png")
-        g = nx.DiGraph(self.subgraph)
+        g = copy_graph(self.subgraph, list(self.subgraph))
         # g.graph['layout'] = 'spring_layout'
         if self.embedding is not None:
             for e in self.embedding:
@@ -216,11 +216,11 @@ class EDNCERule:
                     name = f"{x},{mu},{p}/{q},{d}/{d_}"
                     g.add_node(name, label=mu, alpha=0.5)              
                 g.add_edge(n, name, style='dashed', 
-                           reverse1=d=='in', 
-                           reverse2=d_=='in', 
+                           reverse1=d_=='in', 
+                           reverse2=d=='in', 
                            label1=q, loc1=1/4, 
                            label2=p, loc2=3/4)
-        draw_graph(g, rhs_path, scale=RULE_SCALE, node_size=RULE_NODE_SIZE, font_size=RULE_FONT_SIZE)
+        draw_graph(g, rhs_path, scale=RULE_SCALE, node_size=RULE_NODE_SIZE, font_size=RULE_FONT_SIZE)    
         self.draw_fig(lhs_path, rhs_path, path)
 
     
@@ -344,19 +344,28 @@ def insets_and_outsets(graph, nodes, inset=True):
     # find equivalent neighbors
     equiv, lookup = equiv_class(graph, nodes, out_ns)    
     poss_dirs = list(product(*[['in','out'] for _ in equiv]))
+
+    if 'ckt' in DATASET:
+        ### for CKT ONLY
+        # we can further reduce poss_dirs if all nodes in equiv class "precede" nodes or "succed" nodes on the input-output path        
+        # do dfs from input to each node in equiv class
+        # if no path crosses nodes, then it's true
+        # TODO: implement this
+        pass
+
     poss_ps = list(product(*[NONFINAL for _ in equiv]))
     # naively, we need to enumerate, for every neighbor, the direction and edge label
-    # however, we know inset & ouset whenever there is ambiguity, i.e. for two identical neighbors n1 and n2
+    # however, we know (inset & ouset) whenever there is ambiguity, i.e. for two identical neighbors n1 and n2
     # with same (node label, edge label, direction) then they need to connect with the same subset of nodes
     # for each (y1, y2) with same node labels that do not connect with the same subset of nodes, they can never
     # look identical, so we connect y1-y2 in our incompatibility graph    
     poss = {}
-    for a, dirs in enumerate(poss_dirs):
-        for b, ps in enumerate(poss_ps):
+    for a, dirs in enumerate(poss_dirs): # for each poss dirs
+        for b, ps in enumerate(poss_ps): # for each poss edge labels
             res_inset = set()
             res_outset = set()
-            for i, x in enumerate(nodes):
-                for j, y in enumerate(out_ns):
+            for i, x in enumerate(nodes): # for each node
+                for j, y in enumerate(out_ns): # for each out nei
                     e = lookup[y]
                     d = dirs[e]
                     p = ps[e]

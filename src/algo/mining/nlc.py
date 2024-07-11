@@ -51,7 +51,7 @@ def learn_grammar(g):
             grammar.add_rule(rule)
             break
         groups = [out[i][0]['nodes'] for i in range(len(out))]
-        subgraphs = [nx.induced_subgraph(g, group) for group in groups]
+        subgraphs = [copy_graph(g, group) for group in groups]
         assert min([nx.is_connected(subgraph) for subgraph in subgraphs])
         for i, subgraph in enumerate(subgraphs):
             draw_graph(subgraph, path.replace(".png", f"{i}_subgraph.png"))
@@ -70,7 +70,7 @@ def learn_grammar(g):
         # ous = reduce(lambda x,y: x&y, [compat['out'] for compat in compats])
         # upper = L2 - ous
         nodes_induce = best_ism.nodes[list(best_ism)[0]]['ism']
-        rhs_graph = deepcopy(nx.induced_subgraph(g, nodes_induce))
+        rhs_graph = copy_graph(g, nodes_induce)
         for c in best_clique:
             ism = best_ism.nodes[c]
             nodes = ism['ism']   

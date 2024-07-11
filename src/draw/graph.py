@@ -26,27 +26,26 @@ def draw_custom_arrows(ax, pos, edge, color_1='blue', color_2='green', arrow_1_p
     if rev1:
         ax.annotate('',
                     xy=arrow_pos_1, xycoords='data',
-                    xytext=start, textcoords='data',
-                    arrowprops=dict(arrowstyle=arrowstyle, color=color_1, lw=2, shrinkA=0, shrinkB=0, mutation_scale=arrowsize))
+                    xytext=mid_point, textcoords='data',
+                    arrowprops=dict(arrowstyle='-|>', color=color_1, lw=2, shrinkA=0, shrinkB=0, mutation_scale=arrowsize))
     else:
         ax.annotate('',
                     xy=arrow_pos_1, xycoords='data',
-                    xytext=mid_point, textcoords='data',
-                    arrowprops=dict(arrowstyle=arrowstyle, color=color_1, lw=2, shrinkA=0, shrinkB=0, mutation_scale=arrowsize))
+                    xytext=start, textcoords='data',
+                    arrowprops=dict(arrowstyle='-|>', color=color_1, lw=2, shrinkA=0, shrinkB=0, mutation_scale=arrowsize))
 
     # Draw the second arrow at arrow_2_pos
     arrow_pos_2 = (1 - arrow_2_pos) * start + arrow_2_pos * end
     if rev2:
         ax.annotate('',
                     xy=arrow_pos_2, xycoords='data',
-                    xytext=mid_point, textcoords='data',
-                    arrowprops=dict(arrowstyle=arrowstyle, color=color_2, lw=2, shrinkA=0, shrinkB=0, mutation_scale=arrowsize))
+                    xytext=end, textcoords='data',
+                    arrowprops=dict(arrowstyle='-|>', color=color_2, lw=2, shrinkA=0, shrinkB=0, mutation_scale=arrowsize))
     else:
         ax.annotate('',
                     xy=arrow_pos_2, xycoords='data',
-                    xytext=end, textcoords='data',
-                    arrowprops=dict(arrowstyle=arrowstyle, color=color_2, lw=2, shrinkA=0, shrinkB=0, mutation_scale=arrowsize))
-
+                    xytext=mid_point, textcoords='data',
+                    arrowprops=dict(arrowstyle='-|>', color=color_2, lw=2, shrinkA=0, shrinkB=0, mutation_scale=arrowsize))
 
 
 
@@ -59,7 +58,7 @@ def draw_graph(g, path, scale=SCALE, node_size=NODE_SIZE, font_size=FONT_SIZE, l
         fig = plt.Figure(figsize=(num_rows*DIM_SCALE, num_cols*DIM_SCALE))
         for j, conn in enumerate(conns):
             ax_ = fig.add_subplot(num_rows, num_cols, j+1)
-            g_conn = nx.induced_subgraph(g, conn)
+            g_conn = copy_graph(g, conn)
             g_conn = g_conn.__class__(g_conn) # deepcopy
             # if these conns are different graphs    
             for key in g.graph:
@@ -156,7 +155,14 @@ def draw_graph(g, path, scale=SCALE, node_size=NODE_SIZE, font_size=FONT_SIZE, l
                 loc2 = dic['loc2']
                 rev1 = dic['reverse1']
                 rev2 = dic['reverse2']
-                draw_custom_arrows(ax_, pos, (u, v), label1, label2, loc1, loc2, rev1, rev2)        
+                print(f"u={u} v={v}, passing label1={label1}, label2={label2}, loc1={loc1}, loc2={loc2}, reverse1={rev1}, reverse2={rev2}")
+                draw_custom_arrows(ax_, pos, (u, v), 
+                                   color_1=label1, 
+                                   color_2=label2, 
+                                   arrow_1_pos=loc1, 
+                                   arrow_2_pos=loc2, 
+                                   rev1=rev1, 
+                                   rev2=rev2)        
         if 'title' in g.graph:
             ax_.set_title(g.graph['title'], fontsize=TITLE_FONT_SIZE)
     if ax is None:

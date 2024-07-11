@@ -59,7 +59,7 @@ def load_cora():
     
     conn = list(nx.connected_components(g))[0]
     print(len(conn), "nodes")
-    g = nx.Graph(nx.induced_subgraph(g, conn))        
+    g = copy_graph(g, conn)
     lookup = {}
     for n in list(sorted(g)):
         ego_g = nx.ego_graph(g, n, radius=RADIUS)
@@ -192,7 +192,7 @@ def load_ckt():
     #         max_size = len(g)
     #         best_i = i
     # print(best_i)
-    for i in range(9000):
+    for i in tqdm(range(9000)):
         fpath = os.path.join(data_dir, f"{i}.json")
         data = json.load(open(fpath))
         g = json_graph.node_link_graph(data)                
