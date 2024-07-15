@@ -76,7 +76,7 @@ CACHE_DIR = f"/Users/msun415/Documents/GitHub/induction/cache/{METHOD}_{DATASET}
 
 
 ### CKT
-TERMS = ['yellow', 'lawngreen', 'cyan', 'lightblue', 'deepskyblue', 'dodgerblue', 'silver', 'lightgrey', 'orchid', 'pink']
+TERMS = ['yellow', 'lawngreen', 'cyan', 'lightblue', 'deepskyblue', 'dodgerblue', 'silver', 'light_grey', 'orchid', 'pink']
 NONTERMS = ['gray','black'] # assumes last one is init symbol S
 NONFINAL = ['gray']
 FINAL = ['black']
@@ -104,8 +104,7 @@ INVERSE_LOOKUP = {
     'orchid': 'input',
     'pink': 'output'
 }
-
-
+TOP_DIFF = 30
 SEED = 5
 NUM_ATTEMPTS = 1
 

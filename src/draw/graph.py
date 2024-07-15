@@ -5,6 +5,7 @@ import matplotlib.pyplot as plt
 from matplotlib.colors import to_rgba
 from src.config import *
 from src.draw.utils import hierarchy_pos
+from src.grammar.common import *
 import matplotlib.colors as mcolors
 import igraph
 import pygraphviz as pgv

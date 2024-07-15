@@ -132,8 +132,11 @@ class EDNCEGrammar(NLCGrammar):
             if not nx.is_connected(nx.Graph(sample)):
                 print("not connected")
                 continue
-            if 'ckt' in DATASET:    
-                sample = postprocess(sample)
+            if 'ckt' in DATASET: 
+                try:   
+                    sample = postprocess(sample)
+                except:
+                    continue
             if len(sample) == 0:
                 continue
             for r in res:

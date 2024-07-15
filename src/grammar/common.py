@@ -2,6 +2,7 @@ import networkx as nx
 from src.config import *
 import igraph
 from copy import deepcopy
+import re
 
 
 def check_input_xor_output(subgraph):
@@ -70,16 +71,18 @@ def neis(graph, nodes, direction=['out']):
 def get_groups(content, dtype=int):
     groups = []
     for l in content.split():
+        l = l.replace(' ', '')
+        pat = r"(?:(\d+):)?((?:\d+,)*\d+)" # 2422:2,3,4 or 2,3,4
+        mat = re.match(pat, l)
+        if mat is None:
+            continue
         if ':' in l:
-            index, l = l.split(':')
-            index = int(index)
+            index, l_arr = mat.groups()
         else:
             index = -1
-        l_str = l.replace(' ','').split(',')
-        try:
-            l_arr = list(map(dtype, l_str))
-        except:
-            continue
+            _, l_arr = mat.groups()
+        l_arr = l_arr.split(',')
+        l_arr = list(map(dtype, l_arr))
         if index != -1:
             groups.append({'index': index, 'group': l_arr})
         else:

@@ -54,22 +54,110 @@ def terminate(g, grammar, anno, iter):
     return g, grammar, model
 
 
+def spec(u):
+    # ignore rules of a certain form
+    if 'ckt' in DATASET:
+        return u[1] in NONFINAL and u[2] in FINAL and u[0] not in ['silver', 'light_grey', 'gray', 'black']
+    else:
+        raise NotImplementedError    
+   
+    
+
+
+def gpt_add_diff(rhs_graph, diff):
+    # for the purpose of textual representation, relabel the nodes in topological sort
+    # won't cause side effects outside this function
+    assert np.all([r[1] == 'gray' for r in diff])
+    assert np.all([r[2] == 'black' for r in diff])
+    rename = {'C': 'capacitor', 
+              'R': 'resistor', 
+              '+gm+': '+gm+', 
+              '-gm+': '-gm+', 
+              '+gm-': '+gm-', 
+              '-gm-': '-gm-', 
+              'input': 'input', 
+              'output': 'output'}
+    inv_rename = {v: k for (k, v) in rename.items()}
+    N = len(rhs_graph)
+    lookup = {}
+    comps = []
+    for i, n in enumerate(rhs_graph):
+        lookup[n] = i+1
+        t = rhs_graph.nodes[n]['type']
+        t = rename[t]
+        comps.append(f"({i+1}) {t}")
+    comp_str = ', '.join(comps)
+    conns = []
+    for src, tgt in rhs_graph.edges:
+        t1 = rhs_graph.nodes[src]['type']
+        t2 = rhs_graph.nodes[tgt]['type']
+        t1, t2 = rename[t1], rename[t2]
+        n1, n2 = lookup[src], lookup[tgt]
+        conns.append(f"({n1}) {t1} to ({n2}) {t2}")
+    conn_str = ', '.join(conns)
+
+    # prompt = f"""
+    #     Please design an op-amp with me. I represent the op-amp as a flow network, with current going from input to output. I want an op-amp with high Figure of Merit. My basic building blocks are resistor, capacitor, +gm+, -gm+, +gm-, -gm-, input and output.
+    #     My design includes a sub-circuit with {N} components: {comp_str}. Current flows from {conn_str}. Please rank among the best building blocks to place next, such that current flows from component ({i+1}) {n} to it.            
+    #     DO NOT OUTPUT ANY REASONING. JUST OUTPUT THE ANSWER. Output your answer as a comma-separated sorted list of the possible components: BEST_COMPONENT,SECOND_BEST_COMPONENT,...,WORST_COMPONENT
+    # """
+    prompt = f"""
+        Please design an op-amp with me. I represent the op-amp as a flow network, with signal going from input to output. I want an op-amp with high Figure of Merit. My basic building blocks are resistor, capacitor, +gm+, -gm+, +gm-, -gm-, input and output.
+        My design includes a sub-circuit with {N} components: {comp_str}. Current flows from {conn_str}. Please rank the possible ways to add a new component, so signal flows into or out of an existing component to the new component.
+        Output your answer over multiple lines, beginning with the best addition. For each line, output the id of an existing component, the building block type of the new component, and either "out" if signal should flow out from the existing component, or "in" if the signal flows into the existing component.
+        ID,BUILDING_BLOCK,IN_OR_OUT
+        ID,BUILDING_BLOCK,IN_OR_OUT
+        ...
+        ID,BUILDING_BLOCK,IN_OR_OUT
+        
+        DO NOT OUTPUT ANY REASONING. JUST OUTPUT THE ANSWER. 
+    """
+    completion = openai.ChatCompletion.create(model=MODEL, 
+                                            messages=[{"role": "user", 
+                                                    "content": [
+                                                        {"type": "text",
+                                                        "text": prompt}]}],
+                                    )        
+    res = completion.choices[0].message.content
+    pat = r"(\d+),(capacitor|resistor|\+gm\+|-gm\+|\+gm-|-gm-|input|output),(in|out)"
+    rank = []
+    for line in res.split('\n'):       
+        mat = re.match(pat, line)
+        if mat:
+            comp, type_, dir = mat.groups()
+            type_name = inv_rename[type_]
+            mu = CKT_LOOKUP[type_name]
+            x = int(comp)-1
+            for d in ['in', 'out']:
+                rank.append((mu, 'gray', 'black', x, 'in', dir))
+    rank = [r for r in rank if r in diff]
+    return rank
+
+
+
 def extract_rule(g, best_ism, best_clique, grammar):    
     compats = [best_ism.nodes[n] for n in best_clique]
     lower = reduce(lambda x,y: x|y, [compat['ins'] for compat in compats])
     nodes_induce = best_ism.nodes[list(best_clique)[0]]['ism']
-    rhs_graph = copy_graph(g, nodes_induce)
-    # L2 = set(list(product(TERMS+NONTERMS, FINAL+NONFINAL, FINAL+NONFINAL, range(len(rhs_graph)), ['in', 'out'], ['in', 'out'])))
-    # ous = reduce(lambda x,y: x&y, [compat['out'] for compat in compats])
-    # upper = L2 - ous
-    # # don't add unneccessary non-final edges
-    # upper = set(u for u in upper if u in lower or u[2] in FINAL)            
+    rhs_graph = copy_graph(g, nodes_induce)    
+    L2 = set(list(product(TERMS+NONTERMS, FINAL+NONFINAL, FINAL+NONFINAL, range(len(rhs_graph)), ['in', 'out'], ['in', 'out'])))
+    ous = reduce(lambda x,y: x&y, [compat['out'] for compat in compats])    
+    upper = L2 - ous
+    # don't add unneccessary non-final edges
+    diff = set(u for u in upper if u not in lower and spec(u))
+    # ask gpt if any of the ones in diff should be added
+    emb = lower
+    if 'ckt' in DATASET:
+        if np.all(['type' in rhs_graph.nodes[n] for n in rhs_graph]):
+            emb_diff = gpt_add_diff(rhs_graph, diff)
+            emb = set(emb_diff[:TOP_DIFF]) | emb        
+    # ask gpt to rank the choices
+    # TODO: implement this
     color = 'gray'    
-    rule = EDNCERule(color, rhs_graph, lower)
+    rule = EDNCERule(color, rhs_graph, emb)
     # rule = EDNCERule(color, rhs_graph, upper)
     rule_no = len(grammar.rules)     
     rule.visualize(os.path.join(IMG_DIR, f"rule_{rule_no}.png"))
-    breakpoint()
     grammar.add_rule(rule) 
 
 

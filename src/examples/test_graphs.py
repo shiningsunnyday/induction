@@ -173,6 +173,18 @@ def create_house_graph():
     return g
 
 
+def union(gs, gs_dict={}):
+    whole_g = gs[0].__class__()
+    for g in gs:
+        for n in g:
+            whole_g.add_node(n, **g.nodes[n])
+        for e in g.edges:
+            whole_g.add_edge(e[0], e[1], **g.edges[e])
+    for k in gs_dict:
+        whole_g.graph[k] = gs_dict[k]
+    return whole_g
+
+
 
 def load_ckt():
     """
@@ -192,12 +204,12 @@ def load_ckt():
     #         max_size = len(g)
     #         best_i = i
     # print(best_i)
-    for i in tqdm(range(9000)):
+    gs = []
+    gs_dict = {}
+    for i in tqdm(range(50)):
         fpath = os.path.join(data_dir, f"{i}.json")
         data = json.load(open(fpath))
-        g = json_graph.node_link_graph(data)                
-        if g.graph['fom'] < 310:
-            continue
+        g = json_graph.node_link_graph(data)             
         lookup = CKT_LOOKUP
         for n in g:        
             g.nodes[n]['type'] = list(lookup)[g.nodes[n]['type']]
@@ -207,10 +219,11 @@ def load_ckt():
         for attr in g.graph:
             if attr == 'index':
                 continue
-            whole_g.graph[f"{i}:{attr}"] = g.graph[attr]        
-        node_map = {n: f"{i}:{n}" for n in g}
+            gs_dict[f"{i}:{attr}"] = g.graph[attr]        
+        node_map = {n: f"{i}:{n}" for n in g}        
         g = nx.relabel_nodes(g, node_map)
-        whole_g = nx.union(whole_g, g)            
+        gs.append(g)
+    whole_g = union(gs, gs_dict)
     return whole_g
 
 
