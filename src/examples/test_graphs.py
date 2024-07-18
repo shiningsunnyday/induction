@@ -10,6 +10,7 @@ from src.draw.graph import draw_graph
 from networkx.readwrite import json_graph
 import os
 from tqdm import tqdm
+from src.grammar.common import copy_graph
 
 
 LABELS = ['r','g','b','c']
@@ -206,10 +207,10 @@ def load_ckt():
     # print(best_i)
     gs = []
     gs_dict = {}
-    for i in tqdm(range(50)):
+    for i in tqdm(range(10)):
         fpath = os.path.join(data_dir, f"{i}.json")
         data = json.load(open(fpath))
-        g = json_graph.node_link_graph(data)             
+        g = json_graph.node_link_graph(data)        
         lookup = CKT_LOOKUP
         for n in g:        
             g.nodes[n]['type'] = list(lookup)[g.nodes[n]['type']]
@@ -225,6 +226,77 @@ def load_ckt():
         gs.append(g)
     whole_g = union(gs, gs_dict)
     return whole_g
+
+
+
+def convert_and_write(samples, path):           
+    for i, sample in enumerate(samples):
+        new_path = path.replace('.txt', f'_{i}.txt')        
+        # relabel types according to subckt
+        label_relabel = {
+                        'yellow': 2,
+                        'lawngreen': 3,
+                        'cyan': 6,
+                        'lightblue': 7,
+                        'deepskyblue': 8,
+                        'dodgerblue': 9,
+                        'orchid': 0,
+                        'pink': 1
+                        }
+        ntype_lookup = {
+                        'yellow': 0,
+                        'lawngreen': 1,
+                        'cyan': 2,
+                        'lightblue': 3,
+                        'deepskyblue': 4,
+                        'dodgerblue': 5,
+                        'orchid': 8,
+                        'pink': 9
+        }
+        label_relabel_inv = {v: k for (k, v) in label_relabel.items()}
+        for n in sample:
+            sample.nodes[n]['label'] = label_relabel[sample.nodes[n]['label']]
+        input = next(n for n in sample if sample.nodes[n]['label'] == 0)
+        output = next(n for n in sample if sample.nodes[n]['label'] == 1)
+        relabel_map = {}
+        relabel_map[input] = 0
+        relabel_map[output] = 1
+        index = 2
+        stage = 0
+        for n in sample:
+            if sample.nodes[n]['label'] in [6,7,8,9]:
+                relabel_map[n] = index
+                index += 1
+                stage += 1
+        if stage not in [2, 3]:
+            continue
+        f = open(new_path, 'w+')
+        for n in sample:
+            if n not in relabel_map:
+                relabel_map[n] = index
+                index += 1        
+        sample = nx.relabel_nodes(sample, relabel_map)        
+        f.write(f"{len(sample)} {len(sample)} {stage}\n")
+        sample = copy_graph(sample, range(len(sample)))
+        for n in sample:
+            type_ = sample.nodes[n]['label']
+            preds = list(sample.predecessors(n))
+            pred_str = ' '.join(map(str, preds))
+            num_preds = len(preds)
+            if n == 0:                
+                f.write(f"0 0 0 0 0 1 8 0 1\n")
+            elif n == 1:
+                f.write(f"{type_} {n} {n} {num_preds} {pred_str} 1 9 0 1\n")
+            else:
+                labels = ['-1'] + ['11.11' for _ in preds] + ['-1']
+                label_str = ' '.join(labels)
+                f.write(f"{type_} {n} {n} {num_preds} {pred_str} {label_str}\n")
+        f.write('\n')
+        f.close()
+            
+            
+
+
 
 
 def debug():

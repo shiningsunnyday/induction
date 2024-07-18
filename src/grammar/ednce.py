@@ -105,7 +105,8 @@ class EDNCEGrammar(NLCGrammar):
         return res
 
 
-    def generate(self, num_samples=100):
+    def generate(self, num_samples=10):
+        count = 0
         random.seed(SEED)
         np.random.seed(SEED)        
         gen_dir = os.path.join(IMG_DIR, "generate/")
@@ -151,9 +152,11 @@ class EDNCEGrammar(NLCGrammar):
             is_valid_dag.append(is_valid_DAG(isample, subg=False))
             is_valid_circuit.append(is_valid_Circuit(isample, subg=False))
             # draw_circuit(sample, os.path.join(gen_dir, f'graph_{len(res)}.png'))
-            res.append(sample)
-            print(f"is_valid_dag: {sum(is_valid_dag)}/{len(res)}")
-            print(f"is_valid_circuit: {sum(is_valid_circuit)}/{len(res)}")
+            if is_valid_dag[-1] and is_valid_circuit[-1]:
+                res.append(sample)
+            count += 1
+            print(f"is_valid_dag: {sum(is_valid_dag)}/{count}")
+            print(f"is_valid_circuit: {sum(is_valid_circuit)}/{count}")
         return res
 
 

@@ -32,13 +32,15 @@ def load_data():
 
 def main(args):    
     g = load_data() 
-    gr, _, _ = pickle.load(open(f'{os.getcwd()}/cache/api_ckt_ednce/50.pkl', 'rb'))
+    gr, _, _ = pickle.load(open(f'{os.getcwd()}/cache/api_ckt_ednce/12.pkl', 'rb'))
     # gr, model = grammar.learn_grammar(g)
     # grammar, model = nlc.learn_grammar(g)
     # grammar, model = mining.learn_stochastic_grammar(g)    
-    # model.generate(gr)
-    breakpoint()
+    # model.generate(gr)    
     samples = gr.generate()
+    path = f"{os.getcwd()}/data/api_ckt_ednce/samples.txt"
+    convert_and_write(samples, path)
+    
     
 
 
