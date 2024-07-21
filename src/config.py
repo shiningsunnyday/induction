@@ -77,8 +77,11 @@ CACHE_DIR = f"/Users/msun415/Documents/GitHub/induction/cache/{METHOD}_{DATASET}
 
 ### HG
 
-TERMS = ['yellow', 'lawngreen', 'cyan', 'lightblue', 'deepskyblue', 'dodgerblue', 'silver', 'light_grey', 'orchid', 'pink']
-NONTERMS = ['gray','black'] # assumes last one is init symbol S
+VOCAB = {'S': 2, 
+         'A': 4, 
+         'a': None, 
+         'b': None, 
+         'c': None}
 
 
 ### CKT
