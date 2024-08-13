@@ -8,7 +8,7 @@ from src.draw.utils import hierarchy_pos
 from src.grammar.common import *
 import matplotlib.colors as mcolors
 import igraph
-import pygraphviz as pgv
+# import pygraphviz as pgv
 
 
 def draw_custom_arrows(ax, pos, edge, color_1='blue', color_2='green', arrow_1_pos=0.25, arrow_2_pos=0.75, rev1=False, rev2=False, arrowstyle='-|>', arrowsize=10):

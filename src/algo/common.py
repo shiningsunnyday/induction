@@ -25,8 +25,8 @@ def obtain_motifs(g, img_paths):
                 assert list(group.keys()) == ['index', 'group']
                 index = group['index']
                 group = [f"{index}:{n}" for n in group['group']]
-                if np.any([n not in g for n in group]):
-                    continue
+            if np.any([n not in g for n in group]):
+                continue
             subgraph = copy_graph(g, group)
             if len(subgraph):
                 induced_subgraphs.append(subgraph)        

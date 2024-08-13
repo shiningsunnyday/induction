@@ -1,11 +1,15 @@
+import os
+
+wd = os.getcwd()
+
 METHOD = 'api'
 DATASET = 'ckt'
 GRAMMAR = 'ednce'
 
 MODEL = "gpt-4o"
-FILE_NAME = f"/Users/msun415/Documents/GitHub/induction/data/{METHOD}_{DATASET}_{GRAMMAR}.txt"
-IMG_DIR = f"/Users/msun415/Documents/GitHub/induction/data/{METHOD}_{DATASET}_{GRAMMAR}/"
-CACHE_DIR = f"/Users/msun415/Documents/GitHub/induction/cache/{METHOD}_{DATASET}_{GRAMMAR}/"
+FILE_NAME = f"{wd}/data/{METHOD}_{DATASET}_{GRAMMAR}.txt"
+IMG_DIR = f"{wd}/data/{METHOD}_{DATASET}_{GRAMMAR}/"
+CACHE_DIR = f"{wd}/cache/{METHOD}_{DATASET}_{GRAMMAR}/"
 
 ### HOUSE
 # TERMS = ['cyan']
