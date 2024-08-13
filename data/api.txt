@@ -1,0 +1,5 @@
+I will show you a graph I drew where the nodes have labels. The nodes are numbered. I want you to look for non-trivial, RECURRING substructures that visually look meaningful. Output as many as you can. Structure your output as follows:
+
+- Use one row for each distinct substructure. 
+- For each row, output comma-separated node numbers for exactly one of the occurrences. 
+- FOR EACH ROW, OUTPUT THE COMMA-SEPARATED LIST OF NUMBERS AND NOTHING ELSE.

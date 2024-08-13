@@ -1,0 +1,5 @@
+I will show you a citation network, where each node is a paper. The nodes have labels classifying which topic it is categorized under. The nodes are numbered, not necessarily consecutively. I want you to look for substructures that visually look meaningful. If you can't see some parts of the graph due to spacing issues, focus on the parts of the graph you can see clearly first. Output as many as you can. Structure your output as follows:
+
+- Use one row for each distinct substructure. 
+- For each row, output comma-separated node numbers for exactly one of the occurrences. 
+- FOR EACH ROW, OUTPUT THE COMMA-SEPARATED LIST OF NUMBERS AND NOTHING ELSE.

@@ -1,0 +1,5 @@
+I will show you a graph representing a layout plan. The nodes are numbered. I want you to look for motifs that visually look meaningful. Limit the size of the motif to 3 or 4 nodes. Output as many as you can. Structure your output as follows:
+
+- Use one row for each distinct substructure. 
+- For each row, output comma-separated node numbers for exactly one of the occurrences. 
+- FOR EACH ROW, OUTPUT THE COMMA-SEPARATED LIST OF NUMBERS AND NOTHING ELSE.

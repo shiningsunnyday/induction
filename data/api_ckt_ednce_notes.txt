@@ -1,0 +1,21 @@
+I will show you a graph representing an operational amplifier. The nodes are indexed from 0. I want you to look for recurring subcircuits that make sense from a circuit design perspective. Use your knowledge of op-amps to guide your selection. Output as many as you can. Structure your output as follows:
+
+- Use one row for each distinct substructure. 
+- For each row, output comma-separated node numbers for one of the occurrences.
+- OUTPUT THE COMMA-SEPARATED LIST OF NODE INDICES FOR THAT GRAPH AND NOTHING ELSE.
+
+i.e. {node_index},{node_index},{node_index},...
+
+DON'T OUTPUT ANYTHING ELSE.
+
+
+I will show you graphs representing operational amplifiers. The graphs are indexed, with keys in the title. Within each graph, the nodes are indexed from 0. I want you to look for recurring subcircuits that make sense from a circuit design perspective. DO NOT pick input or output node until the very end, when all other nodes are gray. Use your knowledge of op-amps to guide your selection. Output as many as you can. Structure your output as follows:
+
+- Use one row for each distinct substructure. 
+- For each row, output comma-separated node numbers for one of the occurrences in any of the graphs.
+- Begin your row with the index of the graph and a colon.
+- Right after the colon, OUTPUT THE COMMA-SEPARATED LIST OF NODE INDICES FOR THAT GRAPH AND NOTHING ELSE.
+
+i.e. {graph_index}:{node_index},{node_index},{node_index},...
+
+DON'T OUTPUT ANYTHING ELSE OTHER THAN THESE ROWS.
