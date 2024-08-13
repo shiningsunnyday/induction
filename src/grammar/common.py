@@ -3,6 +3,8 @@ from src.config import *
 import igraph
 from copy import deepcopy
 import re
+from functools import reduce
+from tqdm import tqdm
 
 
 def check_input_xor_output(subgraph):
@@ -68,6 +70,12 @@ def neis(graph, nodes, direction=['out']):
     return res
 
 
+def reduce_to_bounds(compats):
+    lower = reduce(lambda x,y: x|y, [compat['ins'] for compat in compats])
+    ous = reduce(lambda x,y: x&y, [compat['out'] for compat in compats])    
+    return lower, ous
+
+
 def get_groups(content, dtype=int):
     groups = []
     for l in content.split():
@@ -89,13 +97,45 @@ def get_groups(content, dtype=int):
             groups.append(l_arr)
     return groups
 
+def greedy_max_clique(graph):
+    # Sort nodes by degree (high to low)
+    nodes_sorted_by_degree = sorted(graph.nodes, key=lambda x: graph.degree[x], reverse=True)    
+    # Start with an empty clique
+    max_clique = []    
+    # Iterate over the sorted nodes
+    for node in nodes_sorted_by_degree:
+        # Check if this node can be added to the current clique
+        if all(graph.has_edge(node, clique_node) for clique_node in max_clique):
+            max_clique.append(node)    
+    return max_clique
+
+
+def approximate_best_clique(ism_subgraph):
+    max_clique = []
+    for ism_conn_subgraph in nx.connected_components(ism_subgraph):
+        conn_subgraph = copy_graph(ism_subgraph, ism_conn_subgraph)                
+        if len(conn_subgraph) > 1000:
+            clique = greedy_max_clique(conn_subgraph)
+        else:
+            clique = list(nx.approximation.max_clique(conn_subgraph))
+        if len(clique) > len(max_clique):
+            max_clique = clique
+        elif len(clique) == len(max_clique):  
+            lower_best, ous_best = reduce_to_bounds([ism_subgraph.nodes[n] for n in max_clique])
+            lower, ous = reduce_to_bounds([ism_subgraph.nodes[n] for n in clique])
+            if len(lower)+len(ous) < len(lower_best)+len(ous_best):
+                print("better clique")
+                max_clique = clique   
+    return max_clique 
+
+
 
 def find_embedding(subgraphs, graph, find_iso, edges=False):
     # find_iso: a custom function that constructs the compat graph
     best_ism = None
     best_clique = None
     max_len = 0
-    for subgraph in subgraphs:
+    for subgraph in tqdm(subgraphs, desc="looping over subgraphs"):
         # general concerns
         if len(subgraph) == 1:
             continue
@@ -105,16 +145,11 @@ def find_embedding(subgraphs, graph, find_iso, edges=False):
         if 'ckt' in DATASET:
             if check_input_xor_output(subgraph):
                 continue
-        ism_subgraph = find_iso(subgraph, graph)        
+        ism_subgraph = find_iso(subgraph, graph)
         if len(ism_subgraph) == 0:
             continue
         print(subgraph.nodes, ism_subgraph.nodes)
-        max_clique = []
-        for ism_conn_subgraph in nx.connected_components(ism_subgraph):
-            conn_subgraph = copy_graph(ism_subgraph, ism_conn_subgraph)
-            clique = list(nx.approximation.max_clique(conn_subgraph))
-            if len(clique) > len(max_clique):
-                max_clique = clique
+        max_clique = approximate_best_clique(ism_subgraph)
         # max_clique = list(nx.find_cliques(ism_subgraph))
         better = False
         if edges:

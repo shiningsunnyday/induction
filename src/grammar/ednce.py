@@ -20,6 +20,8 @@ import sys
 sys.path.append(os.path.join(os.getcwd(), '../CktGNN/'))
 from utils import is_valid_Circuit, is_valid_DAG
 import igraph
+import multiprocessing as mp
+from tqdm import tqdm
 
 
 def specification(graph):
@@ -99,6 +101,18 @@ class EDNCEGrammar(NLCGrammar):
         return rules
     
 
+    def check_exists(self, rule):
+        for i, r in enumerate(self.rules):
+            if not nx.is_isomorphic(rule.subgraph, r.subgraph):
+                continue
+            if rule.embedding != r.embedding:
+                continue
+            if rule.upper != r.upper:
+                continue
+            return i
+        return None
+    
+
     @staticmethod
     def search_nts(cur, nts):
         res = list(filter(lambda x: cur.nodes[x]['label'] in nts, cur))
@@ -161,10 +175,11 @@ class EDNCEGrammar(NLCGrammar):
 
 
 class EDNCERule:
-    def __init__(self, nt, subgraph, embedding):
+    def __init__(self, nt, subgraph, embedding, upper):
         self.nt = nt
         self.subgraph = subgraph
         self.embedding = embedding
+        self.upper = upper
 
 
     def __call__(self, cur, node): 
@@ -278,6 +293,10 @@ class EDNCENode:
 
 
 class EDNCEModel(NLCModel):
+    def __init__(self, anno):
+        super().__init__(self)
+        self.seq = list(anno)
+
     def generate(self, grammar):
         breakpoint()
 
@@ -308,7 +327,7 @@ def equiv_class(graph, nodes, out_ns):
     return equiv, new_lookup
 
 
-def insets_and_outsets(graph, nodes, inset=True):
+def insets_and_outsets(graph, nodes):
     """
     Output a set of MUST connection instructions (inset)
     or IMPOSSIBLE connection instructions (outset)
@@ -348,8 +367,9 @@ def insets_and_outsets(graph, nodes, inset=True):
     # d = 'in' if num_in > num_out else 'out'
     
     # find equivalent neighbors
-    equiv, lookup = equiv_class(graph, nodes, out_ns)    
-    poss_dirs = list(product(*[['in','out'] for _ in equiv]))
+    lookup = {out_n: i for (i, out_n) in enumerate(out_ns)}
+    poss_dirs = list(product(*[['in','out'] for _ in out_ns])) # try every direction
+    poss_ps = list(product(*[NONFINAL for _ in out_ns])) # try every edge non-final label
 
     if 'ckt' in DATASET:
         ### for CKT ONLY
@@ -358,10 +378,9 @@ def insets_and_outsets(graph, nodes, inset=True):
         # if no path crosses nodes, then it's true
         # TODO: implement this
         pass
-
-    poss_ps = list(product(*[NONFINAL for _ in equiv]))
+    
     # naively, we need to enumerate, for every neighbor, the direction and edge label
-    # however, we know (inset & ouset) whenever there is ambiguity, i.e. for two identical neighbors n1 and n2
+    # however, we know (inset & outset) whenever there is ambiguity, i.e. for two identical neighbors n1 and n2
     # with same (node label, edge label, direction) then they need to connect with the same subset of nodes
     # for each (y1, y2) with same node labels that do not connect with the same subset of nodes, they can never
     # look identical, so we connect y1-y2 in our incompatibility graph    
@@ -411,29 +430,43 @@ def touching(graph, ismA, ismB):
 
 
 
-def find_iso(subgraph, graph):    
+def add_edge(i, j, ism_graph, isms):
+    ismA = isms[int(i.split('_')[0])]
+    ismB = isms[int(j.split('_')[0])]
+    touch = touching(graph, ismA, ismB)
+    inset_i = ism_graph.nodes[i]['ins']
+    outset_i = ism_graph.nodes[i]['out']
+    inset_j = ism_graph.nodes[j]['ins']
+    outset_j = ism_graph.nodes[j]['out']
+    overlap = (inset_i | inset_j) & (outset_i | outset_j)
+    if not touch and not overlap:
+        return (i, j)
+    else:
+        return []
+
+
+
+def find_iso(subgraph, graph, rule=None):
     gm = DiGraphMatcher(graph, subgraph, 
                       node_match=lambda d1, d2: d1.get('label','#')==d2.get('label','#'),
                       edge_match=lambda d1, d2: d1.get('label','#')==d2.get('label','#'))
     isms = list(gm.subgraph_isomorphisms_iter())  
     ism_graph = nx.Graph()    
     for i, ismA in enumerate(isms):
-        poss = insets_and_outsets(graph, ismA)        
+        poss = insets_and_outsets(graph, ismA)
         for (a, b) in poss:
             inset, outset, dirs, ps = poss[(a, b)]
+            if rule is not None:
+                inset = inset | rule.embedding
+                outset = outset & rule.upper
             if inset & outset:
-                continue
+                continue                
             ism_graph.add_node(f"{i}_{a}_{b}", ins=inset, out=outset, ism=list(ismA), dirs=dirs, ps=ps)
-    for i in ism_graph:
-        for j in ism_graph:
-            ismA = isms[int(i.split('_')[0])]
-            ismB = isms[int(j.split('_')[0])]
-            touch = touching(graph, ismA, ismB)
-            inset_i = ism_graph.nodes[i]['ins']
-            outset_i = ism_graph.nodes[i]['out']
-            inset_j = ism_graph.nodes[j]['ins']
-            outset_j = ism_graph.nodes[j]['out']
-            overlap = (inset_i | inset_j) & (outset_i | outset_j)
-            if not touch and not overlap:
-                ism_graph.add_edge(i, j)
+        
+    with mp.Manager() as manager:
+        graph_proxy = manager.dict(ism_graph=ism_graph, isms=isms)
+        with mp.Pool(10) as p:
+            res = p.starmap(add_edge, tqdm([(i, j, graph_proxy['ism_graph'], graph_proxy['isms']) for (i, j) in product(list(ism_graph), list(ism_graph))], desc="looping over pairs"))
+    for (i, j) in sum(res, []):
+        ism_graph.add_edge(i, j)
     return ism_graph
