@@ -1,3 +1,6 @@
 [submodule "Subdue"]
 	path = Subdue
 	url = https://github.com/holderlb/Subdue.git
+[submodule "D-VAE"]
+	path = D-VAE
+	url = https://github.com/muhanzhang/D-VAE.git
