@@ -430,7 +430,9 @@ def touching(graph, ismA, ismB):
 
 
 
-def add_edge(i, j, ism_graph, isms):
+def add_edge(i, j, graph, ism_graph, isms):
+    if int(i.split('_')[0]) == int(j.split('_')[0]):
+        return []
     ismA = isms[int(i.split('_')[0])]
     ismB = isms[int(j.split('_')[0])]
     touch = touching(graph, ismA, ismB)
@@ -440,7 +442,7 @@ def add_edge(i, j, ism_graph, isms):
     outset_j = ism_graph.nodes[j]['out']
     overlap = (inset_i | inset_j) & (outset_i | outset_j)
     if not touch and not overlap:
-        return (i, j)
+        return [(i, j)]
     else:
         return []
 
@@ -464,9 +466,12 @@ def find_iso(subgraph, graph, rule=None):
             ism_graph.add_node(f"{i}_{a}_{b}", ins=inset, out=outset, ism=list(ismA), dirs=dirs, ps=ps)
         
     with mp.Manager() as manager:
-        graph_proxy = manager.dict(ism_graph=ism_graph, isms=isms)
+        graph_proxy = manager.dict(graph=graph, ism_graph=ism_graph, isms=isms)
         with mp.Pool(10) as p:
-            res = p.starmap(add_edge, tqdm([(i, j, graph_proxy['ism_graph'], graph_proxy['isms']) for (i, j) in product(list(ism_graph), list(ism_graph))], desc="looping over pairs"))
-    for (i, j) in sum(res, []):
+            res = p.starmap(add_edge, tqdm([(i, j, graph_proxy['graph'], graph_proxy['ism_graph'], graph_proxy['isms']) \
+                for (i, j) in product(list(ism_graph), list(ism_graph))], desc="looping over pairs"))
+    edges = sum(res, [])
+    breakpoint()
+    for (i, j) in edges:
         ism_graph.add_edge(i, j)
     return ism_graph
