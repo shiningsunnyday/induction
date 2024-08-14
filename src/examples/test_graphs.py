@@ -207,7 +207,7 @@ def load_ckt():
     # print(best_i)
     gs = []
     gs_dict = {}
-    for i in tqdm(range(100)):
+    for i in tqdm(range(9000)):
         fpath = os.path.join(data_dir, f"{i}.json")
         data = json.load(open(fpath))
         g = json_graph.node_link_graph(data)

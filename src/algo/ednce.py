@@ -247,11 +247,11 @@ def learn_grammar(g):
     g, grammar, anno, iter = init_grammar(g, cache_iter, cache_path, EDNCEGrammar)
     while not term(g):
         iter += 1        
-        img_paths = partition_graph(g, iter)                         
+        img_paths = partition_graph(g, iter, NUM_PARTITON_SAMPLES_FOR_MOTIFS)
         all_subgraphs = obtain_motifs(g, img_paths)
         g, anno = compress(g, grammar, anno)
-        path = os.path.join(IMG_DIR, f'{METHOD}_{iter-1}_compress.png')
-        draw_graph(g, path)
+        # path = os.path.join(IMG_DIR, f'{METHOD}_{iter-1}_compress.png')
+        # draw_graph(g, path)
         best_ism, best_clique = find_embedding(all_subgraphs, g, find_iso=find_iso, edges=True)
         if best_ism is None:                        
             break

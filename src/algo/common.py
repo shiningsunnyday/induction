@@ -39,7 +39,7 @@ def obtain_motifs(g, img_paths):
     return all_subgraphs
 
 
-def partition_graph(g, iter):
+def partition_graph(g, iter, num_partitions=NUM_PARTITON_SAMPLES_FOR_MOTIFS):
     """
     Takes a graph g, splits into partition based on PARTITON_SIZE
     Visualizes one image per partition, and outputs the paths
@@ -48,8 +48,10 @@ def partition_graph(g, iter):
     """
     node_sets = list(nx.connected_components(nx.Graph(g)))
     if len(node_sets) > 1: # separate graphs
+        node_set_samples = np.random.choice(len(node_sets), NUM_COMPONENT_SAMPLES_FOR_MOTIFS)
         res = []
-        for i, node_set in enumerate(node_sets):
+        for i in node_set_samples:
+            node_set = node_sets[i]
             conn_g = copy_graph(g, node_set)
             conn_g = conn_g.__class__(conn_g)    
             assert len(set([n.split(':')[0] for n in conn_g])) == 1
@@ -61,7 +63,9 @@ def partition_graph(g, iter):
         
     img_paths = []
     all_nodes = list(g)
-    for i in range((len(g)+PARTITION_SIZE-1)//PARTITION_SIZE):
+    n = (len(g)+PARTITION_SIZE-1)//PARTITION_SIZE
+    partition_samples = np.random.choice(range(n), min(num_partitions, n), replace=False)
+    for i in partition_samples:
         start = PARTITION_SIZE*i
         nodes = all_nodes[start:start+PARTITION_SIZE]        
         one_hop_neis = neis(g, nodes)

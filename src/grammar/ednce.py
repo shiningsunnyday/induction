@@ -449,14 +449,32 @@ def add_edge(i, j, graph, ism_graph, isms):
         return [(i, j)]
     else:
         return []
+    
+
+
+def fast_subgraph_isomorphism(graph, subgraph, conn=None):    
+    assert nx.is_connected(nx.Graph(subgraph))
+    conns = list(nx.connected_components(nx.Graph(graph)))
+    if conn is not None:
+        assert len(conns) == 1
+        graph = copy_graph(graph, conn)
+    if len(conns) == 1:
+        gm = DiGraphMatcher(graph, subgraph, 
+                        node_match=lambda d1, d2: d1.get('label','#')==d2.get('label','#'),
+                        edge_match=lambda d1, d2: d1.get('label','#')==d2.get('label','#'))
+        isms = list(gm.subgraph_isomorphisms_iter())      
+        return isms
+    with mp.Manager() as manager:
+        proxy = manager.dict(graph=graph)
+        with mp.Pool(50) as p:
+            ans = p.starmap(fast_subgraph_isomorphism, tqdm([(proxy['graph'], subgraph, conn) for conn in conns], desc="subgraph isomorphism"))
+    ans = sum(ans, [])
+    return ans
 
 
 
 def find_iso(subgraph, graph, rule=None):
-    gm = DiGraphMatcher(graph, subgraph, 
-                      node_match=lambda d1, d2: d1.get('label','#')==d2.get('label','#'),
-                      edge_match=lambda d1, d2: d1.get('label','#')==d2.get('label','#'))
-    isms = list(gm.subgraph_isomorphisms_iter())  
+    isms = fast_subgraph_isomorphism(graph, subgraph)
     ism_graph = nx.Graph()    
     for i, ismA in enumerate(isms):
         poss = insets_and_outsets(graph, ismA)
