@@ -114,10 +114,11 @@ def approximate_best_clique(ism_subgraph):
     max_clique = []
     for ism_conn_subgraph in nx.connected_components(ism_subgraph):
         conn_subgraph = copy_graph(ism_subgraph, ism_conn_subgraph)                
-        if len(conn_subgraph) > 1000:
-            clique = greedy_max_clique(conn_subgraph)
-        else:
-            clique = list(nx.approximation.max_clique(conn_subgraph))
+        # if len(conn_subgraph) > 1000:
+        #     clique = greedy_max_clique(conn_subgraph)
+        # else:
+        print(f"approx max clique {len(conn_subgraph)} nodes {len(conn_subgraph.edges)} edges")
+        clique = list(nx.approximation.max_clique(conn_subgraph))
         if len(clique) > len(max_clique):
             max_clique = clique
         elif len(clique) == len(max_clique):  
@@ -130,11 +131,27 @@ def approximate_best_clique(ism_subgraph):
 
 
 
+def non_isomorphic(all_subgraphs):
+    subgraphs = []
+    for s in all_subgraphs:
+        exist = False
+        for s_ in subgraphs:
+            if nx.is_isomorphic(s, s_, node_match=lambda x,y:x['label']==y['label'], edge_match=lambda x,y:x['label']==y['label']):
+                exist = True
+                break
+        if not exist:
+            subgraphs.append(s)
+    return subgraphs
+
+
+
 def find_embedding(subgraphs, graph, find_iso, edges=False):
     # find_iso: a custom function that constructs the compat graph
     best_ism = None
     best_clique = None
     max_len = 0
+    # eliminate common subgraphs
+    subgraphs = non_isomorphic(subgraphs)
     for subgraph in tqdm(subgraphs, desc="looping over subgraphs"):
         # general concerns
         if len(subgraph) == 1:

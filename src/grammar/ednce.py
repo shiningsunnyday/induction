@@ -367,8 +367,17 @@ def insets_and_outsets(graph, nodes):
     # d = 'in' if num_in > num_out else 'out'
     
     # find equivalent neighbors
-    lookup = {out_n: i for (i, out_n) in enumerate(out_ns)}
-    poss_dirs = list(product(*[['in','out'] for _ in out_ns])) # try every direction
+    # lookup = {out_n: i for (i, out_n) in enumerate(out_ns)}
+    # poss_dirs = list(product(*[['in','out'] for _ in out_ns])) # try every direction
+    equiv, lookup = equiv_class(graph, nodes, out_ns)
+    poss_dirs = list(product(*[['in','out'] for _ in equiv]))
+    # naively, we need to enumerate, for every neighbor, the direction and edge label
+    # however, let's say there are two (out-)neighbors n1, n2 with same node label and same edge label+directions to n (in nodes)
+    # then it is always better for the poss dir of n2 to be the same as n1
+    # because if n2 is different, then this creates a redundant instruction in the inset
+    # similarly, let's say there are two neighbors n1, n2 with same node label that is not connected to n
+    # then it is always better for the poss dir of n2 to be the same as n1
+    # because if n2 is different, then this creates redundant instructions in the outset
     poss_ps = list(product(*[NONFINAL for _ in out_ns])) # try every edge non-final label
 
     if 'ckt' in DATASET:
@@ -379,11 +388,6 @@ def insets_and_outsets(graph, nodes):
         # TODO: implement this
         pass
     
-    # naively, we need to enumerate, for every neighbor, the direction and edge label
-    # however, we know (inset & outset) whenever there is ambiguity, i.e. for two identical neighbors n1 and n2
-    # with same (node label, edge label, direction) then they need to connect with the same subset of nodes
-    # for each (y1, y2) with same node labels that do not connect with the same subset of nodes, they can never
-    # look identical, so we connect y1-y2 in our incompatibility graph    
     poss = {}
     for a, dirs in enumerate(poss_dirs): # for each poss dirs
         for b, ps in enumerate(poss_ps): # for each poss edge labels
@@ -465,13 +469,13 @@ def find_iso(subgraph, graph, rule=None):
                 continue                
             ism_graph.add_node(f"{i}_{a}_{b}", ins=inset, out=outset, ism=list(ismA), dirs=dirs, ps=ps)
         
-    with mp.Manager() as manager:
-        graph_proxy = manager.dict(graph=graph, ism_graph=ism_graph, isms=isms)
-        with mp.Pool(10) as p:
-            res = p.starmap(add_edge, tqdm([(i, j, graph_proxy['graph'], graph_proxy['ism_graph'], graph_proxy['isms']) \
-                for (i, j) in product(list(ism_graph), list(ism_graph))], desc="looping over pairs"))
+    # with mp.Manager() as manager:
+    #     graph_proxy = manager.dict(graph=graph, ism_graph=ism_graph, isms=isms)
+    #     with mp.Pool(10) as p:
+    #         res = p.starmap(add_edge, tqdm([(i, j, graph_proxy['graph'], graph_proxy['ism_graph'], graph_proxy['isms']) \
+    #             for (i, j) in product(list(ism_graph), list(ism_graph))], desc="looping over pairs"))
+    res = tqdm([add_edge(i, j, graph, ism_graph, isms) for (i, j) in product(list(ism_graph), list(ism_graph))], desc="looping over pairs")
     edges = sum(res, [])
-    breakpoint()
     for (i, j) in edges:
         ism_graph.add_edge(i, j)
     return ism_graph
