@@ -1,4 +1,4 @@
-from src.config import METHOD, DATASET, GRAMMAR, IMG_DIR
+from src.config import METHOD, DATASET, GRAMMAR
 import importlib
 if 'api' in METHOD:
     grammar = importlib.import_module(f"src.algo.{GRAMMAR}")    
@@ -7,10 +7,8 @@ else:
 from src.examples import *
 from src.draw.color import to_hex, CMAP
 from src.draw.graph import draw_graph
-import os
 from src.config import RADIUS
 from argparse import ArgumentParser
-import pickle
 
 
 def load_data():
