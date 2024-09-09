@@ -4,3 +4,9 @@
 [submodule "D-VAE"]
 	path = D-VAE
 	url = https://github.com/muhanzhang/D-VAE.git
+[submodule "HRG"]
+	path = HRG
+	url = https://github.com/shiningsunnyday/HRG.git
+[submodule "my_data_efficient_grammar"]
+	path = my_data_efficient_grammar
+	url = https://github.com/gmh14/my_data_efficient_grammar.git
