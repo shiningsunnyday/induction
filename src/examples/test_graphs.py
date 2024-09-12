@@ -1,11 +1,17 @@
-from src.config import SEED, RADIUS, CKT_LOOKUP
+from src.config import *
 import networkx as nx
 import numpy as np
-import pygsp as gsp
-from pygsp import graphs
+
+# import pygsp as gsp
+# from pygsp import graphs
 import json
 from src.draw.color import to_hex, CMAP
-from src.grammar.ednce import EDNCEGrammar, EDNCERule
+import importlib
+
+if "api" in METHOD:
+    grammar = importlib.import_module(f"src.algo.{GRAMMAR}")
+else:
+    grammar = importlib.import_module(f"src.algo.mining.{GRAMMAR}")
 from src.draw.graph import draw_graph
 from networkx.readwrite import json_graph
 import os
@@ -13,27 +19,50 @@ from tqdm import tqdm
 from src.grammar.common import copy_graph
 
 
-LABELS = ['r','g','b','c']
+LABELS = ["r", "g", "b", "c"]
+
 
 def create_random_graph(labels=LABELS):
     g = nx.random_regular_graph(3, 20, seed=SEED)
     labels = np.random.choice(labels, size=(len(g),))
     for n, label in zip(g, labels):
-        g.nodes[n]['label'] = label
+        g.nodes[n]["label"] = label
     return g
 
 
 def create_test_graph(num):
     if num == 1:
         g = nx.Graph()
-        labels = ['r','g','b','c','r','r','g','b','c','b','g','r','c','b']
+        labels = ["r", "g", "b", "c", "r", "r", "g", "b", "c", "b", "g", "r", "c", "b"]
         labels[5], labels[6] = labels[6], labels[5]
         labels[8], labels[7] = labels[7], labels[8]
         labels[12], labels[10] = labels[10], labels[12]
-        labels[11], labels[10], labels[13], labels[12] = labels[12], labels[11], labels[10], labels[13]
-        edges = [(1, 2), (2, 3), (3, 4), (4, 1), (2, 5), (5, 6), (6, 7), (7, 8), (8, 9), (9, 6), (7, 10), (10, 11), (11, 12), (12, 13), (13, 14), (14, 11)]
+        labels[11], labels[10], labels[13], labels[12] = (
+            labels[12],
+            labels[11],
+            labels[10],
+            labels[13],
+        )
+        edges = [
+            (1, 2),
+            (2, 3),
+            (3, 4),
+            (4, 1),
+            (2, 5),
+            (5, 6),
+            (6, 7),
+            (7, 8),
+            (8, 9),
+            (9, 6),
+            (7, 10),
+            (10, 11),
+            (11, 12),
+            (12, 13),
+            (13, 14),
+            (14, 11),
+        ]
         for i in range(14):
-            g.add_node(i+1, label=labels[i])
+            g.add_node(i + 1, label=labels[i])
         for e in edges:
             g.add_edge(*e)
         g = nx.relabel_nodes(g, {n: n for n in g})
@@ -46,18 +75,18 @@ def create_minnesota():
     minn = graphs.Minnesota()
     g = minn.to_networkx()
     for n in g:
-        g.nodes[n]['label'] = 'r'
+        g.nodes[n]["label"] = "r"
     # draw_graph(g, os.path.join(IMG_DIR, 'base.png'))
     return g
 
 
 def load_cora():
     cwd = os.getcwd()
-    g = nx.node_link_graph(json.load(open(f'{cwd}/data/nx/cora.json')))
+    g = nx.node_link_graph(json.load(open(f"{cwd}/data/nx/cora.json")))
     # labels = list(set([g.nodes[n]['label'] for n in g]))
     # assert len(labels) == len(LABELS)
     # lookup = dict(zip(labels, LABELS))
-    
+
     conn = list(nx.connected_components(g))[0]
     print(len(conn), "nodes")
     g = copy_graph(g, conn)
@@ -73,29 +102,30 @@ def load_cora():
         # labels = ','.join(labels)
         # val = f"{val}_{labels}"
         if val not in lookup:
-            lookup[val] = len(lookup)    
-        g.nodes[n]['label'] = to_hex(CMAP(lookup[val]))    
+            lookup[val] = len(lookup)
+        g.nodes[n]["label"] = to_hex(CMAP(lookup[val]))
     assert len(lookup) <= CMAP.N, f"{len(lookup)} exceeds {CMAP.N} colors"
-    g = nx.relabel_nodes(g, {n: str(i+1) for i, n in enumerate(list(g))})
+    g = nx.relabel_nodes(g, {n: str(i + 1) for i, n in enumerate(list(g))})
     print(len(lookup), "labels")
     return g
 
 
-def create_house_graph(): 
+def create_house_graph():
     def construct_house(grammar, K):
         rule1 = grammar.rules[0]
         rule2 = grammar.rules[1]
         rule3 = grammar.rules[2]
         g = nx.DiGraph()
-        g.add_node('0', label='black')
+        g.add_node("0", label="black")
         K = 2
-        g = rule1(g, '0')    
+        g = rule1(g, "0")
         for k in range(K):
-            nt = grammar.search_nts(g, ['gray'])[0]
+            nt = grammar.search_nts(g, ["gray"])[0]
             g = rule2(g, nt)
-        nt = grammar.search_nts(g, ['gray'])[0]
-        g = rule3(g, nt)        
+        nt = grammar.search_nts(g, ["gray"])[0]
+        g = rule3(g, nt)
         return g
+
     # g = nx.DiGraph()
     # edge_list = [(0,1),(0,2,'red'),
     #              (1,2),
@@ -118,59 +148,59 @@ def create_house_graph():
     #         e = 'green'
     #     g.add_edge(a, b, label=e)
     # for n in g:
-    #     g.nodes[n]['label'] = 'cyan'    
+    #     g.nodes[n]['label'] = 'cyan'
     # in the textbook, edge labels are {h,r,a,b,*} where {h,r} are non-final
     # in the textbook, node labels are {S,X,#} where {S,X} are non-terminal
     # we do the mapping {h,r,a,b,*} -> {black,gray,red,blue,green}
     # {S,X,#} -> {black,gray,cyan}
     # (0,3,h)
-    grammar = EDNCEGrammar()
+    grammar = grammar.EDNCEGrammar()
     subg1 = nx.DiGraph()
-    subg1.add_node(0, label='cyan')
-    subg1.add_node(1, label='cyan')
-    subg1.add_node(2, label='cyan')
-    subg1.add_node(3, label='gray')
-    subg1.add_edge(0, 3, label='black')
-    subg1.add_edge(1, 0, label='blue')
-    subg1.add_edge(2, 1, label='green')
-    subg1.add_edge(2, 3, label='gray')
-    subg1.add_edge(3, 1, label='black')
-    rule1 = EDNCERule('black', subg1, set())
+    subg1.add_node(0, label="cyan")
+    subg1.add_node(1, label="cyan")
+    subg1.add_node(2, label="cyan")
+    subg1.add_node(3, label="gray")
+    subg1.add_edge(0, 3, label="black")
+    subg1.add_edge(1, 0, label="blue")
+    subg1.add_edge(2, 1, label="green")
+    subg1.add_edge(2, 3, label="gray")
+    subg1.add_edge(3, 1, label="black")
+    rule1 = grammar.EDNCERule("black", subg1, set())
     grammar.add_rule(rule1)
     subg2 = nx.DiGraph()
-    subg2.add_node(0, label='cyan')
-    subg2.add_node(1, label='cyan')
-    subg2.add_node(2, label='cyan')
-    subg2.add_node(3, label='cyan')
-    subg2.add_node(4, label='gray')
-    subg2.add_edge(0, 1, label='green')
-    subg2.add_edge(1, 4, label='black')
-    subg2.add_edge(2, 1, label='green')
-    subg2.add_edge(3, 4, label='gray')
-    subg2.add_edge(4, 2, label='black')
+    subg2.add_node(0, label="cyan")
+    subg2.add_node(1, label="cyan")
+    subg2.add_node(2, label="cyan")
+    subg2.add_node(3, label="cyan")
+    subg2.add_node(4, label="gray")
+    subg2.add_edge(0, 1, label="green")
+    subg2.add_edge(1, 4, label="black")
+    subg2.add_edge(2, 1, label="green")
+    subg2.add_edge(3, 4, label="gray")
+    subg2.add_edge(4, 2, label="black")
     emb2 = set()
-    emb2.add(('cyan', 'black', 'green', 0, 'in', 'in'))
-    emb2.add(('cyan', 'black', 'red', 1, 'in', 'in'))
-    emb2.add(('cyan', 'black', 'red', 2, 'out', 'out'))
-    emb2.add(('cyan', 'gray', 'red', 3, 'in', 'in'))
+    emb2.add(("cyan", "black", "green", 0, "in", "in"))
+    emb2.add(("cyan", "black", "red", 1, "in", "in"))
+    emb2.add(("cyan", "black", "red", 2, "out", "out"))
+    emb2.add(("cyan", "gray", "red", 3, "in", "in"))
     subg3 = nx.DiGraph()
-    subg3.add_node(0, label='cyan')
-    subg3.add_node(1, label='cyan')
-    subg3.add_node(2, label='cyan')
-    subg3.add_node(3, label='cyan')
-    subg3.add_edge(0, 1, label='green')
-    subg3.add_edge(2, 1, label='green')
-    subg3.add_edge(3, 2, label='blue')
+    subg3.add_node(0, label="cyan")
+    subg3.add_node(1, label="cyan")
+    subg3.add_node(2, label="cyan")
+    subg3.add_node(3, label="cyan")
+    subg3.add_edge(0, 1, label="green")
+    subg3.add_edge(2, 1, label="green")
+    subg3.add_edge(3, 2, label="blue")
     emb3 = emb2
-    rule2 = EDNCERule('gray', subg2, emb2)
-    rule3 = EDNCERule('gray', subg3, emb3)
+    rule2 = grammar.EDNCERule("gray", subg2, emb2)
+    rule3 = grammar.EDNCERule("gray", subg3, emb3)
     grammar.add_rule(rule2)
     grammar.add_rule(rule3)
     g = nx.DiGraph()
     for size in [4]:
         house = construct_house(grammar, size)
         g = nx.disjoint_union(g, house)
-    g = nx.relabel_nodes(g, {n: str(i+1) for i, n in enumerate(list(g))})
+    g = nx.relabel_nodes(g, {n: str(i + 1) for i, n in enumerate(list(g))})
     return g
 
 
@@ -186,21 +216,20 @@ def union(gs, gs_dict={}):
     return whole_g
 
 
-
 def load_ckt():
     """
     Load all ckts, and do union over all the graphs
     Combine graph-level attrs of individual graphs into a graph-level attr lookup
     """
     cwd = os.getcwd()
-    data_dir = f'{cwd}/data/nx/ckt/'
+    data_dir = f"{cwd}/data/nx/ckt/"
     whole_g = nx.DiGraph()
     best_i = 0
     max_size = 0
     # for i in range(9000):
     #     fpath = os.path.join(data_dir, f"{i}.json")
     #     data = json.load(open(fpath))
-    #     g = json_graph.node_link_graph(data) 
+    #     g = json_graph.node_link_graph(data)
     #     if len(g) > max_size:
     #         max_size = len(g)
     #         best_i = i
@@ -212,100 +241,95 @@ def load_ckt():
         data = json.load(open(fpath))
         g = json_graph.node_link_graph(data)
         lookup = CKT_LOOKUP
-        for n in g:        
-            g.nodes[n]['type'] = list(lookup)[g.nodes[n]['type']]
-            g.nodes[n]['label'] = lookup[g.nodes[n]['type']]
+        for n in g:
+            g.nodes[n]["type"] = list(lookup)[g.nodes[n]["type"]]
+            g.nodes[n]["label"] = lookup[g.nodes[n]["type"]]
         for e in g.edges:
-            g.edges[e]['label'] = 'black'
+            g.edges[e]["label"] = "black"
         for attr in g.graph:
-            if attr == 'index':
+            if attr == "index":
                 continue
-            gs_dict[f"{i}:{attr}"] = g.graph[attr]        
-        node_map = {n: f"{i}:{n}" for n in g}        
+            gs_dict[f"{i}:{attr}"] = g.graph[attr]
+        node_map = {n: f"{i}:{n}" for n in g}
         g = nx.relabel_nodes(g, node_map)
         gs.append(g)
     whole_g = union(gs, gs_dict)
     return whole_g
 
 
-
-def convert_and_write(samples, path):           
+def convert_and_write(samples, path):
     for i, sample in enumerate(samples):
-        new_path = path.replace('.txt', f'_{i}.txt')        
+        new_path = path.replace(".txt", f"_{i}.txt")
         # relabel types according to subckt
         label_relabel = {
-                        'yellow': 2,
-                        'lawngreen': 3,
-                        'cyan': 6,
-                        'lightblue': 7,
-                        'deepskyblue': 8,
-                        'dodgerblue': 9,
-                        'orchid': 0,
-                        'pink': 1
-                        }
+            "yellow": 2,
+            "lawngreen": 3,
+            "cyan": 6,
+            "lightblue": 7,
+            "deepskyblue": 8,
+            "dodgerblue": 9,
+            "orchid": 0,
+            "pink": 1,
+        }
         ntype_lookup = {
-                        'yellow': 0,
-                        'lawngreen': 1,
-                        'cyan': 2,
-                        'lightblue': 3,
-                        'deepskyblue': 4,
-                        'dodgerblue': 5,
-                        'orchid': 8,
-                        'pink': 9
+            "yellow": 0,
+            "lawngreen": 1,
+            "cyan": 2,
+            "lightblue": 3,
+            "deepskyblue": 4,
+            "dodgerblue": 5,
+            "orchid": 8,
+            "pink": 9,
         }
         label_relabel_inv = {v: k for (k, v) in label_relabel.items()}
         for n in sample:
-            sample.nodes[n]['label'] = label_relabel[sample.nodes[n]['label']]
-        input = next(n for n in sample if sample.nodes[n]['label'] == 0)
-        output = next(n for n in sample if sample.nodes[n]['label'] == 1)
+            sample.nodes[n]["label"] = label_relabel[sample.nodes[n]["label"]]
+        input = next(n for n in sample if sample.nodes[n]["label"] == 0)
+        output = next(n for n in sample if sample.nodes[n]["label"] == 1)
         relabel_map = {}
         relabel_map[input] = 0
         relabel_map[output] = 1
         index = 2
         stage = 0
         for n in sample:
-            if sample.nodes[n]['label'] in [6,7,8,9]:
+            if sample.nodes[n]["label"] in [6, 7, 8, 9]:
                 relabel_map[n] = index
                 index += 1
                 stage += 1
         if stage not in [2, 3]:
             continue
-        f = open(new_path, 'w+')
+        f = open(new_path, "w+")
         for n in sample:
             if n not in relabel_map:
                 relabel_map[n] = index
-                index += 1        
-        sample = nx.relabel_nodes(sample, relabel_map)        
+                index += 1
+        sample = nx.relabel_nodes(sample, relabel_map)
         f.write(f"{len(sample)} {len(sample)} {stage}\n")
         sample = copy_graph(sample, range(len(sample)))
         for n in sample:
-            type_ = sample.nodes[n]['label']
+            type_ = sample.nodes[n]["label"]
             preds = list(sample.predecessors(n))
-            pred_str = ' '.join(map(str, preds))
+            pred_str = " ".join(map(str, preds))
             num_preds = len(preds)
-            if n == 0:                
+            if n == 0:
                 f.write(f"0 0 0 0 0 1 8 0 1\n")
             elif n == 1:
                 f.write(f"{type_} {n} {n} {num_preds} {pred_str} 1 9 0 1\n")
             else:
-                labels = ['-1'] + ['11.11' for _ in preds] + ['-1']
-                label_str = ' '.join(labels)
+                labels = ["-1"] + ["11.11" for _ in preds] + ["-1"]
+                label_str = " ".join(labels)
                 f.write(f"{type_} {n} {n} {num_preds} {pred_str} {label_str}\n")
-        f.write('\n')
+        f.write("\n")
         f.close()
-            
-            
-
-
 
 
 def debug():
     g = nx.Graph()
-    g.add_node(0, label='#e1d8e1ff')
-    g.add_node(1, label='#97b6c7ff')
-    g.add_node(2, label='#97b6c7ff')
-    g.add_node(3, label='#e1d8e1ff')
-    g.add_edge(0,1)
-    g.add_edge(2,1)
-    g.add_edge(2,3)    
+    g.add_node(0, label="#e1d8e1ff")
+    g.add_node(1, label="#97b6c7ff")
+    g.add_node(2, label="#97b6c7ff")
+    g.add_node(3, label="#e1d8e1ff")
+    g.add_edge(0, 1)
+    g.add_edge(2, 1)
+    g.add_edge(2, 3)
     return g

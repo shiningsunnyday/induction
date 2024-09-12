@@ -1,9 +1,5 @@
 from src.config import METHOD, DATASET, GRAMMAR
 import importlib
-if 'api' in METHOD:
-    grammar = importlib.import_module(f"src.algo.{GRAMMAR}")    
-else:
-    grammar = importlib.import_module(f"src.algo.mining.{GRAMMAR}")
 from src.examples import *
 from src.draw.color import to_hex, CMAP
 from src.draw.graph import draw_graph
@@ -22,19 +18,21 @@ def load_data():
         g = create_house_graph()
     elif DATASET == 'ckt':
         g = load_ckt()
+    elif DATASET == 'mol':
+        g = 'ClC1=C(Cl)C2(Cl)C3C4CC(C5OC45)C3C1(Cl)C2(Cl)Cl'
     else:
         raise NotImplementedError
     return g
 
 
 
-def main(args):    
+def main(args):
     g = load_data() 
     # gr, _, _ = pickle.load(open(f'{os.getcwd()}/cache/api_ckt_ednce/12.pkl', 'rb'))
     gr, model = grammar.learn_grammar(g)
     # grammar, model = nlc.learn_grammar(g)
     # grammar, model = mining.learn_stochastic_grammar(g)
-    model.generate(gr)
+    # model.generate(gr)
     samples = gr.generate()
     # path = f"{os.getcwd()}/data/api_ckt_ednce/samples.txt"
     # convert_and_write(samples, path)
@@ -45,5 +43,4 @@ def main(args):
 if __name__ == "__main__":        
     parser = ArgumentParser()
     args = parser.parse_args()
-    breakpoint()
     main(args)
