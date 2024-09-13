@@ -1,5 +1,6 @@
 import os
 import sys
+
 wd = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
 sys.path.append(wd)
 import networkx as nx
@@ -27,38 +28,38 @@ class HRG_rule:
         self.symbol = symbol
         self.rhs: HG = rhs
 
-    def __call__(self, hg, edge):        
+    def __call__(self, hg, edge):
         if isinstance(edge, tuple):
             index, cand_index = edge
             assert index in self.vocab
             cands = hg.get_cands(index)
             assert cand_index < len(cands)
             index = cands[cand_index]
-        else:            
+        else:
             assert isinstance(edge, int)
             assert edge < len(hg.E)
             index = edge
-        assert hg.E[index].get_type(self.vocab) == self.vocab[self.symbol]        
+        assert hg.E[index].get_type(self.vocab) == self.vocab[self.symbol]
         # Step 1: Remove from hg.E
         he = hg.remove_hyperedge(index)
-        print(f"removing {he.nodes}")    
+        # print(f"removing {he.nodes}")
         # Step 2: Add rhs
         # Step 3: Fuse rhs.ext with he.nodes
         node_map = {}
-        for n in self.rhs.V:                        
-            if n.id[0] == 'e':
+        for n in self.rhs.V:
+            if n.id[0] == "e":
                 continue
             hg_n = hg.add_node(n.label, **n.kwargs)
             node_map[n.id] = hg_n
         for i, e in enumerate(self.rhs.ext):
-            node_map[e.id] = he.nodes[i]     
-       # for each node in rhs.ext, sample its adj atoms from he
+            node_map[e.id] = he.nodes[i]
+        # for each node in rhs.ext, sample its adj atoms from he
         # for e, n in zip(he.nodes, self.rhs.ext):
         #     atom_cts = self.rhs.adj_atoms(n.id)
         #     e_atoms = hg.adj_atoms(e, count=False)
         #     for a, c in atom_cts.items():
         #         to_del += list(np.random.choice(e_atoms[a], c, replace=False))
-        for i in range(len(hg.E)-1,-1,-1):
+        for i in range(len(hg.E) - 1, -1, -1):
             e = hg.E[i]
             if set(e.nodes) & set(he.nodes) == set(e.nodes):
                 hg.remove_hyperedge(i)
@@ -68,8 +69,8 @@ class HRG_rule:
                 continue
             # any edges connecting only the anchors should be ignored
             hg.add_hyperedge(mapped_n, e.label, **e.kwargs)
-        # remove edges consisting of only anchors                  
-        
+        # remove edges consisting of only anchors
+
         return hg
 
 
@@ -107,9 +108,9 @@ class HRG:
 class Node:
     def __init__(self, id, label, **kwargs):
         assert isinstance(id, str)
-        self.id : str = id
+        self.id: str = id
         self.label = label
-        self.kwargs : Dict = kwargs
+        self.kwargs: Dict = kwargs
 
 
 class HG:
@@ -130,58 +131,55 @@ class HG:
         """
         self.V: list[Node] = []  # finite set of nodes
         self.E: list[Hyperedge] = []  # finite set of hyperedges, contains att, lab
-        self.ext: list[Node] = []  # pairwise distinct external nodes        
-        self.node_index_lookup = {}        
-        self.adj_edges = np.zeros((0, 0)) 
-        self.mapping = {} # mapping to preserve node ids before being marked as ext
+        self.ext: list[Node] = []  # pairwise distinct external nodes
+        self.node_index_lookup = {}
+        self.adj_edges = np.zeros((0, 0))
+        self.mapping = {}  # mapping to preserve node ids before being marked as ext
         for i in range(num_nodes):
             if node_labels is None:
                 nl = {}
-                self.add_node('', **nl)
+                self.add_node("", **nl)
             else:
-                nl = node_labels[i]            
-                assert 'label' in nl
+                nl = node_labels[i]
+                assert "label" in nl
                 self.add_node(**nl)
 
         for i in range(len(exts)):
             self.add_ext(exts[i])
-        
-                    
+
     def get_cands(self, index):
         cands = [i for i in range(len(self.E)) if self.E[i].label == index]
         return cands
 
-
     @staticmethod
     def edge_type(e):
         return len(e)
-
 
     @property
     def type(self):
         return len(self.ext)
 
     def add_node(self, label, **kwargs):
-        print(f"add hyperedge, adj_edges shape {self.adj_edges.shape}, len(self.E) {len(self.E)}")
-        id = max([int(v.id[1:]) for v in self.V])+1 if self.V else 0
+        # print(f"add hyperedge, adj_edges shape {self.adj_edges.shape}, len(self.E) {len(self.E)}")
+        id = max([int(v.id[1:]) for v in self.V]) + 1 if self.V else 0
         n = f"n{id}"
         self.V.append(Node(n, label, **kwargs))
-        self.node_index_lookup[n] = len(self.V)-1
-        new_adj_edges = np.pad(self.adj_edges, [(0,1),(0,0)])
+        self.node_index_lookup[n] = len(self.V) - 1
+        new_adj_edges = np.pad(self.adj_edges, [(0, 1), (0, 0)])
         assert new_adj_edges.shape[0] == len(self.V)
         assert self.adj_edges.shape[1] == new_adj_edges.shape[1]
         self.adj_edges = new_adj_edges
-        print(f"add hyperedge, adj_edges shape {self.adj_edges.shape}, len(self.E) {len(self.E)}")
+        # print(f"add hyperedge, adj_edges shape {self.adj_edges.shape}, len(self.E) {len(self.E)}")
         return n
-    
-    def adj_atoms(self, node, count=True):        
+
+    def adj_atoms(self, node, count=True):
         adj = self.adj_edges[self.node_index_lookup[node]]
-        adj = np.argwhere(adj).flatten()        
+        adj = np.argwhere(adj).flatten()
         if count:
             labels = [self.E[i].label for i in adj]
             ctr = {}
             for l in labels:
-                ctr[l] = ctr.get(l, 0)+1
+                ctr[l] = ctr.get(l, 0) + 1
         else:
             ctr = {}
             for i in adj:
@@ -189,7 +187,6 @@ class HG:
                 ctr[l] = ctr.get(l, []) + [i]
         return ctr
 
-        
     def add_ext(self, n):
         # has to be one of self.V
         # always number from e0, e1, ...
@@ -203,24 +200,22 @@ class HG:
         node.id = new_name
         self.ext.append(node)
 
-    def add_hyperedge(self, nodes, label, **kwargs):   
-        print(f"add hyperedge, adj_edges shape {self.adj_edges.shape}, len(self.E) {len(self.E)}")
+    def add_hyperedge(self, nodes, label, **kwargs):
+        # print(f"add hyperedge, adj_edges shape {self.adj_edges.shape}, len(self.E) {len(self.E)}")
         nodes = [self.mapping[n] if n in self.mapping else n for n in nodes]
-        edge = Hyperedge(nodes, label, **kwargs)  
-        print(self.adj_edges)
-        new_adj_edges = np.pad(self.adj_edges, [(0,0),(0,1)])
+        edge = Hyperedge(nodes, label, **kwargs)
+        # print(self.adj_edges)
+        new_adj_edges = np.pad(self.adj_edges, [(0, 0), (0, 1)])
         for node in nodes:
             new_adj_edges[self.node_index_lookup[node], -1] = 1
         self.E.append(edge)
         assert new_adj_edges.shape[1] == len(self.E)
         self.adj_edges = new_adj_edges
-        print(f"add hyperedge, adj_edges shape {self.adj_edges.shape}, len(self.E) {len(self.E)}")
+        # print(f"add hyperedge, adj_edges shape {self.adj_edges.shape}, len(self.E) {len(self.E)}")
 
-    
-    def remove_hyperedge(self, index):        
+    def remove_hyperedge(self, index):
         self.adj_edges = np.delete(self.adj_edges, index, -1)
         return self.E.pop(index)
-        
 
     def visualize(self, path):
         """
@@ -273,73 +268,53 @@ class HG:
             g, pos, {n: n for n in ext_nodes}, font_color="white", ax=ax
         )
         nx.draw_networkx_labels(
-            g, pos, {n: n+' '+g.nodes[n]["label"] for n in h_nodes}, ax=ax
+            g, pos, {n: n + " " + g.nodes[n]["label"] for n in h_nodes}, ax=ax
         )
         fig.savefig(path)
         print(os.path.abspath(path))
 
 
 if __name__ == "__main__":
-    vocab = {'S': 2,
-             'A': 4,
-             'a': None,
-             'b': None,
-             'c': None}
+    vocab = {"S": 2, "A": 4, "a": None, "b": None, "c": None}
     hrg = HRG(["S", "A"], ["a", "b", "c"], "S", vocab)
-    rhs_1 = HG(4+2, range(4,4+2))
+    rhs_1 = HG(4 + 2, range(4, 4 + 2))
     rhs_1.add_hyperedge(["e0", "n0"], "a")
     rhs_1.add_hyperedge(["n1", "n2"], "b")
     rhs_1.add_hyperedge(["n2", "n3"], "c")
     rhs_1.add_hyperedge(["n0", "n1", "n3", "e1"], "A")
     rule_1 = HRG_rule("S", rhs_1, vocab)
-    rhs_1.visualize(
-        f"{wd}/data/api_mol_hg/rhs_rule_1.png"
-    )
-    rhs_2 = HG(2+2, range(2,2+2))
+    rhs_1.visualize(f"{wd}/data/api_mol_hg/rhs_rule_1.png")
+    rhs_2 = HG(2 + 2, range(2, 2 + 2))
     rhs_2.add_hyperedge(["e0", "n0"], "a")
     rhs_2.add_hyperedge(["n0", "n1"], "b")
     rhs_2.add_hyperedge(["n1", "e1"], "c")
     rule_2 = HRG_rule("S", rhs_2, vocab)
-    rhs_2.visualize(
-        f"{wd}/data/api_mol_hg/rhs_rule_2.png"
-    )    
-    rhs_3 = HG(3+4, range(3,3+4))
+    rhs_2.visualize(f"{wd}/data/api_mol_hg/rhs_rule_2.png")
+    rhs_3 = HG(3 + 4, range(3, 3 + 4))
     rhs_3.add_hyperedge(["e0", "n0"], "a")
     rhs_3.add_hyperedge(["n1", "e1"], "b")
     rhs_3.add_hyperedge(["e2", "n2"], "c")
     rhs_3.add_hyperedge(["n0", "n1", "n2", "e3"], "A")
     rule_3 = HRG_rule("A", rhs_3, vocab)
-    rhs_3.visualize(
-        f"{wd}/data/api_mol_hg/rhs_rule_3.png"
-    )    
-    rhs_4 = HG(1+4, range(1,1+4))
+    rhs_3.visualize(f"{wd}/data/api_mol_hg/rhs_rule_3.png")
+    rhs_4 = HG(1 + 4, range(1, 1 + 4))
     rhs_4.add_hyperedge(["e0", "n0"], "a")
     rhs_4.add_hyperedge(["n0", "e1"], "b")
     rhs_4.add_hyperedge(["e2", "e3"], "c")
     rule_4 = HRG_rule("A", rhs_4, vocab)
-    rhs_4.visualize(
-        f"{wd}/data/api_mol_hg/rhs_rule_4.png"
-    )    
+    rhs_4.visualize(f"{wd}/data/api_mol_hg/rhs_rule_4.png")
     hrg.add_rule(rule_1)
     hrg.add_rule(rule_2)
     hrg.add_rule(rule_3)
     hrg.add_rule(rule_4)
-    hg = HG(0+2, range(0,0+2))
+    hg = HG(0 + 2, range(0, 0 + 2))
     hg.add_hyperedge(["e0", "e1"], "S")
-    hg.visualize(
-        f"{wd}/data/api_mol_hg/test_0.png"
-    )
-    hg = rule_1(hg, ('S', 0))
-    hg.visualize(
-        f"{wd}/data/api_mol_hg/test_1.png"
-    )
+    hg.visualize(f"{wd}/data/api_mol_hg/test_0.png")
+    hg = rule_1(hg, ("S", 0))
+    hg.visualize(f"{wd}/data/api_mol_hg/test_1.png")
     N = 2
     for i in range(N - 1):
         hg = rule_3(hg, ("A", 0))
-        hg.visualize(
-            f"{wd}/data/api_mol_hg/test_{i+2}.png"
-        )
+        hg.visualize(f"{wd}/data/api_mol_hg/test_{i+2}.png")
     hg = rule_4(hg, ("A", 0))
-    hg.visualize(
-        f"{wd}/data/api_mol_hg/test_final.png"
-    )
+    hg.visualize(f"{wd}/data/api_mol_hg/test_final.png")

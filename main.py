@@ -19,7 +19,7 @@ def load_data():
     elif DATASET == 'ckt':
         g = load_ckt()
     elif DATASET == 'mol':
-        g = 'ClC1=C(Cl)C2(Cl)C3C4CC(C5OC45)C3C1(Cl)C2(Cl)Cl'
+        g = read_file('/home/msun415/polymer_walk/datasets/PTC.txt')        
     else:
         raise NotImplementedError
     return g
@@ -43,4 +43,5 @@ def main(args):
 if __name__ == "__main__":        
     parser = ArgumentParser()
     args = parser.parse_args()
+    breakpoint()
     main(args)

@@ -257,6 +257,18 @@ def load_ckt():
     return whole_g
 
 
+def read_file(filename, num_samples=3):
+    smiles_list = []
+    with open(filename) as f:
+        lines = f.readlines()
+        samples = np.random.choice(range(len(lines)), (num_samples,), replace=False)
+        print("samples", samples)
+        for l in samples:
+            line = lines[l]
+            smiles_list.append(line.split(",")[0])
+    return smiles_list
+
+
 def convert_and_write(samples, path):
     for i, sample in enumerate(samples):
         new_path = path.replace(".txt", f"_{i}.txt")
