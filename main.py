@@ -5,6 +5,7 @@ from src.draw.color import to_hex, CMAP
 from src.draw.graph import draw_graph
 from src.config import RADIUS
 from argparse import ArgumentParser
+import pickle
 
 
 def load_data():
@@ -30,11 +31,15 @@ def main(args):
     g = load_data() 
     # gr, _, _ = pickle.load(open(f'{os.getcwd()}/cache/api_ckt_ednce/12.pkl', 'rb'))
     gr, model = grammar.learn_grammar(g)
+    breakpoint()
     # grammar, model = nlc.learn_grammar(g)
     # grammar, model = mining.learn_stochastic_grammar(g)
     # model.generate(gr)
-    samples = gr.generate()
+    # gr = pickle.load(open(os.path.join(IMG_DIR, 'grammar.pkl'), 'rb'))
+    # samples = gr.generate()
     # path = f"{os.getcwd()}/data/api_ckt_ednce/samples.txt"
+    # path = os.path.join(IMG_DIR, 'smiles.txt')
+    # write_file(samples, path)
     # convert_and_write(samples, path)
     
     
@@ -43,5 +48,4 @@ def main(args):
 if __name__ == "__main__":        
     parser = ArgumentParser()
     args = parser.parse_args()
-    breakpoint()
     main(args)

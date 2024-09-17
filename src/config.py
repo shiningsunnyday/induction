@@ -1,4 +1,19 @@
 import os
+import logging
+
+def create_logger(name, log_file, level=logging.INFO):
+    l = logging.getLogger(name)
+    formatter = logging.Formatter(
+        '[%(asctime)s][%(filename)15s][line:%(lineno)4d][%(levelname)8s] %(message)s')
+    fh = logging.FileHandler(log_file)
+    fh.setFormatter(formatter)
+    sh = logging.StreamHandler()
+    sh.setFormatter(formatter)
+    l.setLevel(level)
+    l.addHandler(fh)
+    l.addHandler(sh)
+    return l
+
 
 wd = os.getcwd()
 
@@ -10,6 +25,10 @@ MODEL = "gpt-4o"
 FILE_NAME = f"{wd}/data/{METHOD}_{DATASET}_{GRAMMAR}.txt"
 IMG_DIR = f"{wd}/data/{METHOD}_{DATASET}_{GRAMMAR}/"
 CACHE_DIR = f"{wd}/cache/{METHOD}_{DATASET}_{GRAMMAR}/"
+LOGGER = create_logger('global_logger', f"{wd}/data/{METHOD}_{DATASET}_{GRAMMAR}.log")
+
+NUM_THREADS = 1
+NUM_PROCS = 50
 
 TOP_DIFF = 30
 SEED = 5

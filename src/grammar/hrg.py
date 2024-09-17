@@ -28,7 +28,7 @@ class HRG_rule:
         self.symbol = symbol
         self.rhs: HG = rhs
 
-    def __call__(self, hg, edge):
+    def __call__(self, hg, edge, match_info=None):
         if isinstance(edge, tuple):
             index, cand_index = edge
             assert index in self.vocab
@@ -39,38 +39,76 @@ class HRG_rule:
             assert isinstance(edge, int)
             assert edge < len(hg.E)
             index = edge
+        remove_edges = []
         assert hg.E[index].get_type(self.vocab) == self.vocab[self.symbol]
         # Step 1: Remove from hg.E
-        he = hg.remove_hyperedge(index)
+        old_e = {}
+        for ei in range(len(hg.E)):
+            old_e[f"h{ei}"] = hg.E[ei].nodes
+        he = hg.E[index]
+        remove_edges.append(index)
+        # # also remove any TERMINAL edges with the same nodes as he
+        for i in range(len(hg.E)-1,-1,-1):            
+            if set(hg.E[i].nodes) == set(he.nodes) and hg.E[i].label[0] != '(':
+                remove_edges.append(i)
         # print(f"removing {he.nodes}")
         # Step 2: Add rhs
         # Step 3: Fuse rhs.ext with he.nodes
-        node_map = {}
-        for n in self.rhs.V:
-            if n.id[0] == "e":
-                continue
+        node_map = {}        
+        if match_info is not None:
+            inv_match_info = dict(zip(match_info.values(), match_info.keys()))
+        for n in self.rhs.V:            
+            if match_info is None:
+                if n.id[0] == "e":
+                    continue
+            if match_info is not None:
+                if n.id in inv_match_info:
+                    hg_n = inv_match_info[n.id]
+                    node_map[n.id] = hg_n
+                    continue
             hg_n = hg.add_node(n.label, **n.kwargs)
-            node_map[n.id] = hg_n
-        for i, e in enumerate(self.rhs.ext):
-            node_map[e.id] = he.nodes[i]
+            node_map[n.id] = hg_n        
+        for i, e in enumerate(self.rhs.ext):            
+            if match_info is not None:
+                node_map[e.id] = inv_match_info[e.id]
+            else:
+                node_map[e.id] = he.nodes[i]
         # for each node in rhs.ext, sample its adj atoms from he
         # for e, n in zip(he.nodes, self.rhs.ext):
         #     atom_cts = self.rhs.adj_atoms(n.id)
         #     e_atoms = hg.adj_atoms(e, count=False)
         #     for a, c in atom_cts.items():
-        #         to_del += list(np.random.choice(e_atoms[a], c, replace=False))
-        for i in range(len(hg.E) - 1, -1, -1):
-            e = hg.E[i]
-            if set(e.nodes) & set(he.nodes) == set(e.nodes):
-                hg.remove_hyperedge(i)
-        for e in self.rhs.E:
+        #         to_del += list(np.random.choice(e_atoms[a], c, replace=False))    
+        # breakpoint()
+        # if match_info is not None:
+        #     remove_edges = sorted([int(n[1:]) for n in match_info if n[0]=='h'], reverse=True)
+        #     for i in remove_edges:
+        #         if i > index:
+        #             i = i-1
+        #         hg.E[i].nodes # add this back!
+        #         hg.remove_hyperedge(i)        
+        for ei, e in enumerate(self.rhs.E):
             mapped_n = [node_map[n] for n in e.nodes]
-            if set(mapped_n) & set(he.nodes) == set(mapped_n):
-                continue
-            # any edges connecting only the anchors should be ignored
+            if match_info is not None:
+                if f"h{ei}" in inv_match_info:
+                    old_e_nodes = old_e[inv_match_info[f"h{ei}"]]
+                    if set(mapped_n).issubset(old_e_nodes): # don't dup
+                        continue
+                    elif set(old_e_nodes).issubset(mapped_n): # remove old edge                        
+                        remove_edges.append(int(inv_match_info[f"h{ei}"][1:]))
+            # if set(mapped_n) & set(he.nodes) == set(mapped_n):
+            #     continue
+            # old_edges = [i for i in range(len(hg.E)) if set(hg.E[i].nodes) == set(mapped_n)]
+            # if len(old_edges) > 1:
+            #     breakpoint()
+            # for i in sorted(old_edges, reverse=True):
+            #     hg.remove_hyperedge(i)
+            # any edges connecting only the anchors should be ignored            
             hg.add_hyperedge(mapped_n, e.label, **e.kwargs)
+            # find any counterpart to remove
         # remove edges consisting of only anchors
-
+        for ei in sorted(list(set(remove_edges)), reverse=True):
+            hg.remove_hyperedge(ei)
         return hg
 
 
@@ -169,7 +207,7 @@ class HG:
         assert new_adj_edges.shape[0] == len(self.V)
         assert self.adj_edges.shape[1] == new_adj_edges.shape[1]
         self.adj_edges = new_adj_edges
-        # print(f"add hyperedge, adj_edges shape {self.adj_edges.shape}, len(self.E) {len(self.E)}")
+        # print(f"add hyperedge, adj_edges shape {self.adj_edges.shape}, len(self.E) {len(self.E)}")    
         return n
 
     def adj_atoms(self, node, count=True):
@@ -211,13 +249,18 @@ class HG:
         self.E.append(edge)
         assert new_adj_edges.shape[1] == len(self.E)
         self.adj_edges = new_adj_edges
+        # import glob
+        # import re
+        # d = max([int(re.match('/home/msun415/test_(\d+).png', a).groups()[0]) if re.match('/home/msun415/test_(\d+).png', a) is not None else -1 for a in glob.glob(f'/home/msun415/test_*.png')])
+        # self.visualize(f'/home/msun415/test_{d+1}.png')        
         # print(f"add hyperedge, adj_edges shape {self.adj_edges.shape}, len(self.E) {len(self.E)}")
 
     def remove_hyperedge(self, index):
         self.adj_edges = np.delete(self.adj_edges, index, -1)
-        return self.E.pop(index)
+        res = self.E.pop(index)
+        return res
 
-    def visualize(self, path):
+    def visualize(self, path, return_g=False):
         """
         The way we visualize hg is by making hyperedges of type > 2 in a special color
         all attached nodes, with one color for each type
@@ -227,10 +270,10 @@ class HG:
         ext_nodes = []
         h_nodes = []
         for n in self.V:
-            g.add_node(n.id)
+            g.add_node(n.id, label=n.label)
             v_nodes.append(n.id)
         for e in self.ext:
-            g.add_node(e.id)
+            g.add_node(e.id, label=e.label)
             ext_nodes.append(e.id)
         for ind in range(len(self.E)):
             g.add_node(f"h{ind}", label=self.E[ind].label)
@@ -238,6 +281,8 @@ class HG:
             nodes = self.E[ind].nodes
             for n in nodes:
                 g.add_edge(f"h{ind}", n)
+        if return_g:
+            return g
         fig, ax = plt.subplots()
         pos = nx.kamada_kawai_layout(g)
         nx.draw_networkx_nodes(
@@ -263,7 +308,7 @@ class HG:
             ax=ax,
         )
         nx.draw_networkx_edges(g, pos, g.edges, ax=ax)
-        nx.draw_networkx_labels(g, pos, {n: n for n in v_nodes}, ax=ax)
+        nx.draw_networkx_labels(g, pos, {n: n + " " + str(g.nodes[n]["label"]) for n in v_nodes}, ax=ax)
         nx.draw_networkx_labels(
             g, pos, {n: n for n in ext_nodes}, font_color="white", ax=ax
         )
@@ -271,7 +316,8 @@ class HG:
             g, pos, {n: n + " " + g.nodes[n]["label"] for n in h_nodes}, ax=ax
         )
         fig.savefig(path)
-        print(os.path.abspath(path))
+        plt.close(fig)
+        # print(os.path.abspath(path))
 
 
 if __name__ == "__main__":

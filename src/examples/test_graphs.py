@@ -257,16 +257,27 @@ def load_ckt():
     return whole_g
 
 
-def read_file(filename, num_samples=3):
+def read_file(filename, num_samples=-1):
+    # debug
+    smiles_list = ['c1c(N)c(OC)ccc1[N+](=O)[O-]']
+    return smiles_list
+    # end debug
     smiles_list = []
     with open(filename) as f:
         lines = f.readlines()
-        samples = np.random.choice(range(len(lines)), (num_samples,), replace=False)
+        samples = np.random.choice(range(len(lines)), (num_samples if num_samples > -1 else len(lines),), replace=False)
         print("samples", samples)
         for l in samples:
             line = lines[l]
             smiles_list.append(line.split(",")[0])
     return smiles_list
+
+
+def write_file(samples, filename):
+    with open(filename, 'w+') as f:
+        for s in samples:
+            f.write(f"{s}\n")        
+
 
 
 def convert_and_write(samples, path):
