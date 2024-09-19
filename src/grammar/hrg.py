@@ -48,16 +48,16 @@ class HRG_rule:
         he = hg.E[index]
         remove_edges.append(index)
         # # also remove any TERMINAL edges with the same nodes as he
-        for i in range(len(hg.E)-1,-1,-1):            
-            if set(hg.E[i].nodes) == set(he.nodes) and hg.E[i].label[0] != '(':
+        for i in range(len(hg.E) - 1, -1, -1):
+            if set(hg.E[i].nodes) == set(he.nodes) and hg.E[i].label[0] != "(":
                 remove_edges.append(i)
         # print(f"removing {he.nodes}")
         # Step 2: Add rhs
         # Step 3: Fuse rhs.ext with he.nodes
-        node_map = {}        
+        node_map = {}
         if match_info is not None:
             inv_match_info = dict(zip(match_info.values(), match_info.keys()))
-        for n in self.rhs.V:            
+        for n in self.rhs.V:
             if match_info is None:
                 if n.id[0] == "e":
                     continue
@@ -67,8 +67,8 @@ class HRG_rule:
                     node_map[n.id] = hg_n
                     continue
             hg_n = hg.add_node(n.label, **n.kwargs)
-            node_map[n.id] = hg_n        
-        for i, e in enumerate(self.rhs.ext):            
+            node_map[n.id] = hg_n
+        for i, e in enumerate(self.rhs.ext):
             if match_info is not None:
                 node_map[e.id] = inv_match_info[e.id]
             else:
@@ -78,7 +78,7 @@ class HRG_rule:
         #     atom_cts = self.rhs.adj_atoms(n.id)
         #     e_atoms = hg.adj_atoms(e, count=False)
         #     for a, c in atom_cts.items():
-        #         to_del += list(np.random.choice(e_atoms[a], c, replace=False))    
+        #         to_del += list(np.random.choice(e_atoms[a], c, replace=False))
         # breakpoint()
         # if match_info is not None:
         #     remove_edges = sorted([int(n[1:]) for n in match_info if n[0]=='h'], reverse=True)
@@ -86,15 +86,15 @@ class HRG_rule:
         #         if i > index:
         #             i = i-1
         #         hg.E[i].nodes # add this back!
-        #         hg.remove_hyperedge(i)        
+        #         hg.remove_hyperedge(i)
         for ei, e in enumerate(self.rhs.E):
             mapped_n = [node_map[n] for n in e.nodes]
             if match_info is not None:
                 if f"h{ei}" in inv_match_info:
                     old_e_nodes = old_e[inv_match_info[f"h{ei}"]]
-                    if set(mapped_n).issubset(old_e_nodes): # don't dup
+                    if set(mapped_n).issubset(old_e_nodes):  # don't dup
                         continue
-                    elif set(old_e_nodes).issubset(mapped_n): # remove old edge                        
+                    elif set(old_e_nodes).issubset(mapped_n):  # remove old edge
                         remove_edges.append(int(inv_match_info[f"h{ei}"][1:]))
             # if set(mapped_n) & set(he.nodes) == set(mapped_n):
             #     continue
@@ -103,7 +103,7 @@ class HRG_rule:
             #     breakpoint()
             # for i in sorted(old_edges, reverse=True):
             #     hg.remove_hyperedge(i)
-            # any edges connecting only the anchors should be ignored            
+            # any edges connecting only the anchors should be ignored
             hg.add_hyperedge(mapped_n, e.label, **e.kwargs)
             # find any counterpart to remove
         # remove edges consisting of only anchors
@@ -143,11 +143,11 @@ class HRG:
         """
         self.counts.append(0)
         self.rules.append(rule)
-    
+
     def set_counts(self, counts):
         assert len(counts) == len(self.rules)
         self.counts = counts
-    
+
     def combine_counts(self, other, remap_idx):
         for i in range(len(other.counts)):
             self.counts[remap_idx[i]] = other.counts[i]
@@ -217,7 +217,7 @@ class HG:
         assert new_adj_edges.shape[0] == len(self.V)
         assert self.adj_edges.shape[1] == new_adj_edges.shape[1]
         self.adj_edges = new_adj_edges
-        # print(f"add hyperedge, adj_edges shape {self.adj_edges.shape}, len(self.E) {len(self.E)}")    
+        # print(f"add hyperedge, adj_edges shape {self.adj_edges.shape}, len(self.E) {len(self.E)}")
         return n
 
     def adj_atoms(self, node, count=True):
@@ -262,7 +262,7 @@ class HG:
         # import glob
         # import re
         # d = max([int(re.match('/home/msun415/test_(\d+).png', a).groups()[0]) if re.match('/home/msun415/test_(\d+).png', a) is not None else -1 for a in glob.glob(f'/home/msun415/test_*.png')])
-        # self.visualize(f'/home/msun415/test_{d+1}.png')        
+        # self.visualize(f'/home/msun415/test_{d+1}.png')
         # print(f"add hyperedge, adj_edges shape {self.adj_edges.shape}, len(self.E) {len(self.E)}")
 
     def remove_hyperedge(self, index):
@@ -318,7 +318,9 @@ class HG:
             ax=ax,
         )
         nx.draw_networkx_edges(g, pos, g.edges, ax=ax)
-        nx.draw_networkx_labels(g, pos, {n: n + " " + str(g.nodes[n]["label"]) for n in v_nodes}, ax=ax)
+        nx.draw_networkx_labels(
+            g, pos, {n: n + " " + str(g.nodes[n]["label"]) for n in v_nodes}, ax=ax
+        )
         nx.draw_networkx_labels(
             g, pos, {n: n for n in ext_nodes}, font_color="white", ax=ax
         )

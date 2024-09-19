@@ -268,7 +268,7 @@ def read_file(filename, num_samples=-1):
         # make sure no dups
         uniq_lines = []
         for l in lines:
-            smiles = l.rstrip('\n')
+            smiles = l.rstrip("\n")
             mol = Chem.MolFromSmiles(smiles)
             Chem.Kekulize(mol)
             smiles = Chem.MolToSmiles(mol)
@@ -289,10 +289,9 @@ def read_file(filename, num_samples=-1):
 
 
 def write_file(samples, filename):
-    with open(filename, 'w+') as f:
+    with open(filename, "w+") as f:
         for s in samples:
-            f.write(f"{s}\n")        
-
+            f.write(f"{s}\n")
 
 
 def convert_and_write(samples, path):
