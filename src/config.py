@@ -25,10 +25,10 @@ MODEL = "gpt-4o"
 FILE_NAME = f"{wd}/data/{METHOD}_{DATASET}_{GRAMMAR}.txt"
 IMG_DIR = f"{wd}/data/{METHOD}_{DATASET}_{GRAMMAR}/"
 CACHE_DIR = f"{wd}/cache/{METHOD}_{DATASET}_{GRAMMAR}/"
-LOGGER = create_logger('global_logger', f"{wd}/data/{METHOD}_{DATASET}_{GRAMMAR}.log")
 
-NUM_THREADS = 1
-NUM_PROCS = 50
+NUM_THREADS = 100
+NUM_PROCS = 100
+VISUALIZE = False
 
 TOP_DIFF = 30
 SEED = 5

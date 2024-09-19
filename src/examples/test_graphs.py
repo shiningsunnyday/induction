@@ -17,7 +17,7 @@ from networkx.readwrite import json_graph
 import os
 from tqdm import tqdm
 from src.grammar.common import copy_graph
-
+import rdkit.Chem as Chem
 
 LABELS = ["r", "g", "b", "c"]
 
@@ -259,13 +259,28 @@ def load_ckt():
 
 def read_file(filename, num_samples=-1):
     # debug
-    smiles_list = ['c1c(N)c(OC)ccc1[N+](=O)[O-]']
-    return smiles_list
+    # smiles_list = ['c1c(N)c(OC)ccc1[N+](=O)[O-]']
+    # return smiles_list
     # end debug
     smiles_list = []
     with open(filename) as f:
         lines = f.readlines()
-        samples = np.random.choice(range(len(lines)), (num_samples if num_samples > -1 else len(lines),), replace=False)
+        # make sure no dups
+        uniq_lines = []
+        for l in lines:
+            smiles = l.rstrip('\n')
+            mol = Chem.MolFromSmiles(smiles)
+            Chem.Kekulize(mol)
+            smiles = Chem.MolToSmiles(mol)
+            if smiles in uniq_lines:
+                continue
+            uniq_lines.append(smiles)
+        print(f"{len(uniq_lines)}/{len(lines)} unique smiles")
+        lines = uniq_lines
+        if num_samples == -1:
+            samples = range(len(lines))
+        else:
+            samples = np.random.choice(range(len(lines)), (num_samples), replace=False)
         print("samples", samples)
         for l in samples:
             line = lines[l]

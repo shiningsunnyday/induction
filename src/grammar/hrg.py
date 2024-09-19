@@ -129,6 +129,7 @@ class HRG:
         self.vocab = vocab
         for n in nonterms + terms + [start]:
             assert n in vocab
+        self.counts = []
 
     def add_rule(self, rule: HRG_rule):
         """
@@ -140,7 +141,16 @@ class HRG:
             - R = rhs(p)
 
         """
+        self.counts.append(0)
         self.rules.append(rule)
+    
+    def set_counts(self, counts):
+        assert len(counts) == len(self.rules)
+        self.counts = counts
+    
+    def combine_counts(self, other, remap_idx):
+        for i in range(len(other.counts)):
+            self.counts[remap_idx[i]] = other.counts[i]
 
 
 class Node:
