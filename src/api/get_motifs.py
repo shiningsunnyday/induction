@@ -21,6 +21,7 @@ def encode(img_array):
     buffer.seek(0)
     img_base64 = base64.b64encode(buffer.getvalue())
     base64_image = img_base64.decode("utf-8")
+    os.remove(os.path.join(IMG_DIR, fname))
     return base64_image
 
 

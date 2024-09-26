@@ -28,9 +28,11 @@ FILE_NAME = f"{wd}/data/{METHOD}_{DATASET}_{GRAMMAR}.txt"
 IMG_DIR = f"{wd}/data/{METHOD}_{DATASET}_{GRAMMAR}/"
 CACHE_DIR = f"{wd}/cache/{METHOD}_{DATASET}_{GRAMMAR}/"
 
-NUM_THREADS = 100
+NUM_THREADS = 40
 NUM_PROCS = 100
 VISUALIZE = False
+VERBOSE = False
+CACHE = False
 
 TOP_DIFF = 30
 SEED = 5
@@ -170,8 +172,3 @@ elif DATASET == "ckt":
         "orchid": "input",
         "pink": "output",
     }
-
-elif DATASET == "mol":
-    prompt_1_path = "data/api_mol_hg_1.txt"
-    prompt_2_path = "data/api_mol_hg_2.txt"
-    prompt_3_path = "data/api_mol_hg_3.txt"

@@ -96,6 +96,12 @@ class HRG_rule:
                         continue
                     elif set(old_e_nodes).issubset(mapped_n):  # remove old edge
                         remove_edges.append(int(inv_match_info[f"h{ei}"][1:]))
+                    else:
+                        # update the edge
+                        new_e_nodes = set(mapped_n)|set(old_e_nodes)
+                        remove_edges.append(int(inv_match_info[f"h{ei}"][1:]))
+                        hg.add_hyperedge(list(new_e_nodes), e.label, **e.kwargs)
+                        continue
             # if set(mapped_n) & set(he.nodes) == set(mapped_n):
             #     continue
             # old_edges = [i for i in range(len(hg.E)) if set(hg.E[i].nodes) == set(mapped_n)]

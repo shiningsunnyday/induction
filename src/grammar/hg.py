@@ -199,14 +199,9 @@ IPythonConsole.ipython_useSVG = (
     True  # < set this to False if you want PNGs instead of SVGs
 )
 from fuseprop import (
-    find_clusters,
-    extract_subgraph,
-    get_mol,
-    get_smiles,
     find_fragments,
-    find_fragments_with_scaffold,
-    __extract_subgraph,
 )
+from src.draw.mol import _extract_subgraph
 from private import *
 from src.draw.utils import hierarchy_pos
 import HRG.create_production_rules as cpr
@@ -313,22 +308,6 @@ def my_complete_to_chordal(cg, mol):
     return cg
 
 
-def GetAtomsFromBonds(mol, bonds):
-    return list(
-        set(
-            flatten(
-                [
-                    [
-                        mol.GetBondWithIdx(bond).GetBeginAtomIdx(),
-                        mol.GetBondWithIdx(bond).GetEndAtomIdx(),
-                    ]
-                    for bond in bonds
-                ]
-            )
-        )
-    )
-
-
 class Grammar(HRG):
     def __init__(self, mol, rules):
         mol = deepcopy(mol)
@@ -353,6 +332,8 @@ class Grammar(HRG):
                     self.hrg.add_rule(rule_item)
                 else:
                     self.hrg_rule_index_map[key][rule] = index
+        self.folder = None
+
 
     @staticmethod
     def check_exist(rules, rule):
@@ -384,11 +365,21 @@ class Grammar(HRG):
                     assert self.vocab[k] == other.vocab[k]
                 else:
                     self.vocab[k] = other.vocab[k]
+        
+        def _combine_folders(self, other):
+            assert hasattr(self, 'folder_lookup')
+            if hasattr(other, 'folder_lookup'):
+                for smi in other.folder_lookup:
+                    self.folder_lookup[smi] = other.folder
+            else:
+                self.folder_lookup[Chem.MolToSmiles(other.mol)] = other.folder
+
 
         def _init_mol_lookup(self):
             smiles = Chem.MolToSmiles(self.mol)
             self.mol_lookup = {smiles: deepcopy(self.rules)}
             self.rule_idx_lookup = {smiles: deepcopy(self.hrg_rule_index_map)}
+            self.folder_lookup = {smiles: self.folder}
 
         def _merge_hrgs(self, other):
             merge_keys = set(self.hrg_rule_index_map)
@@ -451,7 +442,7 @@ class Grammar(HRG):
             for rule in self.hrg.rules:
                 hrg.add_rule(rule)
             remap_rule_idx = _combine_rules(hrg, other.hrg.rules)
-            self.combine_counts(other, remap_rule_idx)
+            hrg.combine_counts(other.hrg, remap_rule_idx)
             self.hrg = hrg
             other_smiles = Chem.MolToSmiles(other.mol)
             for key in self.rule_idx_lookup[other_smiles]:
@@ -475,71 +466,9 @@ class Grammar(HRG):
             _init_mol_lookup(self)
         _combine_atoms(self, other)
         _combine_vocabs(self, other)
+        _combine_folders(self, other)
         _combine_hrgs(self, other)
         return self
-
-    @staticmethod
-    def __extract_subgraph(mol, selected_atoms, selected_bonds=None):
-        selected_atoms = set(selected_atoms)
-        roots = []
-        for idx in selected_atoms:
-            atom = mol.GetAtomWithIdx(idx)
-            bad_neis = [
-                y for y in atom.GetNeighbors() if y.GetIdx() not in selected_atoms
-            ]
-            if len(bad_neis) > 0:
-                roots.append(idx)
-
-        new_mol = Chem.RWMol(mol)
-        Chem.Kekulize(new_mol)
-        for atom in new_mol.GetAtoms():
-            atom.SetIntProp("org_idx", atom.GetIdx())
-        for bond in new_mol.GetBonds():
-            bond.SetIntProp("org_idx", bond.GetIdx())
-        for atom_idx in roots:
-            atom = new_mol.GetAtomWithIdx(atom_idx)
-            atom.SetAtomMapNum(1)
-            aroma_bonds = [
-                bond
-                for bond in atom.GetBonds()
-                if bond.GetBondType() == Chem.rdchem.BondType.AROMATIC
-            ]
-            aroma_bonds = [
-                bond
-                for bond in aroma_bonds
-                if bond.GetBeginAtom().GetIdx() in selected_atoms
-                and bond.GetEndAtom().GetIdx() in selected_atoms
-            ]
-            if len(aroma_bonds) == 0:
-                # if atom.GetIsAromatic():
-                #     breakpoint()
-                atom.SetIsAromatic(False)
-
-        remove_atoms = [
-            atom.GetIdx()
-            for atom in new_mol.GetAtoms()
-            if atom.GetIdx() not in selected_atoms
-        ]
-        remove_atoms = sorted(remove_atoms, reverse=True)
-        if selected_bonds is not None:
-            remove_bonds = [
-                (bond.GetBeginAtomIdx(), bond.GetEndAtomIdx())
-                for bond in new_mol.GetBonds()
-                if bond.GetIdx() not in selected_bonds
-            ]
-        if selected_bonds is not None:
-            dic = {}
-            for b in new_mol.GetBonds():
-                dic[(b.GetBeginAtomIdx(), b.GetEndAtomIdx())] = b.GetBondType()
-            for bond in remove_bonds:
-                new_mol.RemoveBond(*bond)
-            for b in new_mol.GetBonds():
-                if dic[(b.GetBeginAtomIdx(), b.GetEndAtomIdx())] != b.GetBondType():
-                    breakpoint()
-        for atom in remove_atoms:
-            new_mol.RemoveAtom(atom)
-        new_mol = new_mol.GetMol()
-        return new_mol
 
     def NumNTs(self):
         return len(self.rules)
@@ -573,7 +502,7 @@ class Grammar(HRG):
 
     def RHSMol(self, nonterm, idx):
         nodes, _ = self.RHSNodes(nonterm, idx)
-        return Grammar.__extract_subgraph(
+        return _extract_subgraph(
             self.get_mol(nonterm, idx),
             GetAtomsFromBonds(self.get_mol(nonterm, idx), nodes),
             nodes,
@@ -600,7 +529,7 @@ class Grammar(HRG):
         bonds = [inv_d[ind] for ind in nodes_idx]  # these refer to bonds of hyperedge
         # logger.info(bonds, "bonds")
         # logger.info([nodes[ind] for ind in nodes_idx], "old bonds")
-        rhs_edge_mol = Grammar.__extract_subgraph(
+        rhs_edge_mol = _extract_subgraph(
             self.get_mol(nonterm, idx),
             GetAtomsFromBonds(self.get_mol(nonterm, idx), bonds),
             bonds,
@@ -619,7 +548,7 @@ class Grammar(HRG):
         fig, axes = plt.subplots(1, len(edges) + 1, figsize=(10, 10))
         axes = flatten(axes)
         nodes, _ = self.RHSNodes(nonterm, idx)
-        rhs_mol = Grammar.__extract_subgraph(
+        rhs_mol = _extract_subgraph(
             self.get_mol(nonterm, idx),
             GetAtomsFromBonds(self.get_mol(nonterm, idx), nodes),
             nodes,
@@ -642,7 +571,7 @@ class Grammar(HRG):
         edges, _ = self.EdgesForRule(nonterm, idx, nt_only=nt_only)
         nodes, d = self.RHSNodes(nonterm, idx)
         inv_d = dict(zip(d.values(), d.keys()))
-        rhs_mol = Grammar.__extract_subgraph(
+        rhs_mol = _extract_subgraph(
             self.get_mol(nonterm, idx),
             GetAtomsFromBonds(self.get_mol(nonterm, idx), nodes),
             nodes,
@@ -700,7 +629,7 @@ class Grammar(HRG):
         edges, _ = self.EdgesForRule(nonterm, idx, nt_only=nt_only)
         nodes, d = self.RHSNodes(nonterm, idx)
         inv_d = dict(zip(d.values(), d.keys()))
-        rhs_mol = Grammar.__extract_subgraph(
+        rhs_mol = _extract_subgraph(
             self.get_mol(nonterm, idx),
             GetAtomsFromBonds(self.get_mol(nonterm, idx), nodes),
             nodes,
@@ -797,9 +726,10 @@ class Grammar(HRG):
             inc_subgraph = copy_graph(rhs_g, inc_nodes)
             r_wl_hash = nx.weisfeiler_lehman_graph_hash(inc_subgraph, node_attr="label")
             rule_lookup[(r.rhs.type, r_wl_hash)].append(i)
-        folder = f"data/api_mol_hg/{time.time()}/"
-        os.makedirs(folder, exist_ok=True)
-        print(f"begin generate {os.path.abspath(folder)}")
+        if VISUALIZE:
+            folder = f"data/api_mol_hg/generate-{time.time()}/"
+            os.makedirs(folder, exist_ok=True)
+            print(f"begin generate {os.path.abspath(folder)}")
         smi = None
         j = 0
         hg = HG(0 + 0, [])
@@ -863,6 +793,15 @@ class Grammar(HRG):
                     assert len(find_fragments(mol)) == 1
                 except:
                     continue
+                
+                # temporary
+                for b in mol.GetBonds():
+                    begin = b.GetBeginAtomIdx()
+                    end = b.GetEndAtomIdx()
+                    if mol.GetAtomWithIdx(begin).GetSymbol() == 'O' and mol.GetAtomWithIdx(end).GetSymbol() == 'O':
+                        breakpoint()
+                        hg_cand = rule(deepcopy(hg), edge, *pargs)
+
                 good = True
                 j += 1
                 if VISUALIZE:
@@ -874,8 +813,8 @@ class Grammar(HRG):
             smi = Chem.MolToSmiles(mol)
             if VISUALIZE:
                 draw_smiles(smi, path=f"{folder}/mol_{j}.png")
-            with open(os.path.join(folder, "smiles.txt"), "a+") as f:
-                f.write(smi)
+                with open(os.path.join(folder, "smiles.txt"), "a+") as f:
+                    f.write(smi)
             # early terminate?
             if shared_dict is not None and smi not in shared_dict:
                 shared_dict[smi] = None
@@ -913,6 +852,16 @@ class Grammar(HRG):
             f"{wd}/data/{METHOD}_{DATASET}_{GRAMMAR}-{args.dataset}-{args.seed}.log",
         )
         globals()["logger"] = logger
+        idx = 1
+        while True:
+            path = f"data/{args.dataset}/api_mol_hg_{idx}.txt" 
+            if os.path.exists(path):
+                globals()[f'prompt_{idx}_path'] = path
+                idx += 1
+            else:
+                break  
+        # for k, v in set_global_args(args).items():
+        #     globals()[k] = v
         logger.info("===BEGIN GENERATION===")
         if NUM_PROCS == 1:
             smis = Grammar._single_mp_execute(
@@ -932,12 +881,12 @@ def chordal_mol_graph(smiles):
     # res, order = chordal._find_chordality_breaker(cg)
     # cg, _, chords = chordal.complete_to_chordal_graph(cg)
     try:
-        cg = my_complete_to_chordal(cg, mol)
+        chordal_cg = my_complete_to_chordal(deepcopy(cg), mol)
     except KeyError:
         logger.error(smiles)
         sys.exit(1)
-    assert chordal.is_chordal(cg)
-    return mol, cg
+    assert chordal.is_chordal(chordal_cg)
+    return mol, chordal_cg, cg
     # chordal.chordal_graph_cliques(cg)
 
 

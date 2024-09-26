@@ -5,6 +5,38 @@ from copy import deepcopy
 import re
 from functools import reduce
 from tqdm import tqdm
+from argparse import ArgumentParser
+
+
+def get_args():
+    parser = ArgumentParser()
+    # global args
+    parser.add_argument("--visualize", dest="global_visualize", action='store_true')
+    parser.add_argument("--cache", dest="global_cache", action='store_true')
+    parser.add_argument("--num_threads", dest="global_num_threads", type=int)
+    parser.add_argument("--num_procs", dest="global_num_procs", type=int)    
+    # hparams
+    parser.add_argument("--scheme", choices=['one','zero'], help='whether to index from 0 or 1', default='zero')
+    # task params
+    parser.add_argument("--task", nargs='+', choices=["learn","generate"])
+    parser.add_argument("--seed")
+    parser.add_argument(
+        "--dataset",
+        choices=["ptc","hopv","polymers_117", "isocyanates", "chain_extenders", "acrylates"],
+    )
+    parser.add_argument("--num_samples", default=10000, type=int)
+    return parser.parse_args()
+
+
+def set_global_args(args):
+    res = {}
+    idx = 1  
+    for k, v in args.__dict__.items():
+        if v is None:
+            continue
+        if k[:7] == 'global_':
+            res[k[7:].upper()] = v
+    return res
 
 
 def check_input_xor_output(subgraph):
