@@ -76,11 +76,18 @@ def copy_graph(g, nodes):
     for k in g.graph:
         g_copy.graph[k] = g.graph[k]
     for n in nodes:
-        g_copy.add_node(n, **g.nodes[n])
-    for e in g.edges(data=True):
-        if e[0] not in nodes or e[1] not in nodes:
-            continue
-        g_copy.add_edge(e[0], e[1], **e[2])
+        g_copy.add_node(n, **g.nodes[n])    
+    if isinstance(g, nx.DiGraph):
+        for e in g.in_edges(nodes, data=True):
+            if e[0] in nodes:
+                g_copy.add_edge(e[0], e[1], **e[2])
+        for e in g.out_edges(nodes, data=True):
+            if e[1] in nodes:
+                g_copy.add_edge(e[0], e[1], **e[2])
+    else:
+        for e in g.edges(nodes, data=True):
+            if e[1] in nodes:
+                g_copy.add_edge(e[0], e[1], **e[2])
     return g_copy
 
 

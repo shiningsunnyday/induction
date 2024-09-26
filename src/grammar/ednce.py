@@ -603,6 +603,15 @@ def touching(graph, ismA, ismB):
     
 
 
+
+def initialize(path):
+    global graph
+    global ism_graph
+    global isms
+    graph, ism_graph, isms = pickle.load(open(path, 'rb'))
+
+
+
 def find_iso(subgraph, graph, rule=None):
     global graph_proxy
     isms = fast_subgraph_isomorphism(graph, subgraph)
