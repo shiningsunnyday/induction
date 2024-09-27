@@ -6,6 +6,7 @@ from PIL import Image
 import networkx as nx
 import numpy as np
 import matplotlib.pyplot as plt
+plt.switch_backend('Agg') 
 from src.grammar.utils import flatten
 from src.config import VISUALIZE
 import io

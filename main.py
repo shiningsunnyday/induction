@@ -23,7 +23,7 @@ def load_data(args):
         g = load_ckt()
     elif DATASET == "mol":
         g = read_file(
-            f"/home/msun415/induction/data/api_mol_hg/{args.dataset}_smiles.txt"
+            f"data/api_mol_hg/{args.dataset}_smiles.txt"
         )
     else:
         raise NotImplementedError

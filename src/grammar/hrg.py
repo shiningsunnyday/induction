@@ -5,6 +5,7 @@ wd = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
 sys.path.append(wd)
 import networkx as nx
 import matplotlib.pyplot as plt
+plt.switch_backend('Agg') 
 from typing import Dict
 from collections import defaultdict
 import numpy as np

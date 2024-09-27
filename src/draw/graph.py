@@ -2,6 +2,7 @@ import os
 import networkx as nx
 import numpy as np
 import matplotlib.pyplot as plt
+plt.switch_backend('Agg') 
 from matplotlib.colors import to_rgba
 from src.config import *
 from src.draw.utils import hierarchy_pos
