@@ -794,13 +794,13 @@ class Grammar(HRG):
                 except:
                     continue
                 
-                # temporary
-                for b in mol.GetBonds():
-                    begin = b.GetBeginAtomIdx()
-                    end = b.GetEndAtomIdx()
-                    if mol.GetAtomWithIdx(begin).GetSymbol() == 'O' and mol.GetAtomWithIdx(end).GetSymbol() == 'O':
-                        breakpoint()
-                        hg_cand = rule(deepcopy(hg), edge, *pargs)
+                # # temporary
+                # for b in mol.GetBonds():
+                #     begin = b.GetBeginAtomIdx()
+                #     end = b.GetEndAtomIdx()
+                #     if mol.GetAtomWithIdx(begin).GetSymbol() == 'O' and mol.GetAtomWithIdx(end).GetSymbol() == 'O':
+                #         breakpoint()
+                #         hg_cand = rule(deepcopy(hg), edge, *pargs)
 
                 good = True
                 j += 1

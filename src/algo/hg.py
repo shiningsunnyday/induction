@@ -260,6 +260,12 @@ def llm_edit_cliques(cg, mol, prompt_path, folder, scheme='zero'):
     
     return cg, path, cots
 
+def sanity_check_num_cliques(res):
+    num = 0
+    while str(num) in res:
+        num += 1
+    return num
+
 
 def llm_describe_cliques(cliques, paths, prompt_path):
     numbering_str = ', '.join(map(str, range(len(cliques))))
@@ -268,14 +274,18 @@ def llm_describe_cliques(cliques, paths, prompt_path):
     )
     prompt = ''.join(open(prompt_path).readlines())
     if len(cliques) > 1:
-        prompt = prompt.replace("<optional>", "I will highlight for you some of the distinctive substructures of an Acrylates molecule. They are numbered from 0.")
+        prompt = prompt.replace("<optional>", "I will highlight for you some of the distinctive substructures of a molecule. They are numbered from 0.")
     else:
-        prompt = prompt.replace("<optional>", "I will highlight for you one distinctive substructure of an Acrylates molecule.")        
+        prompt = prompt.replace("<optional>", "I will highlight for you one distinctive substructure of a molecule.")        
+    tries = 0
     while True:
+        if tries == MAX_TRIES:
+            breakpoint()
         ans_heads, res = llm_call(paths, None, optional_prompts=[post_prompt], prompt=prompt)
         ans = ans_heads[0]
-        if ans[:3] == "YES":
-            break
+        if ans[:3] == "YES" and sanity_check_num_cliques(res) == len(cliques):
+            break                
+        tries += 1
     return res
 
 
@@ -329,11 +339,15 @@ def llm_break_cycles(tree, mol, root, prompt_path, folder, scheme='zero'):
     os.makedirs(dir_name, exist_ok=True)
     motif_cot = ''.join(open(os.path.join(folder, 'motifs_cot.txt')).readlines())
     prompt = describe_post_prompt(motif_cot)
+    tries = 0
     while True:
+        if tries == MAX_TRIES:
+            breakpoint()
         describe_cot = llm_call([], None, prompt=prompt)
         describes = [line for line in describe_cot.split('\n') if line]
         if len(describes) == len(tree):
             break
+        tries += 1
     while not nx.is_tree(tree):
         i = get_next_version(dir_name, dir=False)
         path = os.path.join(dir_name, f"{i}.png")
@@ -458,11 +472,16 @@ def _learn_grammar(smiles, args):
     clique_drawing(cg, mol, path=motif_path, isolate=True, scheme=args.scheme)
 
     with open(os.path.join(folder, 'motifs_cot.txt'), 'w+') as f:
-        f.write(cots[-1][0])      
+        f.write(cots[-1][0])
+    tries = 0
     while True:
+        if tries == MAX_TRIES:
+            breakpoint()
         root, cot = llm_choose_root(path, prompt_2_path, folder)
         if root in tree:
             break
+        else:
+            tries += 1
     with open(os.path.join(folder, 'root_cot.txt'), 'w+') as f:
         f.write(cot)
     tree = llm_break_cycles(tree, mol, root, prompt_3_path, folder, scheme=args.scheme)
