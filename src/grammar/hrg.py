@@ -156,7 +156,7 @@ class HRG:
 
     def combine_counts(self, other, remap_idx):
         for i in range(len(other.counts)):
-            self.counts[remap_idx[i]] = other.counts[i]
+            self.counts[remap_idx[i]] += other.counts[i]
 
 
 class Node:

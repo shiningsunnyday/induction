@@ -32,19 +32,21 @@ def load_data(args):
 def main(args):
     g = load_data(args)    
     if 'learn' in args.task:
+        if os.path.exists(os.path.join(IMG_DIR, f"grammar-{args.dataset}-{args.seed}.pkl")):
+            return
         gr, model = grammar.learn_grammar(g, args)
         # grammar, model = nlc.learn_grammar(g)
         # grammar, model = mining.learn_stochastic_grammar(g)        
     # model.generate(gr)
     
     if 'generate' in args.task:
+        path = os.path.join(IMG_DIR, f"smiles-{args.dataset}-{args.seed}.txt")        
         # gr, _, _ = pickle.load(open(f'{os.getcwd()}/cache/api_ckt_ednce/12.pkl', 'rb'))
         gr = pickle.load(
             open(os.path.join(IMG_DIR, f"grammar-{args.dataset}-{args.seed}.pkl"), "rb")
         )
         samples = gr.generate(args)
         # path = f"{os.getcwd()}/data/api_ckt_ednce/samples.txt"
-        path = os.path.join(IMG_DIR, f"smiles-{args.dataset}-{args.seed}.txt")
         write_file(samples, path)
         # convert_and_write(samples, path)
 

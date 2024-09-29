@@ -12,14 +12,19 @@ def get_args():
     parser = ArgumentParser()
     # global args
     parser.add_argument("--visualize", dest="global_visualize", action='store_true')
-    parser.add_argument("--cache", dest="global_cache", action='store_true')
+    parser.add_argument("--cache", dest="global_cache", action='store_true')    
     parser.add_argument("--num_threads", dest="global_num_threads", type=int)
     parser.add_argument("--num_procs", dest="global_num_procs", type=int)    
     # hparams
     parser.add_argument("--scheme", choices=['one','zero'], help='whether to index from 0 or 1', default='zero')
+    # ablations
+    parser.add_argument("--ablate_tree", action='store_true') 
+    parser.add_argument("--ablate_merge", action='store_true') 
+    parser.add_argument("--ablate_root", action='store_true') 
     # task params
     parser.add_argument("--task", nargs='+', choices=["learn","generate"])
     parser.add_argument("--seed")
+    parser.add_argument("--grammar_ckpt")
     parser.add_argument(
         "--dataset",
         choices=["ptc","hopv","polymers_117", "isocyanates", "chain_extenders", "acrylates"],

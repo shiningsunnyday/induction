@@ -353,121 +353,129 @@ class Grammar(HRG):
                     return idx
         return -1
 
+    @staticmethod
+    def _combine_atoms(self, other):
+        for a in other.atoms:
+            if a not in self.atoms:
+                self.atoms.append(a)
+
+    @staticmethod
+    def _combine_vocabs(self, other):
+        for k in other.vocab:
+            if k in self.vocab:
+                assert self.vocab[k] == other.vocab[k]
+            else:
+                self.vocab[k] = other.vocab[k]
+
+    @staticmethod
+    def _combine_folders(self, other):
+        assert hasattr(self, 'folder_lookup')
+        if hasattr(other, 'folder_lookup'):
+            for smi in other.folder_lookup:
+                self.folder_lookup[smi] = other.folder
+        else:
+            self.folder_lookup[Chem.MolToSmiles(other.mol)] = other.folder
+
+    @staticmethod
+    def _init_mol_lookup(self):
+        smiles = Chem.MolToSmiles(self.mol)
+        self.mol_lookup = {smiles: deepcopy(self.rules)}
+        self.rule_idx_lookup = {smiles: deepcopy(self.hrg_rule_index_map)}
+        self.folder_lookup = {smiles: self.folder}
+
+    @staticmethod
+    def _merge_hrgs(self, other):
+        merge_keys = set(self.hrg_rule_index_map)
+        for other_smi in other.mol_lookup:
+            merge_keys |= set(other.mol_lookup[other_smi])
+        merge_keys = list(merge_keys)
+        hrg = HRG(merge_keys, self.atoms, self.init_symbol, self.vocab)
+        for rule in self.hrg.rules:
+            hrg.add_rule(rule)
+        hrg.set_counts(self.hrg.counts)
+        remap_rule_idx = Grammar._combine_rules(hrg, other.hrg.rules)
+        hrg.combine_counts(other.hrg, remap_rule_idx)
+        self.hrg = hrg
+        for other_smi in other.mol_lookup:
+            if other_smi not in self.mol_lookup:
+                self.mol_lookup[other_smi] = deepcopy(other.mol_lookup[other_smi])
+                self.rule_idx_lookup[other_smi] = deepcopy(other.hrg_rule_index_map)
+            else:
+                for key in other.mol_lookup[other_smi]:
+                    self.mol_lookup[other_smi][key] = self.mol_lookup[
+                        other_smi
+                    ].get(key, {})
+                    self.rule_idx_lookup[other_smi][key] = self.rule_idx_lookup[
+                        other_smi
+                    ].get(key, {})
+                    for rule, rule_dict in other.mol_lookup[other_smi][key].items():
+                        if rule in self.mol_lookup[other_smi][key]:
+                            assert (
+                                self.mol_lookup[other_smi][key][rule] == rule_dict
+                            )
+                        self.mol_lookup[other_smi][key][rule] = self.mol_lookup[
+                            other_smi
+                        ][key].get(rule, {})
+                        self.rule_idx_lookup[other_smi][key][
+                            rule
+                        ] = self.rule_idx_lookup[other_smi][key].get(rule, {})
+                        self.mol_lookup[other_smi][key][rule] = rule_dict
+                        org_idx = other.rule_idx_lookup[other_smi][key][rule]
+                        self.rule_idx_lookup[other_smi][key][rule] = remap_rule_idx[
+                            org_idx
+                        ]
+
+    @staticmethod
+    def _combine_rules(hrg, other_rules):
+        remap_rule_idx = {}
+        for i, rule in enumerate(other_rules):
+            index = Grammar.check_exist(hrg.rules, rule)
+            if index == -1:
+                index = len(hrg.rules)
+                hrg.add_rule(rule)
+            remap_rule_idx[i] = index
+        return remap_rule_idx
+
+    @staticmethod
+    def _append_hrg(self, other):
+        self.mol_lookup[Chem.MolToSmiles(other.mol)] = deepcopy(other.rules)
+        self.rule_idx_lookup[Chem.MolToSmiles(other.mol)] = deepcopy(
+            other.hrg_rule_index_map
+        )
+        merge_keys = list(set(self.hrg_rule_index_map) | set(other.rules))
+        hrg = HRG(merge_keys, self.atoms, self.init_symbol, self.vocab)
+        for rule in self.hrg.rules:
+            hrg.add_rule(rule)
+        remap_rule_idx = Grammar._combine_rules(hrg, other.hrg.rules)
+        hrg.combine_counts(other.hrg, remap_rule_idx)
+        self.hrg = hrg
+        other_smiles = Chem.MolToSmiles(other.mol)
+        for key in self.rule_idx_lookup[other_smiles]:
+            for rule in self.rule_idx_lookup[other_smiles][key]:
+                self.rule_idx_lookup[other_smiles][key][rule] = remap_rule_idx[
+                    self.rule_idx_lookup[other_smiles][key][rule]
+                ]
+
+    @staticmethod
+    def _combine_hrgs(self, other):
+        if hasattr(other, "mol_lookup"):
+            Grammar._merge_hrgs(self, other)
+        else:
+            Grammar._append_hrg(self, other)
+
+
     def combine(self, other):
-        def _combine_atoms(self, other):
-            for a in other.atoms:
-                if a not in self.atoms:
-                    self.atoms.append(a)
-
-        def _combine_vocabs(self, other):
-            for k in other.vocab:
-                if k in self.vocab:
-                    assert self.vocab[k] == other.vocab[k]
-                else:
-                    self.vocab[k] = other.vocab[k]
-        
-        def _combine_folders(self, other):
-            assert hasattr(self, 'folder_lookup')
-            if hasattr(other, 'folder_lookup'):
-                for smi in other.folder_lookup:
-                    self.folder_lookup[smi] = other.folder
-            else:
-                self.folder_lookup[Chem.MolToSmiles(other.mol)] = other.folder
-
-
-        def _init_mol_lookup(self):
-            smiles = Chem.MolToSmiles(self.mol)
-            self.mol_lookup = {smiles: deepcopy(self.rules)}
-            self.rule_idx_lookup = {smiles: deepcopy(self.hrg_rule_index_map)}
-            self.folder_lookup = {smiles: self.folder}
-
-        def _merge_hrgs(self, other):
-            merge_keys = set(self.hrg_rule_index_map)
-            for other_smi in other.mol_lookup:
-                merge_keys |= set(other.mol_lookup[other_smi])
-            merge_keys = list(merge_keys)
-            hrg = HRG(merge_keys, self.atoms, self.init_symbol, self.vocab)
-            for rule in self.hrg.rules:
-                hrg.add_rule(rule)
-            hrg.set_counts(self.hrg.counts)
-            remap_rule_idx = _combine_rules(hrg, other.hrg.rules)
-            hrg.combine_counts(other.hrg, remap_rule_idx)
-            self.hrg = hrg
-            for other_smi in other.mol_lookup:
-                if other_smi not in self.mol_lookup:
-                    self.mol_lookup[other_smi] = deepcopy(other.mol_lookup[other_smi])
-                    self.rule_idx_lookup[other_smi] = deepcopy(other.hrg_rule_index_map)
-                else:
-                    for key in other.mol_lookup[other_smi]:
-                        self.mol_lookup[other_smi][key] = self.mol_lookup[
-                            other_smi
-                        ].get(key, {})
-                        self.rule_idx_lookup[other_smi][key] = self.rule_idx_lookup[
-                            other_smi
-                        ].get(key, {})
-                        for rule, rule_dict in other.mol_lookup[other_smi][key].items():
-                            if rule in self.mol_lookup[other_smi][key]:
-                                assert (
-                                    self.mol_lookup[other_smi][key][rule] == rule_dict
-                                )
-                            self.mol_lookup[other_smi][key][rule] = self.mol_lookup[
-                                other_smi
-                            ][key].get(rule, {})
-                            self.rule_idx_lookup[other_smi][key][
-                                rule
-                            ] = self.rule_idx_lookup[other_smi][key].get(rule, {})
-                            self.mol_lookup[other_smi][key][rule] = rule_dict
-                            org_idx = other.rule_idx_lookup[other_smi][key][rule]
-                            self.rule_idx_lookup[other_smi][key][rule] = remap_rule_idx[
-                                org_idx
-                            ]
-
-        def _combine_rules(hrg, other_rules):
-            remap_rule_idx = {}
-            for i, rule in enumerate(other_rules):
-                index = Grammar.check_exist(hrg.rules, rule)
-                if index == -1:
-                    index = len(hrg.rules)
-                    hrg.add_rule(rule)
-                remap_rule_idx[i] = index
-            return remap_rule_idx
-
-        def _append_hrg(self, other):
-            self.mol_lookup[Chem.MolToSmiles(other.mol)] = deepcopy(other.rules)
-            self.rule_idx_lookup[Chem.MolToSmiles(other.mol)] = deepcopy(
-                other.hrg_rule_index_map
-            )
-            merge_keys = list(set(self.hrg_rule_index_map) | set(other.rules))
-            hrg = HRG(merge_keys, self.atoms, self.init_symbol, self.vocab)
-            for rule in self.hrg.rules:
-                hrg.add_rule(rule)
-            remap_rule_idx = _combine_rules(hrg, other.hrg.rules)
-            hrg.combine_counts(other.hrg, remap_rule_idx)
-            self.hrg = hrg
-            other_smiles = Chem.MolToSmiles(other.mol)
-            for key in self.rule_idx_lookup[other_smiles]:
-                for rule in self.rule_idx_lookup[other_smiles][key]:
-                    self.rule_idx_lookup[other_smiles][key][rule] = remap_rule_idx[
-                        self.rule_idx_lookup[other_smiles][key][rule]
-                    ]
-
-        def _combine_hrgs(self, other):
-            if hasattr(other, "mol_lookup"):
-                _merge_hrgs(self, other)
-            else:
-                _append_hrg(self, other)
-
         # merge the vocabs
         # list the init_symbols
         # make hrg with all rules, terms, starts, new vocab
         # add the rules
         assert not (hasattr(self, "mol_lookup") ^ hasattr(self, "rule_idx_lookup"))
         if not hasattr(self, "mol_lookup"):
-            _init_mol_lookup(self)
-        _combine_atoms(self, other)
-        _combine_vocabs(self, other)
-        _combine_folders(self, other)
-        _combine_hrgs(self, other)
+            Grammar._init_mol_lookup(self)
+        Grammar._combine_atoms(self, other)
+        Grammar._combine_vocabs(self, other)
+        Grammar._combine_folders(self, other)
+        Grammar._combine_hrgs(self, other)
         return self
 
     def NumNTs(self):
@@ -714,6 +722,52 @@ class Grammar(HRG):
         for x in vs:
             neis += [n for n in g[x] if g.nodes[n]["label"][0] != "("]
         return neis
+    
+    @staticmethod
+    def find_all_choices(hrg, hg, vocab, rule_lookup, first=False):
+        # if first, only return choices for first nt
+        choices = []
+        choice_probs = []          
+        hg_g = hg.visualize("", return_g=True)
+        nt_order = np.random.RandomState().permutation(len(hg.E)).tolist()
+        for i in nt_order:
+            e = hg.E[i]
+            if hrg.vocab[e.label] is None:  # terminal
+                continue                
+            inc_nodes = Grammar.atom_neis(hg_g, e.nodes) + e.nodes
+            hg_g_sub = copy_graph(hg_g, inc_nodes)
+            # use its WL hash to quickly find possible rules
+            wl_hash = nx.weisfeiler_lehman_graph_hash(hg_g_sub, node_attr="label")
+            for ri in tqdm(
+                rule_lookup[(e.get_type(vocab), wl_hash)], "checking rules"
+            ):
+                r = hrg.rules[ri]
+                # r.rhs.visualize(os.path.join(folder, 'test_rhs.png'))
+                # ensure e's node sequence <-> perm(r.rhs.ext)
+                # where:
+                # each node's label matches
+                # each node's adj atoms matches
+                if len(r.rhs.ext) == 0:
+                    choices.append((i, r))
+                    choice_probs.append(hrg.counts[ri])
+                else:
+                    rhs_g = r.rhs.visualize("", return_g=True)
+                    ext_ids = [a.id for a in r.rhs.ext]
+                    inc_nodes = Grammar.atom_neis(rhs_g, ext_ids) + ext_ids
+                    inc_subgraph = copy_graph(rhs_g, inc_nodes)
+                    # match_info: hg to rule
+                    gm = GraphMatcher(
+                        hg_g_sub,
+                        inc_subgraph,
+                        node_match=lambda x, y: x["label"] == y["label"],
+                    )
+                    subs = list(gm.subgraph_isomorphisms_iter())
+                    for sub in subs:
+                        choices.append((i, r, sub))
+                        choice_probs.append(hrg.counts[ri] / len(subs))
+            if len(choices) and first:
+                break
+        return choices, choice_probs       
 
     @staticmethod
     def _generate(hrg, vocab, shared_dict=None):
@@ -734,50 +788,12 @@ class Grammar(HRG):
         j = 0
         hg = HG(0 + 0, [])
         hg.add_hyperedge([], label="(S)")
-        while True:
-            choices = []
-            choice_probs = []
-            for i, e in enumerate(hg.E):
-                if hrg.vocab[e.label] is None:  # terminal
-                    continue
-                hg_g = hg.visualize("", return_g=True)
-                inc_nodes = Grammar.atom_neis(hg_g, e.nodes) + e.nodes
-                hg_g_sub = copy_graph(hg_g, inc_nodes)
-                # use its WL hash to quickly find possible rules
-                wl_hash = nx.weisfeiler_lehman_graph_hash(hg_g_sub, node_attr="label")
-                for ri in tqdm(
-                    rule_lookup[(e.get_type(vocab), wl_hash)], "checking rules"
-                ):
-                    r = hrg.rules[ri]
-                    # r.rhs.visualize(os.path.join(folder, 'test_rhs.png'))
-                    # ensure e's node sequence <-> perm(r.rhs.ext)
-                    # where:
-                    # each node's label matches
-                    # each node's adj atoms matches
-                    if len(r.rhs.ext) == 0:
-                        choices.append((i, r))
-                        choice_probs.append(hrg.counts[ri])
-                    else:
-                        rhs_g = r.rhs.visualize("", return_g=True)
-                        ext_ids = [a.id for a in r.rhs.ext]
-                        inc_nodes = Grammar.atom_neis(rhs_g, ext_ids) + ext_ids
-                        inc_subgraph = copy_graph(rhs_g, inc_nodes)
-                        # match_info: hg to rule
-                        gm = GraphMatcher(
-                            hg_g_sub,
-                            inc_subgraph,
-                            node_match=lambda x, y: x["label"] == y["label"],
-                        )
-                        subs = list(gm.subgraph_isomorphisms_iter())
-                        for sub in subs:
-                            choices.append((i, r, sub))
-                            choice_probs.append(hrg.counts[ri] / len(subs))
-            if len(choices) == 0:
-                break
+        while True:            
+            choices, choice_probs = Grammar.find_all_choices(hrg, hg, vocab, rule_lookup, first=True)
             good = False
             while len(choices):
                 rand_ind = np.random.RandomState().choice(
-                    len(choices), p=np.array(choice_probs) / sum(choice_probs)
+                    len(choices), p=np.array(choice_probs) / sum(choice_probs) if sum(choice_probs) > 0 else None
                 )
                 # for rand_ind
                 edge, rule, *pargs = choices[rand_ind]
@@ -792,16 +808,7 @@ class Grammar(HRG):
                     mol = hg_to_mol(hg_cand)
                     assert len(find_fragments(mol)) == 1
                 except:
-                    continue
-                
-                # # temporary
-                # for b in mol.GetBonds():
-                #     begin = b.GetBeginAtomIdx()
-                #     end = b.GetEndAtomIdx()
-                #     if mol.GetAtomWithIdx(begin).GetSymbol() == 'O' and mol.GetAtomWithIdx(end).GetSymbol() == 'O':
-                #         breakpoint()
-                #         hg_cand = rule(deepcopy(hg), edge, *pargs)
-
+                    continue            
                 good = True
                 j += 1
                 if VISUALIZE:
@@ -819,6 +826,7 @@ class Grammar(HRG):
             if shared_dict is not None and smi not in shared_dict:
                 shared_dict[smi] = None
                 logger.info(f"generated {smi}")
+                print(f"generated {len(shared_dict)}")
                 break
         # if smi is not None:
         #     logger.info(f"generated {smi}")
@@ -835,11 +843,11 @@ class Grammar(HRG):
         return list(smis)
 
     @staticmethod
-    def _multi_mp_execute(func, arg, num_samples, batch_size=5 * NUM_PROCS):
+    def _multi_mp_execute(func, arg, num_samples, batch_size=10 * NUM_PROCS):
         with mp.Manager() as manager:
             shared_dict = manager.dict()
             smis = []
-            while len(shared_dict) < num_samples:
+            while len(shared_dict) < num_samples:                
                 args = [arg + (shared_dict,) for _ in range(batch_size)]
                 with mp.Pool(NUM_PROCS) as p:
                     p.starmap(func, tqdm(args, desc="submitting generation tasks"))
