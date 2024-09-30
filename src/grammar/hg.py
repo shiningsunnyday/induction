@@ -738,9 +738,7 @@ class Grammar(HRG):
             hg_g_sub = copy_graph(hg_g, inc_nodes)
             # use its WL hash to quickly find possible rules
             wl_hash = nx.weisfeiler_lehman_graph_hash(hg_g_sub, node_attr="label")
-            for ri in tqdm(
-                rule_lookup[(e.get_type(vocab), wl_hash)], "checking rules"
-            ):
+            for ri in rule_lookup[(e.get_type(vocab), wl_hash)]:
                 r = hrg.rules[ri]
                 # r.rhs.visualize(os.path.join(folder, 'test_rhs.png'))
                 # ensure e's node sequence <-> perm(r.rhs.ext)

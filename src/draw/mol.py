@@ -205,7 +205,8 @@ def draw_cliques(cg, mol, ax=None, cq=None, label=True, label_atoms=True, label_
         if label_atom_idx:
             atom_label += str(j)
         a.SetProp("atomLabel", atom_label)
-    global_color = (1, 0, 0)
+    global_color = (0, 1, 0) # for acrylates
+    # global_color = (1, 0, 0)
     AllChem.Compute2DCoords(mol)
     drawer = rdMolDraw2D.MolDraw2DCairo(-1, -1)
     options = drawer.drawOptions()

@@ -566,12 +566,16 @@ def _learn_grammar(smiles, args):
 
 def grammar_inference(G, trees):
     counts = [0 for _ in range(len(G.hrg.rules))]
+    bad_smis = {'Cc1c(-c2c3nc4c(nc3c(-c3c(C)cc(-c5ccc6-c7ccccc7C(C)(C)c6c5)s3)s2)-c2cccc3cccc-4c23)scc1':'Cc1c(-c2c3nc4c(nc3c(-c3c(C)cc(-c5ccc6-c7ccccc7C(C)(C)c6c5)s3)s2)-c2cccc3c2c-4ccc3)scc1',
+                'Cc1c(-c2c(C)cc(-c3cc(C)c(-c4c5nc6c(nc5c(-c5c(C)ccs5)s4)-c4cccc5cccc-6c45)s3)s2)scc1': 'Cc1c(-c2c(C)cc(-c3cc(C)c(-c4c5nc6c(nc5c(-c5c(C)ccs5)s4)-c4cccc5c4c-6ccc5)s3)s2)scc1',
+                'O=[N+]([O-])c1ccc2CCc3cccc1c32': 'O=[N+]([O-])c1ccc2CCc3c2c1ccc3',                'COc1ccc([N+](=O)[O-])cc1N=Nc1c2ccccc2cc(C(=O)Nc2cccc([N+](=O)[O-])c2)c1O': 'COc1ccc([N+](=O)[O-])cc1N=Nc1c(O)c(C(=O)Nc2cccc([N+](=O)[O-])c2)cc2ccccc12'
+                }
     for smi in trees:
         for tree in trees[smi]:
             for n in tree:
                 symbol = tree.nodes[n]["symbol"]
                 rule_str = tree.nodes[n]["rule"]
-                rule_idx = G.rule_idx_lookup[smi][symbol][rule_str]
+                rule_idx = G.rule_idx_lookup[smi if smi not in bad_smis else bad_smis[smi]][symbol][rule_str]
                 counts[rule_idx] += 1
     G.hrg.set_counts(counts)
 
