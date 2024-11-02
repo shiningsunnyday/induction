@@ -6,7 +6,8 @@ import re
 from functools import reduce
 from tqdm import tqdm
 from argparse import ArgumentParser
-
+from networkx.algorithms.isomorphism import DiGraphMatcher
+import multiprocessing as mp
 
 def get_args():
     parser = ArgumentParser()
@@ -22,7 +23,7 @@ def get_args():
     parser.add_argument("--ablate_merge", action='store_true') 
     parser.add_argument("--ablate_root", action='store_true') 
     # task params
-    parser.add_argument("--task", nargs='+', choices=["learn","generate"])
+    parser.add_argument("--task", nargs='+', choices=["learn","generate","prediction"])
     parser.add_argument("--seed")
     parser.add_argument("--grammar_ckpt")
     parser.add_argument(
@@ -229,3 +230,38 @@ def find_embedding(subgraphs, graph, find_iso, edges=False):
     # best cliques: best clique in ism_subgraph for best_ism
     # return best_ism, best_clique
     return best_ism, best_clique
+
+def subgraphs_isomorphism(graph, subgraph):
+    gm = DiGraphMatcher(
+        graph,
+        subgraph,
+        node_match=lambda d1, d2: d1.get("label", "#") == d2.get("label", "#"),
+        edge_match=lambda d1, d2: d1.get("label", "#") == d2.get("label", "#"),
+    )
+    isms = list(gm.subgraph_isomorphisms_iter())
+    return isms    
+
+def fast_subgraph_isomorphism(graph, subgraph):
+    assert nx.is_connected(nx.Graph(subgraph))
+    conns = list(nx.connected_components(nx.Graph(graph)))
+    # if conn is not None:
+    #     graph = copy_graph(graph, conn)
+    #     conns = [conn]
+    if len(conns) == 1:
+        return subgraphs_isomorphism(graph, subgraph)
+    args = []
+    for conn in tqdm(conns, desc="preparing args"):
+        args.append((copy_graph(graph, conn), subgraph))
+    if NUM_PROCS == 1:
+        ans = [subgraphs_isomorphism(*arg) for arg in tqdm(args, desc="subgraph isomorphism")]
+    else:
+        with mp.Pool(50) as p:
+            ans = p.starmap(
+                subgraphs_isomorphism,
+                tqdm(
+                    args,
+                    desc="subgraph isomorphism mp",
+                ),
+        )
+    ans = sum(ans, [])
+    return ans

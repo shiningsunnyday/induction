@@ -664,7 +664,8 @@ def learn_grammar(smiles_or_list, args):
         else:
             G, trees = multi_thread_execute(_learn_grammar, task_args, G, trees)
         # probabilistic grammar inference => populate counts
-        grammar_inference(G, {smi: [tree] for (smi, tree) in zip(G.mol_lookup, trees)})
+        if len(trees) > 1:
+            grammar_inference(G, {smi: [tree] for (smi, tree) in zip(G.mol_lookup, trees)})
         pickle.dump(
             G,
             open(

@@ -2,7 +2,6 @@ from typing import List, Dict, Any
 from src.draw.graph import draw_graph, draw_circuit
 from src.config import *
 import os
-from networkx.algorithms.isomorphism import DiGraphMatcher
 from PIL import Image
 import numpy as np
 import networkx as nx
@@ -21,7 +20,6 @@ import sys
 sys.path.append(os.path.join(os.getcwd(), "../CktGNN/"))
 from utils import is_valid_Circuit, is_valid_DAG
 import igraph
-import multiprocessing as mp
 from tqdm import tqdm
 
 
@@ -92,6 +90,39 @@ class EDNCEGrammar(NLCGrammar):
             num_nts = len(self.search_nts(cur, "gray"))
             iters += 1
         return cur
+
+
+    def induce_recurse(self, node, model, g):
+        fig, ax = plt.subplots()
+        nx.draw(g, ax=ax, with_labels=True)        
+        draw_graph(g, f'/home/msun415/induction/debug/{len(g)}.png')
+        rule_id = model.graph[node].attrs['rule']
+        if 'nodes' not in model.graph[node].attrs:
+            breakpoint()
+        nodes = model.graph[node].attrs['nodes']
+        rhs = self.rules[rule_id].subgraph
+        rhs = copy_graph(rhs, list(rhs))
+        name_map = dict(zip(rhs, nodes))
+        rhs = nx.relabel_nodes(rhs, name_map)
+        for a, b in rhs.edges:
+            rhs.edges[(a,b)]['level'] = 1            
+        g = nx.union(g, rhs)
+        for n in rhs:
+            g.add_edge(node, n, level=2, label='black')
+        for c in model.graph[node].children:
+            g = self.induce_recurse(c.id, model, g)            
+        return g
+        
+
+    def induce(self, model):
+        if isinstance(model, list):
+            return [self.induce(m) for m in model]
+        g = nx.DiGraph()
+        root = list(model.graph)[-1]
+        nt = self.rules[model.graph[root].attrs['rule']].nt
+        g.add_node(root, label=nt)
+        g = self.induce_recurse(root, model, g)        
+        return g
 
     def search_rules(self, nt):
         rules = []
@@ -313,7 +344,7 @@ class EDNCENode:
 
 class EDNCEModel(NLCModel):
     def __init__(self, anno):
-        super().__init__(self)
+        super().__init__(anno)
         self.seq = list(anno)
 
     def generate(self, grammar):
@@ -369,6 +400,7 @@ def insets_and_outsets(graph, nodes):
         2. A direction of the edge d between the mother node and y
     For each realization, we return the inset/outset and information to identify the realization.
     """
+    breakpoint()
     # if sorted(list(nodes)) == sorted(['11', '1', '2', '12']):
     #     breakpoint()
     out_ns = neis(graph, nodes, direction=["in", "out"])
@@ -403,11 +435,18 @@ def insets_and_outsets(graph, nodes):
 
     if "ckt" in DATASET:
         ### for CKT ONLY
-        # we can further reduce poss_dirs if all nodes in equiv class "precede" nodes or "succed" nodes on the input-output path
+        # we can further reduce poss_dirs if all nodes in equiv class "precede" nodes or "succeed" nodes on the input-output path
         # do dfs from input to each node in equiv class
         # if no path crosses nodes, then it's true
         # TODO: implement this
-        pass
+        poss_ps = list(
+            product(*[FINAL for _ in out_ns])
+        )
+        for e in equiv:            
+            o = []
+            for n in e:
+                # find path from n to nodes
+                o.append(1)
 
     poss = {}
     for a, dirs in enumerate(poss_dirs):  # for each poss dirs
@@ -468,35 +507,6 @@ def add_edge(i, j, graph, ism_graph, isms):
         return [(i, j)]
     else:
         return []
-
-
-def fast_subgraph_isomorphism(graph, subgraph, conn=None):
-    assert nx.is_connected(nx.Graph(subgraph))
-    conns = list(nx.connected_components(nx.Graph(graph)))
-    if conn is not None:
-        assert len(conns) == 1
-        graph = copy_graph(graph, conn)
-    if len(conns) == 1:
-        gm = DiGraphMatcher(
-            graph,
-            subgraph,
-            node_match=lambda d1, d2: d1.get("label", "#") == d2.get("label", "#"),
-            edge_match=lambda d1, d2: d1.get("label", "#") == d2.get("label", "#"),
-        )
-        isms = list(gm.subgraph_isomorphisms_iter())
-        return isms
-    with mp.Manager() as manager:
-        proxy = manager.dict(graph=graph)
-        with mp.Pool(50) as p:
-            ans = p.starmap(
-                fast_subgraph_isomorphism,
-                tqdm(
-                    [(proxy["graph"], subgraph, conn) for conn in conns],
-                    desc="subgraph isomorphism",
-                ),
-            )
-    ans = sum(ans, [])
-    return ans
 
 
 def find_iso(subgraph, graph, rule=None):

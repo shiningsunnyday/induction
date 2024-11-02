@@ -13,44 +13,53 @@ from src.grammar.common import *
 from src.grammar.utils import *
 
 
+def edit_grammar(grammar, conn_g):
+    conn_g_copy = conn_g.__class__(conn_g)
+    rule = EDNCERule("black", conn_g_copy, None, None)
+    exist = grammar.check_exists(rule)
+    if exist is None:
+        rule_no = len(grammar.rules)
+        rule.visualize(os.path.join(IMG_DIR, f"rule_{rule_no}.png"))
+        grammar.add_rule(rule)
+    else:
+        rule_no = exist
+    return rule_no
+
+
 def terminate(g, grammar, anno, iter):
+    def is_init_graph(g_init):
+        return len(g_init) == 1 and g_init.nodes[list(g_init)[0]]['label'] == 'black'
     # create a rule for each connected component
     conns = list(nx.connected_components(nx.Graph(g)))
     if len(conns) == 1:
         nodes = list(g)
-        new_n = find_next(g)
-        rule_no = len(grammar.rules)
-        anno[new_n] = EDNCENode(new_n, attrs={"rule": rule_no})
-        g_copy = g.__class__(g)
-        rule = EDNCERule("black", g_copy, None)
-        rule.visualize(os.path.join(IMG_DIR, f"rule_{rule_no}.png"))
-        grammar.add_rule(rule)
-        g.add_node(new_n, label="black")  # annotate which rule was applied to model
-        rewire_graph(g, new_n, nodes, anno)
-        model = anno[new_n]
+        if is_init_graph(g):
+            model = anno[list(anno)[-1]]
+        else:
+            new_n = find_next(g)        
+            rule_no = edit_grammar(grammar, g)
+            anno[new_n] = EDNCENode(new_n, attrs={"rule": rule_no, "nodes": nodes})
+            g.add_node(new_n, label="black")  # annotate which rule was applied to model
+            rewire_graph(g, new_n, nodes, anno)
+            model = anno[new_n]
         cache_path = os.path.join(CACHE_DIR, f"{iter}.pkl")
         pickle.dump((grammar, anno, g), open(cache_path, "wb+"))
     else:
         model = []
         while conns:
             conn = conns.pop(-1)
+            nodes = conn
             prefixes = [n.split(":")[0] for n in conn]
             assert len(set(prefixes)) == 1
             prefix = prefixes[0] + ":"
             conn_g = copy_graph(g, conn)
+            if is_init_graph(conn_g):            
+                model.append(anno[list(conn_g)[-1]])
+                continue
             new_n = find_next(conn_g, prefix)
-            conn_g_copy = conn_g.__class__(conn_g)
-            rule = EDNCERule("black", conn_g_copy, None, None)
-            exist = grammar.check_exists(rule)
-            if exist is None:
-                rule_no = len(grammar.rules)
-                rule.visualize(os.path.join(IMG_DIR, f"rule_{rule_no}.png"))
-                grammar.add_rule(rule)
-            else:
-                rule_no = exist
-            anno[new_n] = EDNCENode(new_n, attrs={"rule": rule_no})
-            g.add_node(new_n, label="black")  # annotate which rule was applied to model
-            nodes = conn
+            rule_no = edit_grammar(grammar, conn_g)            
+            anno[new_n] = EDNCENode(new_n, attrs={"rule": rule_no, "nodes": nodes})
+            g.add_node(new_n, label="black")  # annotate which rule was applied to model            
             rewire_graph(g, new_n, nodes, anno)
             model.append(anno[new_n])
     cache_path = os.path.join(CACHE_DIR, f"{iter}.pkl")
@@ -208,7 +217,10 @@ def update_graph(g, anno, best_ism, best_clique, grammar, index=-1):
         new_n = find_next(g, prefix=prefix)
         g.add_node(new_n, label="gray")  # annotate which rule was applied to model
         anno[new_n] = EDNCENode(
-            new_n, attrs={"rule": len(grammar.rules) - 1 if index == -1 else index}
+            new_n, attrs={
+                "rule": len(grammar.rules) - 1 if index == -1 else index,
+                "nodes": nodes
+                }
         )
         print(f"{new_n} new node")
         rewire_graph_ednce(g, new_n, nodes, dirs, ps, anno)
@@ -255,9 +267,20 @@ def compress(g, grammar, anno):
     return g, anno
 
 
-def learn_grammar(g):
+def dfs(anno, k):
+    def _dfs(anno, k, anno_k):            
+        for c in anno[k].children:
+            _dfs(anno, c.id, anno_k)
+        anno_k[k] = anno[k]
+    anno_k = {}
+    _dfs(anno, k, anno_k)
+    return anno_k
+        
+
+
+def learn_grammar(g, args):
     cache_iter, cache_path = setup()
-    g, grammar, anno, iter = init_grammar(g, cache_iter, cache_path, EDNCEGrammar)
+    g, grammar, anno, iter = init_grammar(g, cache_iter, cache_path, EDNCEGrammar)    
     while not term(g):
         iter += 1
         img_paths = partition_graph(g, iter, NUM_PARTITON_SAMPLES_FOR_MOTIFS)
@@ -282,8 +305,9 @@ def learn_grammar(g):
     if isinstance(model, list):
         for j, m in enumerate(model):
             draw_tree(m, os.path.join(IMG_DIR, f"model_{iter}_{j}.png"))
+            model[j] = EDNCEModel(dfs(anno, m.id))
     else:
         model = anno[find_max(anno)]
         draw_tree(model, os.path.join(IMG_DIR, f"model_{iter}.png"))
-    model = EDNCEModel(anno)
+        model = EDNCEModel(anno)
     return grammar, model

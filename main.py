@@ -7,6 +7,7 @@ from src.config import RADIUS
 from argparse import ArgumentParser
 import pickle
 from src.grammar.common import get_args
+from src.model import graph_regression, transformer_regression
 
 
 def load_data(args):
@@ -30,14 +31,19 @@ def load_data(args):
 
 
 def main(args):
-    g = load_data(args)    
+    g = load_data(args)
     if 'learn' in args.task:
-        if os.path.exists(os.path.join(IMG_DIR, f"grammar-{args.dataset}-{args.seed}.pkl")):
-            return
+        # if os.path.exists(os.path.join(IMG_DIR, f"grammar-{args.dataset}-{args.seed}.pkl")):
+        #     return
         gr, model = grammar.learn_grammar(g, args)
         # grammar, model = nlc.learn_grammar(g)
-        # grammar, model = mining.learn_stochastic_grammar(g)        
+        # grammar, model = mining.learn_stochastic_grammar(g)     
     # model.generate(gr)
+
+    if 'prediction' in args.task:
+        samples = gr.induce(model)        
+        # graph_regression(samples)
+        transformer_regression(samples)
     
     if 'generate' in args.task:
         path = os.path.join(IMG_DIR, f"smiles-{args.dataset}-{args.seed}.txt")        

@@ -20,15 +20,15 @@ def create_logger(name, log_file, level=logging.INFO):
 wd = os.getcwd()
 
 METHOD = "api"
-DATASET = "mol"
-GRAMMAR = "hg"
+DATASET = "ckt"
+GRAMMAR = "ednce"
 
 MODEL = "gpt-4o"
 FILE_NAME = f"{wd}/data/{METHOD}_{DATASET}_{GRAMMAR}.txt"
 IMG_DIR = f"{wd}/data/{METHOD}_{DATASET}_{GRAMMAR}/"
 CACHE_DIR = f"{wd}/cache/{METHOD}_{DATASET}_{GRAMMAR}/"
 
-NUM_THREADS = 50
+NUM_THREADS = 1
 NUM_PROCS = 50
 VISUALIZE = False
 VERBOSE = True
@@ -73,65 +73,65 @@ if DATASET == "house":
     FINAL = ["red", "blue", "green"]
 elif DATASET == "ckt":
     ### CKT (with basis)
-    # TERMS = ['orchid','pink','yellow','lawngreen','greenyellow','yellowgreen','cyan','lightblue','deepskyblue','dodgerblue','lime','seagreen','springgreen','limegreen','lightcoral','coral','salmon','red','darkorange','bisque','navajowhite','orange','plum','violet','mediumpurple','blueviolet']
-    # NONTERMS = ['gray','black']
-    # NONFINAL = ['gray']
-    # FINAL = ['black']
-    # CKT_LOOKUP = {'input': 'orchid',
-    #     'output': 'pink',
-    #     'R': 'yellow',
-    #     'C': 'lawngreen',
-    #     'R serie C': 'greenyellow',
-    #     'R paral C': 'yellowgreen',
-    #     '+gm+': 'cyan',
-    #     '-gm+': 'lightblue',
-    #     '+gm-': 'deepskyblue',
-    #     '-gm-': 'dodgerblue',
-    #     'C paral +gm+': 'lime',
-    #     'C paral -gm+': 'seagreen',
-    #     'C paral +gm-': 'springgreen',
-    #     'C paral -gm-': 'limegreen',
-    #     'R paral +gm+': 'lightcoral',
-    #     'R paral -gm+': 'coral',
-    #     'R paral +gm-': 'salmon',
-    #     'R paral gm-': 'red',
-    #     'R paral C paral +gm+': 'darkorange',
-    #     'R paral C paral -gm+': 'bisque',
-    #     'R paral C paral +gm-': 'navajowhite',
-    #     'R paral C paral -gm-': 'orange',
-    #     'R serie C serie +gm+': 'plum',
-    #     'R serie C serie -gm+': 'violet',
-    #     'R serie C serie +gm-': 'mediumpurple',
-    #     'R serie C serie -gm-': 'blueviolet'
-    # }
-    # INVERSE_LOOKUP = {
-    #     'orchid': 'input',
-    #     'pink': 'output',
-    #     'yellow': 'R',
-    #     'lawngreen': 'C',
-    #     'greenyellow': 'R serie C',
-    #     'yellowgreen': 'R paral C',
-    #     'cyan': '+gm+',
-    #     'lightblue': '-gm+',
-    #     'deepskyblue': '+gm-',
-    #     'dodgerblue': '-gm-',
-    #     'lime': 'C paral +gm+',
-    #     'seagreen': 'C paral -gm+',
-    #     'springgreen': 'C paral +gm-',
-    #     'limegreen': 'C paral -gm-',
-    #     'lightcoral': 'R paral +gm+',
-    #     'coral': 'R paral -gm+',
-    #     'salmon': 'R paral +gm-',
-    #     'red': 'R paral gm-',
-    #     'darkorange': 'R paral C paral +gm+',
-    #     'bisque': 'R paral C paral -gm+',
-    #     'navajowhite': 'R paral C paral +gm-',
-    #     'orange': 'R paral C paral -gm-',
-    #     'plum': 'R serie C serie +gm+',
-    #     'violet': 'R serie C serie -gm+',
-    #     'mediumpurple': 'R serie C serie +gm-',
-    #     'blueviolet': 'R serie C serie -gm-',
-    # }
+    TERMS = ['orchid','pink','yellow','lawngreen','greenyellow','yellowgreen','cyan','lightblue','deepskyblue','dodgerblue','lime','seagreen','springgreen','limegreen','lightcoral','coral','salmon','red','darkorange','bisque','navajowhite','orange','plum','violet','mediumpurple','blueviolet']
+    NONTERMS = ['gray','black']
+    NONFINAL = ['gray']
+    FINAL = ['black']
+    CKT_LOOKUP = {'input': 'orchid',
+        'output': 'pink',
+        'R': 'yellow',
+        'C': 'lawngreen',
+        'R serie C': 'greenyellow',
+        'R paral C': 'yellowgreen',
+        '+gm+': 'cyan',
+        '-gm+': 'lightblue',
+        '+gm-': 'deepskyblue',
+        '-gm-': 'dodgerblue',
+        'C paral +gm+': 'lime',
+        'C paral -gm+': 'seagreen',
+        'C paral +gm-': 'springgreen',
+        'C paral -gm-': 'limegreen',
+        'R paral +gm+': 'lightcoral',
+        'R paral -gm+': 'coral',
+        'R paral +gm-': 'salmon',
+        'R paral gm-': 'red',
+        'R paral C paral +gm+': 'darkorange',
+        'R paral C paral -gm+': 'bisque',
+        'R paral C paral +gm-': 'navajowhite',
+        'R paral C paral -gm-': 'orange',
+        'R serie C serie +gm+': 'plum',
+        'R serie C serie -gm+': 'violet',
+        'R serie C serie +gm-': 'mediumpurple',
+        'R serie C serie -gm-': 'blueviolet'
+    }
+    INVERSE_LOOKUP = {
+        'orchid': 'input',
+        'pink': 'output',
+        'yellow': 'R',
+        'lawngreen': 'C',
+        'greenyellow': 'R serie C',
+        'yellowgreen': 'R paral C',
+        'cyan': '+gm+',
+        'lightblue': '-gm+',
+        'deepskyblue': '+gm-',
+        'dodgerblue': '-gm-',
+        'lime': 'C paral +gm+',
+        'seagreen': 'C paral -gm+',
+        'springgreen': 'C paral +gm-',
+        'limegreen': 'C paral -gm-',
+        'lightcoral': 'R paral +gm+',
+        'coral': 'R paral -gm+',
+        'salmon': 'R paral +gm-',
+        'red': 'R paral gm-',
+        'darkorange': 'R paral C paral +gm+',
+        'bisque': 'R paral C paral -gm+',
+        'navajowhite': 'R paral C paral +gm-',
+        'orange': 'R paral C paral -gm-',
+        'plum': 'R serie C serie +gm+',
+        'violet': 'R serie C serie -gm+',
+        'mediumpurple': 'R serie C serie +gm-',
+        'blueviolet': 'R serie C serie -gm-',
+    }
 
     ### CKT
     TERMS = [

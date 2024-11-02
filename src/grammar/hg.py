@@ -679,11 +679,13 @@ class Grammar(HRG):
             rhs.add_hyperedge([f"n{b}" for b in bonds], label=f"({label})")
         return HRG_rule(nonterm, rhs, self.vocab)
 
-    def VisAllRules(self):
+    def VisAllRules(self, verbose=False):
         max_title_length = 20
         nonterms = self.GetNTs()
         counts = [self.NumRulesForNT(nonterm) for nonterm in nonterms]
         fig, axes = plt.subplots(len(counts), max(counts), figsize=(50, 50))
+        if verbose:
+            all_figs = []
         if max(counts) == 1:
             if len(counts) == 1:
                 axes = [[axes]]
@@ -693,6 +695,8 @@ class Grammar(HRG):
             axes[i][0].set_ylabel(nonterms[i], fontsize=36)
         for i in range(len(counts)):
             for j in range(counts[i]):
+                if verbose:
+                    all_figs.append(plt.subplots())
                 nt_edges = self.EdgesForRule(nonterms[i], j, False)[0]
                 nt_edges = "".join(nt_edges)
                 # logger.info(nt_edges)
@@ -703,7 +707,12 @@ class Grammar(HRG):
                     title = nt_edges
                 axes[i][j].set_title(title, fontsize=36)
                 self.VisRuleAlt(nonterms[i], j, ax=axes[i][j])
-        return fig
+                if verbose:
+                    self.VisRuleAlt(nonterms[i], j, ax=all_figs[-1][1])
+        if verbose:
+            return all_figs
+        else:
+            return fig
 
     def ProcessAllRules(self):
         nonterms = self.GetNTs()

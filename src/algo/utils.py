@@ -4,9 +4,12 @@ import subprocess
 import re
 import networkx as nx
 from src.draw.graph import *
+import hashlib
+import json
 
 
 def prepare_subdue_file(g, tmp_path):
+    is_directed = 'e' if GRAMMAR == "ednce" else 'u'
     file_content = ""
     for n in g:
         label = g.nodes[n]["label"]
@@ -14,13 +17,23 @@ def prepare_subdue_file(g, tmp_path):
         file_content += line
     file_content += "\n"
     for u, v in g.edges:
-        line = f"u {u} {v} on\n"
+        line = f"{is_directed} {u} {v} on\n"
         file_content += line
     with open(tmp_path, "w+") as f:
         f.write(file_content)
 
 
+
+def hash_graph(g):
+    assert set(g) == set(map(str, range(1,len(g)+1))), "make sure graph nodes are '1', '2', ..."
+    json_data = nx.node_link_data(g)
+    ans = hashlib.md5(json.dumps(json_data, sort_keys=True).encode()).hexdigest()
+    return ans
+
+
+
 def run_subdue(tmp_path, subdue_call="/home/msun415/subdue-5.2.2/bin/subdue"):
+    is_directed = 'e' if GRAMMAR == "ednce" else 'u'
     out_path = str(Path(tmp_path).with_suffix(".out"))
     command = [
         subdue_call,
@@ -35,13 +48,16 @@ def run_subdue(tmp_path, subdue_call="/home/msun415/subdue-5.2.2/bin/subdue"):
         tmp_path,
     ]
     result = subprocess.run(command, capture_output=True, text=True)
-    pat = r"((?:\s{4}v \w+ \S+\n)+(?:\s{4}u \w+ \w+ on\n)+)"
+    if is_directed:
+        pat = r"((?:\s{4}v \w+ \S+\n)+(?:\s{4}d \w+ \w+ on\n)+)"
+    else:
+        pat = r"((?:\s{4}v \w+ \S+\n)+(?:\s{4}u \w+ \w+ on\n)+)"
     regex = re.compile(pat)
     matches = regex.findall(result.stdout)
     out = []
     for m in matches:
         lines = m.rstrip("\n").split("\n")
-        g = nx.Graph()
+        g = nx.DiGraph() if is_directed else nx.Graph()
         for line in lines:
             line = line.strip(" ")
             if line[0] == "v":

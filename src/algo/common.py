@@ -1,6 +1,7 @@
 from src.config import *
 from src.grammar.common import *
 from src.api.get_motifs import *
+from src.algo.utils import *
 import os
 import networkx as nx
 from src.draw.graph import draw_graph
@@ -12,11 +13,41 @@ def term(g):
     return min([g.nodes[n]["label"] in NONTERMS for n in g])
 
 
+def extract_motifs(g):  
+    mapping = {n: str(i + 1) for i, n in enumerate(g)}
+    inv_mapping = {v: k for k, v in mapping.items()}
+    g = nx.relabel_nodes(g, mapping)  # subdue assumes nodes are consecutive 1,2,...
+    hash_val = hash_graph(g)    
+    tmp_path = os.path.join(IMG_DIR, f"g_{hash_val}.g")
+    prepare_subdue_file(g, tmp_path)
+    subgraphs = run_subdue(tmp_path)      
+    for i in tqdm(range(len(subgraphs)), "grounding subs"):
+        gm = DiGraphMatcher(
+            g,
+            subgraphs[i],
+            node_match=lambda d1, d2: d1.get("label", "#") == d2.get("label", "#"),
+        )        
+        ism_iter = gm.subgraph_isomorphisms_iter()        
+        occur = next(ism_iter)
+        subgraphs[i] = nx.relabel_nodes(subgraphs[i], {v: inv_mapping[k] for (k,v) in occur.items()})
+    g = nx.relabel_nodes(g, inv_mapping)
+    if DATASET == 'ckt':
+        for sub in subgraphs:
+            for e in sub.edges:
+                sub.edges[e]['label'] = 'black'
+    else:
+        raise NotImplementedError
+    return subgraphs
+
+
 def obtain_motifs(g, img_paths):
     all_subgraphs = []
     for _ in range(NUM_ATTEMPTS):
-        content = get_motifs(img_paths)
-        groups = get_groups(content, dtype=type(list(g)[0]))
+        ### LLM
+        # content = get_motifs(img_paths)
+        # groups = get_groups(content, dtype=type(list(g)[0]))
+        ### auto        
+        groups = extract_motifs(g)
         # groups = [['6', '7', '8', '15']]
         # groups = [['4','5','9','14']]
         # groups = [['16','10','3']]

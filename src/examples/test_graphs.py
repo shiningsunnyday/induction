@@ -224,8 +224,8 @@ def load_ckt():
     cwd = os.getcwd()
     data_dir = f"{cwd}/data/nx/ckt/"
     whole_g = nx.DiGraph()
-    best_i = 0
-    max_size = 0
+    # best_i = 0
+    # max_size = 0
     # for i in range(9000):
     #     fpath = os.path.join(data_dir, f"{i}.json")
     #     data = json.load(open(fpath))
@@ -258,10 +258,18 @@ def load_ckt():
 
 
 def read_file(filename, num_samples=-1):
-    # debug
-    # smiles_list = ['c1c(N)c(OC)ccc1[N+](=O)[O-]']
+    # debug ptc
+    # smiles_list = ['COP(=O)(OC)OC=C(Cl)Cl']
     # return smiles_list
-    # end debug
+    # single chain extender
+    smiles_list = ['OCCNC(=O)NCCCCCCNC(=O)NCCO']
+    return smiles_list
+    # top-10 ptc
+    # debug_smiles_list = ['COc1c(N)cccc1', 'CC(C)CCCC(C)C1CCC2C3CC=C4CC(OC(=O)Cc5ccc(N(CCCl)CCCl)cc5)CCC4(C)C3CCC12C', 'Nc1nc(=O)n(C2OC(CO)C(O)C2O)cn1', 'CC(=O)C(N=Nc1ccc(-c2ccc(N=NC(C(C)=O)C(=O)Nc3ccccc3)c(Cl)c2)cc1Cl)C(=O)Nc1ccccc1', 'ClCC(Br)CBr', 'ClC1=C(Cl)C2(Cl)C3C4CC(C5OC45)C3C1(Cl)C2(Cl)Cl', 'ClC1=C(Cl)C2(Cl)C3C(Cl)C(Cl)CC3C1(Cl)C2(Cl)Cl', 'CNC(=O)CSP(=S)(OC)OC', 'ClC=C(Cl)Cl', 'COP(=O)(OC)OC=C(Cl)Cl']
+    # top-10 hopv
+    # debug_smiles_list = ['Cc1c(-c2cccs2)sc2c1sc(-c1ccc(-c3c4C(=O)N(C)C(=O)c4cs3)s1)c2C', 'COC(=O)c1cc2c(-c3cccs3)sc(-c3ccc(-c4cc5c(s4)c(-c4ccc(C)s4)c4ccsc4c5-c4ccc(C)s4)s3)c2s1', 'N#CC(=Cc1ccc(-c2ccc(-c3ccc(C=C(C#N)c4ccc([N+](=O)[O-])cc4)s3)c3c2C(=O)OC3=O)s1)c1ccc([N+](=O)[O-])cc1', 'CC1(C)CC(C=Cc2ccc(N(c3ccc(-n4c5ccccc5c5ccccc54)cc3)c3ccc(-n4c5ccccc5c5ccccc54)cc3)cc2)=CC(=C(C#N)C(=O)O)C1', 'CN1C(=O)C2=C(c3ccc(-c4cc5c(s4)-c4c(ccs4)C5(C)C)s3)N(C)C(=O)C2=C1c1cccs1', 'COc1ccc(N(c2ccc(OC)cc2)c2ccc(-c3ccc(-c4ccc(C=C(C#N)C(=O)O)s4)s3)cc2)cc1', 'Cc1cc(C)c(-c2c3cc(-c4ccc(-c5ccc(-c6cccs6)c6nsnc56)s4)sc3c(-c3c(C)cc(C)s3)c3c2scc3)s1', 'C#Cc1cc2c(s1)c1c(cc(C#Cc3c4nc(-c5ccccc5)c(-c5ccccc5)nc4cs3)s1)n2C', 'C[Si]1(C)c2c(scc2)-c2c1cc(-c1nc3c(nc(-c4cc5c(s4)-c4c(cc(-c6cc7c(ccs7)s6)s4)[Si]5(C)C)s3)s1)s2', 'Cc1ccc(-c2c3cc(-c4c(C)c5c(cc(-c6ccc(-c7csc8c7scc8C)c7nsnc67)s5)s4)sc3c(-c3ccc(C)s3)c3c2scc3)s1']
+    # return debug_smiles_list
+    # end debug    
     smiles_list = []
     with open(filename) as f:
         lines = f.readlines()
@@ -285,6 +293,7 @@ def read_file(filename, num_samples=-1):
         for l in samples:
             line = lines[l]
             smiles_list.append(line.split(",")[0])
+    
     return smiles_list
 
 
