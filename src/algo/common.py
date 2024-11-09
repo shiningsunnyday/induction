@@ -13,7 +13,18 @@ def term(g):
     return min([g.nodes[n]["label"] in NONTERMS for n in g])
 
 
+def preprocess_ckt(g):
+    interm_nodes = []
+    for n in g:
+        if g.nodes[n]["label"] in INVERSE_LOOKUP and INVERSE_LOOKUP[g.nodes[n]["label"]] in ['input', 'output']:
+            continue
+        interm_nodes.append(n)
+    return copy_graph(g, interm_nodes)
+
+
 def extract_motifs(g):  
+    if DATASET == 'ckt':
+        g = preprocess_ckt(g)
     mapping = {n: str(i + 1) for i, n in enumerate(g)}
     inv_mapping = {v: k for k, v in mapping.items()}
     g = nx.relabel_nodes(g, mapping)  # subdue assumes nodes are consecutive 1,2,...
@@ -28,7 +39,10 @@ def extract_motifs(g):
             node_match=lambda d1, d2: d1.get("label", "#") == d2.get("label", "#"),
         )        
         ism_iter = gm.subgraph_isomorphisms_iter()        
-        occur = next(ism_iter)
+        try:
+            occur = next(ism_iter)
+        except:
+            continue
         subgraphs[i] = nx.relabel_nodes(subgraphs[i], {v: inv_mapping[k] for (k,v) in occur.items()})
     g = nx.relabel_nodes(g, inv_mapping)
     if DATASET == 'ckt':
@@ -37,6 +51,7 @@ def extract_motifs(g):
                 sub.edges[e]['label'] = 'black'
     else:
         raise NotImplementedError
+    # assert len(subgraphs) > 0
     return subgraphs
 
 

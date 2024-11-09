@@ -5,6 +5,7 @@ from torch.utils.data import Dataset
 from torch_geometric.nn import GCNConv, global_mean_pool
 from torch_geometric.utils import from_networkx
 from functools import reduce
+import numpy as np
 from src.config import *
 
 class GraphDataset(Dataset):
@@ -56,7 +57,10 @@ def convert_networkx_to_pyg_data(graphs):
     pyg_data_list = []
     for i, G in enumerate(graphs):
         for node in G.nodes():
-            G.nodes[node]['x'] = label_to_one_hot(G.nodes[node])
+            G.nodes[node]['x'] = [label_to_one_hot(G.nodes[node]),
+                                  [G.nodes[node]['feat'] if 'feat' in G.nodes[node] else 0.0]
+            ]            
+            G.nodes[node]['x'] = torch.from_numpy(np.concatenate(G.nodes[node]['x'], dtype=np.float32))
         data = my_from_networkx(G)
         data.x = torch.stack(data.x)
         data.y = torch.tensor([G.graph[f'{i}:fom']], dtype=torch.float) 
@@ -80,8 +84,8 @@ def graph_regression(graphs):
     pyg_dataset = GraphDataset(pyg_data_list)
     loader = DataLoader(pyg_dataset, batch_size=2)
     model = create_model(num_node_features=pyg_dataset[0].x.shape[-1], hidden_channels=16)
-    optimizer = torch.optim.Adam(model.parameters(), lr=0.01)
-    train(model, loader, optimizer, num_epochs=1000)
+    optimizer = torch.optim.Adam(model.parameters())
+    train(model, loader, optimizer, num_epochs=10000)
 
 def transformer_regression(graphs):
     breakpoint()

@@ -20,7 +20,7 @@ def load_data(args):
     elif DATASET == "house":
         g = create_house_graph()
     elif DATASET == "ckt":
-        g = load_ckt()
+        g = load_ckt(10)
     elif DATASET == "mol":
         g = read_file(
             f"data/api_mol_hg/{args.dataset}_smiles.txt"
@@ -40,10 +40,12 @@ def main(args):
         # grammar, model = mining.learn_stochastic_grammar(g)     
     # model.generate(gr)
 
-    if 'prediction' in args.task:
-        samples = gr.induce(model)        
-        # graph_regression(samples)
-        transformer_regression(samples)
+    if 'prediction' in args.task:       
+        samples = gr.induce(model)      
+        for i in range(len(samples)):
+            draw_graph(samples[i], os.path.join(IMG_DIR, f"{i}_model.png"))
+        graph_regression(samples)
+        # transformer_regression(samples)
     
     if 'generate' in args.task:
         path = os.path.join(IMG_DIR, f"smiles-{args.dataset}-{args.seed}.txt")        

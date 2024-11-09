@@ -113,7 +113,7 @@ def draw_custom_arrows(
 
 def draw_graph(
     g,
-    path,
+    path=None,
     scale=SCALE,
     node_size=NODE_SIZE,
     font_size=FONT_SIZE,
@@ -248,9 +248,12 @@ def draw_graph(
         if "title" in g.graph:
             ax_.set_title(g.graph["title"], fontsize=TITLE_FONT_SIZE)
     if ax is None:
-        os.makedirs(os.path.dirname(path), exist_ok=True)
-        fig.savefig(path, bbox_inches="tight")
-        print(os.path.abspath(path))
+        if path is None:
+            return fig
+        else:
+            os.makedirs(os.path.dirname(path), exist_ok=True)
+            fig.savefig(path, bbox_inches="tight")
+            print(os.path.abspath(path))
 
 
 def add_node(graph, node_id, label, shape="box", style="filled"):

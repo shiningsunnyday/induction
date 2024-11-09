@@ -216,7 +216,7 @@ def union(gs, gs_dict={}):
     return whole_g
 
 
-def load_ckt():
+def load_ckt(num_graphs=10):
     """
     Load all ckts, and do union over all the graphs
     Combine graph-level attrs of individual graphs into a graph-level attr lookup
@@ -236,8 +236,8 @@ def load_ckt():
     # print(best_i)
     gs = []
     gs_dict = {}
-    for i in tqdm(range(9000)):
-        fpath = os.path.join(data_dir, f"{i}.json")
+    for i in tqdm(range(num_graphs)):
+        fpath = os.path.join(data_dir, f"{2*i}.json")
         data = json.load(open(fpath))
         g = json_graph.node_link_graph(data)
         lookup = CKT_LOOKUP

@@ -94,18 +94,20 @@ class EDNCEGrammar(NLCGrammar):
 
     def induce_recurse(self, node, model, g):
         fig, ax = plt.subplots()
-        nx.draw(g, ax=ax, with_labels=True)        
-        draw_graph(g, f'/home/msun415/induction/debug/{len(g)}.png')
+        nx.draw(g, ax=ax, with_labels=True)                
         rule_id = model.graph[node].attrs['rule']
         if 'nodes' not in model.graph[node].attrs:
             breakpoint()
         nodes = model.graph[node].attrs['nodes']
-        rhs = self.rules[rule_id].subgraph
-        rhs = copy_graph(rhs, list(rhs))
+        rhs = self.rules[rule_id].subgraph        
+        rhs = copy_graph(rhs, list(rhs))       
         name_map = dict(zip(rhs, nodes))
         rhs = nx.relabel_nodes(rhs, name_map)
+        # set the feats
+        for n in rhs:
+            rhs.nodes[n]['feat'] = model.feat_lookup[n]        
         for a, b in rhs.edges:
-            rhs.edges[(a,b)]['level'] = 1            
+            rhs.edges[(a,b)]['level'] = 1
         g = nx.union(g, rhs)
         for n in rhs:
             g.add_edge(node, n, level=2, label='black')
@@ -400,9 +402,8 @@ def insets_and_outsets(graph, nodes):
         2. A direction of the edge d between the mother node and y
     For each realization, we return the inset/outset and information to identify the realization.
     """
-    breakpoint()
     # if sorted(list(nodes)) == sorted(['11', '1', '2', '12']):
-    #     breakpoint()
+    #     breakpoint()    
     out_ns = neis(graph, nodes, direction=["in", "out"])
     # # compute direction of mother-daughter
     # dirs = {}
@@ -442,11 +443,23 @@ def insets_and_outsets(graph, nodes):
         poss_ps = list(
             product(*[FINAL for _ in out_ns])
         )
-        for e in equiv:            
-            o = []
-            for n in e:
-                # find path from n to nodes
-                o.append(1)
+        # find source
+        prefix = list(nodes)[0][0]
+        assert graph.nodes[f"{prefix}:0"]['type'] == 'input'        
+        # single source shortest paths
+        equiv_dir = []
+        for e in equiv:
+            try:
+                has_paths = [nx.has_path(graph, n, ei) for n in nodes for ei in e]
+            except:
+                breakpoint()
+            if np.all(has_paths):
+                equiv_dir.append(['out'])
+            elif not np.any(has_paths):
+                equiv_dir.append(['in'])
+            else:
+                equiv_dir.append(["in", "out"])
+        poss_dirs = list(product(*equiv_dir))
 
     poss = {}
     for a, dirs in enumerate(poss_dirs):  # for each poss dirs
@@ -456,7 +469,10 @@ def insets_and_outsets(graph, nodes):
             for i, x in enumerate(nodes):  # for each node
                 for j, y in enumerate(out_ns):  # for each out nei
                     e = lookup[y]
-                    d = dirs[e]
+                    try:
+                        d = dirs[e]
+                    except:
+                        breakpoint()
                     p = ps[e]
                     label_y = graph.nodes[y]["label"]
                     mu = label_y

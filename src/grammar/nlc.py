@@ -166,6 +166,11 @@ class NLCNode:
 class NLCModel:
     def __init__(self, graph):
         self.graph = graph
+        # references to node-level attrs
+        self.feat_lookup = {}
+        for n in graph:
+            for node, feat in zip(graph[n].attrs['nodes'], graph[n].attrs['feats']):
+                self.feat_lookup[node] = feat
 
     def __generate__(self, node, grammar, res):
         rule_no = node.attrs["rule"]

@@ -38,7 +38,7 @@ def terminate(g, grammar, anno, iter):
         else:
             new_n = find_next(g)        
             rule_no = edit_grammar(grammar, g)
-            anno[new_n] = EDNCENode(new_n, attrs={"rule": rule_no, "nodes": nodes})
+            anno[new_n] = EDNCENode(new_n, attrs={"rule": rule_no, "nodes": nodes, "feats": [g.nodes[n]['feat'] if 'feat' in g.nodes[n] else 0.0 for n in nodes]})
             g.add_node(new_n, label="black")  # annotate which rule was applied to model
             rewire_graph(g, new_n, nodes, anno)
             model = anno[new_n]
@@ -58,7 +58,7 @@ def terminate(g, grammar, anno, iter):
                 continue
             new_n = find_next(conn_g, prefix)
             rule_no = edit_grammar(grammar, conn_g)            
-            anno[new_n] = EDNCENode(new_n, attrs={"rule": rule_no, "nodes": nodes})
+            anno[new_n] = EDNCENode(new_n, attrs={"rule": rule_no, "nodes": nodes, "feats": [conn_g.nodes[n]['feat'] if 'feat' in conn_g.nodes[n] else 0.0 for n in nodes]})
             g.add_node(new_n, label="black")  # annotate which rule was applied to model            
             rewire_graph(g, new_n, nodes, anno)
             model.append(anno[new_n])
@@ -215,11 +215,12 @@ def update_graph(g, anno, best_ism, best_clique, grammar, index=-1):
         no = nodes[0].split(":")[0]
         prefix = f"{no}:"
         new_n = find_next(g, prefix=prefix)
-        g.add_node(new_n, label="gray")  # annotate which rule was applied to model
+        g.add_node(new_n, label="gray")  # annotate which rule was applied to model        
         anno[new_n] = EDNCENode(
             new_n, attrs={
                 "rule": len(grammar.rules) - 1 if index == -1 else index,
-                "nodes": nodes
+                "nodes": nodes,
+                "feats": [g.nodes[n]['feat'] if 'feat' in g.nodes[n] else 0.0 for n in nodes]
                 }
         )
         print(f"{new_n} new node")
@@ -280,7 +281,7 @@ def dfs(anno, k):
 
 def learn_grammar(g, args):
     cache_iter, cache_path = setup()
-    g, grammar, anno, iter = init_grammar(g, cache_iter, cache_path, EDNCEGrammar)    
+    g, grammar, anno, iter = init_grammar(g, cache_iter, cache_path, EDNCEGrammar)
     while not term(g):
         iter += 1
         img_paths = partition_graph(g, iter, NUM_PARTITON_SAMPLES_FOR_MOTIFS)

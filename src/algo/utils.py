@@ -9,7 +9,7 @@ import json
 
 
 def prepare_subdue_file(g, tmp_path):
-    is_directed = 'e' if GRAMMAR == "ednce" else 'u'
+    is_directed = 'd' if GRAMMAR == "ednce" else 'u'
     file_content = ""
     for n in g:
         label = g.nodes[n]["label"]
@@ -20,7 +20,7 @@ def prepare_subdue_file(g, tmp_path):
         line = f"{is_directed} {u} {v} on\n"
         file_content += line
     with open(tmp_path, "w+") as f:
-        f.write(file_content)
+        f.write(file_content)        
 
 
 
@@ -32,9 +32,10 @@ def hash_graph(g):
 
 
 
-def run_subdue(tmp_path, subdue_call="/home/msun415/subdue-5.2.2/bin/subdue"):
-    is_directed = 'e' if GRAMMAR == "ednce" else 'u'
+def run_subdue(tmp_path, subdue_call="../subdue-5.2.2/bin/subdue"):
+    is_directed = 'd' if GRAMMAR == "ednce" else 'u'
     out_path = str(Path(tmp_path).with_suffix(".out"))
+    print("out_path:", out_path)
     command = [
         subdue_call,
         "-out",
@@ -44,11 +45,11 @@ def run_subdue(tmp_path, subdue_call="/home/msun415/subdue-5.2.2/bin/subdue"):
         "-maxsize",
         "5",
         "-nsubs",
-        "10",
+        "100",
         tmp_path,
     ]
     result = subprocess.run(command, capture_output=True, text=True)
-    if is_directed:
+    if is_directed == 'd':
         pat = r"((?:\s{4}v \w+ \S+\n)+(?:\s{4}d \w+ \w+ on\n)+)"
     else:
         pat = r"((?:\s{4}v \w+ \S+\n)+(?:\s{4}u \w+ \w+ on\n)+)"
@@ -57,7 +58,7 @@ def run_subdue(tmp_path, subdue_call="/home/msun415/subdue-5.2.2/bin/subdue"):
     out = []
     for m in matches:
         lines = m.rstrip("\n").split("\n")
-        g = nx.DiGraph() if is_directed else nx.Graph()
+        g = nx.DiGraph() if is_directed == 'd' else nx.Graph()
         for line in lines:
             line = line.strip(" ")
             if line[0] == "v":
