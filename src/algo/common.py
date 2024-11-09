@@ -56,6 +56,8 @@ def extract_motifs(g):
 
 
 def obtain_motifs(g, img_paths):
+    logger = logging.getLogger('global_logger')
+    logger.info("begin obtain motifs")
     all_subgraphs = []
     for _ in range(NUM_ATTEMPTS):
         ### LLM
@@ -83,6 +85,7 @@ def obtain_motifs(g, img_paths):
             comps = list(nx.connected_components(undirected_subgraph))
             subgraphs += [copy_graph(subgraph, comp) for comp in comps]
         all_subgraphs += subgraphs
+    logger.info(f"finish obtain {len(all_subgraphs)} motifs")
     return all_subgraphs
 
 

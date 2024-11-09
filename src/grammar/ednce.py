@@ -508,29 +508,58 @@ def touching(graph, ismA, ismB):
     return touch
 
 
-def add_edge(i, j, graph, ism_graph, isms):
+def add_edge(i, j, graph, ism_graph, isms):    
     if int(i.split("_")[0]) == int(j.split("_")[0]):
         return []
     ismA = isms[int(i.split("_")[0])]
     ismB = isms[int(j.split("_")[0])]
+    # if ednce is linear
+        # if i, j in same component
+            # don't add edge    
+    if LINEAR:
+        if get_prefix(list(ismA)[0]) == get_prefix(list(ismB)[0]):
+            return []
     touch = touching(graph, ismA, ismB)
+    if touch:
+        return []            
     inset_i = ism_graph.nodes[i]["ins"]
     outset_i = ism_graph.nodes[i]["out"]
     inset_j = ism_graph.nodes[j]["ins"]
     outset_j = ism_graph.nodes[j]["out"]
     overlap = (inset_i | inset_j) & (outset_i | outset_j)
-    if not touch and not overlap:
-        return [(i, j)]
-    else:
-        return []
+    return [] if overlap else [(i, j)]
 
 
 def find_iso(subgraph, graph, rule=None):
     isms = fast_subgraph_isomorphism(graph, subgraph)
+    # if ednce is linear
+        # if subgraph is terminal-only
+            # remove all subgraph instances in comps with nt
+    if LINEAR:
+        isms_copy = []
+        for ism in isms:
+            term_only = True
+            for n in subgraph:
+                if subgraph.nodes[n]['label'] in NONTERMS:
+                    term_only = False
+            if not term_only:
+                isms_copy.append(ism)
+                continue
+            pre = get_prefix(list(ism)[0])
+            has_nt = False
+            for n in graph:
+                if get_prefix(n) == pre:
+                    if graph.nodes[n]['label'] in NONTERMS:
+                        has_nt = True
+                        break
+            if not has_nt:
+                isms_copy.append(ism)
+        isms = isms_copy
+            
     ism_graph = nx.Graph()
     for i, ismA in enumerate(isms):
-        poss = insets_and_outsets(graph, ismA)
-        for a, b in poss:
+        poss = insets_and_outsets(graph, ismA)        
+        for a, b in poss: # each one a possible contraction
             inset, outset, dirs, ps = poss[(a, b)]
             if rule is not None:
                 inset = inset | rule.embedding

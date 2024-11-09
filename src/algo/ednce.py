@@ -31,6 +31,7 @@ def terminate(g, grammar, anno, iter):
         return len(g_init) == 1 and g_init.nodes[list(g_init)[0]]['label'] == 'black'
     # create a rule for each connected component
     conns = list(nx.connected_components(nx.Graph(g)))
+    conns = sorted(conns, key=lambda c: get_prefix(list(c)[0]))
     if len(conns) == 1:
         nodes = list(g)
         if is_init_graph(g):
@@ -236,28 +237,35 @@ def update_graph(g, anno, best_ism, best_clique, grammar, index=-1):
 
 
 def compress(g, grammar, anno):
+    logger = logging.getLogger('global_logger')
+    logger.info("begin compress grammar")
     changed = True
     while changed:
         changed = False
+        best_i = -1
         best_ism = None
         best_clique = None
         best_rule_idx = None
         max_len = 0
         for index, rule in enumerate(grammar.rules):
             ism_subgraph = find_iso(rule.subgraph, g, rule=rule)
-            if len(ism_subgraph):
+            if len(ism_subgraph):                
                 max_clique = approximate_best_clique(ism_subgraph)
                 if len(max_clique) * len(rule.subgraph) > max_len:
+                    best_i = index
                     max_len = len(max_clique) * len(rule.subgraph)
                     best_ism = ism_subgraph
                     best_clique = max_clique
                     best_rule_idx = index
         if best_clique is not None:
+            best_comps = list(set([get_prefix(best_ism.nodes[c]['ism'][0]) for c in best_clique]))    
+            logger.info(f"subgraph {best_i} occurred {len(best_clique)} times across components {sorted(best_comps)}")                        
             # update grammar
             lower_best, ous_best = reduce_to_bounds(
                 [best_ism.nodes[n] for n in best_clique]
             )
             rule = grammar.rules[best_rule_idx]
+            logger.info(f"revising rule {best_rule_idx}")
             rule.embedding = rule.embedding | lower_best
             rule.upper = rule.upper & ous_best
             assert not (rule.embedding & rule.upper)
@@ -265,6 +273,7 @@ def compress(g, grammar, anno):
             g, _ = update_graph(
                 g, anno, best_ism, best_clique, grammar, index=best_rule_idx
             )
+    logger.info("done compress grammar")
     return g, anno
 
 
@@ -280,12 +289,21 @@ def dfs(anno, k):
 
 
 def learn_grammar(g, args):
+    logger = create_logger(
+        "global_logger",
+        f"{wd}/data/{METHOD}_{DATASET}_{GRAMMAR}.log",
+    )        
     cache_iter, cache_path = setup()
     g, grammar, anno, iter = init_grammar(g, cache_iter, cache_path, EDNCEGrammar)
     while not term(g):
         iter += 1
-        img_paths = partition_graph(g, iter, NUM_PARTITON_SAMPLES_FOR_MOTIFS)
-        all_subgraphs = obtain_motifs(g, img_paths)
+        # img_paths = partition_graph(g, iter, NUM_PARTITON_SAMPLES_FOR_MOTIFS)
+        # all_subgraphs = obtain_motifs(g, img_paths)
+        all_subgraphs = obtain_motifs(g, [])
+        for i, subgraph in enumerate(all_subgraphs):
+            path = os.path.join(IMG_DIR, f"iter_{iter}_motif_{i}.png")
+            draw_graph(subgraph, path)
+            logger.info(f"subgraph {i} {path}")        
         g, anno = compress(g, grammar, anno)
         # path = os.path.join(IMG_DIR, f'{METHOD}_{iter-1}_compress.png')
         # draw_graph(g, path)
@@ -299,7 +317,8 @@ def learn_grammar(g, args):
         if not change:
             break
         path = os.path.join(IMG_DIR, f"{METHOD}_{iter}.png")
-        draw_graph(g, path)
+        if VISUALIZE:
+            draw_graph(g, path)
         cache_path = os.path.join(CACHE_DIR, f"{iter}.pkl")
         pickle.dump((grammar, anno, g), open(cache_path, "wb+"))
     g, grammar, model = terminate(g, grammar, anno, iter)

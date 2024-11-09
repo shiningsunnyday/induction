@@ -27,6 +27,13 @@ def next(n):
             return str(int(n) + 1)
     else:
         return n + 1
+    
+
+def get_prefix(name):
+    # '5:13' => 5
+    if ':' not in name:
+        raise ValueError(f"{name} has no :")
+    return int(name.split(':')[0])
 
 
 def flatten(nested_iterable):

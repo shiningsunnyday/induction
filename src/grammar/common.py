@@ -85,6 +85,7 @@ def copy_graph(g, nodes):
 
 
 def boundary(g):
+    # checks for any non-term connected nodes in g
     bad = False
     for a, b in g.edges:
         if g.nodes[a]["label"] in NONTERMS and g.nodes[b]["label"] in NONTERMS:
@@ -176,7 +177,8 @@ def approximate_best_clique(ism_subgraph):
 
 def non_isomorphic(all_subgraphs):
     subgraphs = []
-    for s in all_subgraphs:
+    subgraph_ids = []
+    for i, s in enumerate(all_subgraphs):
         exist = False
         for s_ in subgraphs:
             if nx.is_isomorphic(
@@ -189,22 +191,26 @@ def non_isomorphic(all_subgraphs):
                 break
         if not exist:
             subgraphs.append(s)
-    return subgraphs
+            subgraph_ids.append(i)
+    return subgraph_ids, subgraphs
 
 
 def find_embedding(subgraphs, graph, find_iso, edges=False):
+    logger = logging.getLogger('global_logger')
+    logger.info("begin find embedding")
     # find_iso: a custom function that constructs the compat graph
+    best_i = -1
     best_ism = None
     best_clique = None
     max_len = 0
     # eliminate common subgraphs
-    subgraphs = non_isomorphic(subgraphs)
-    for subgraph in tqdm(subgraphs, desc="looping over subgraphs"):
+    subgraph_ids, subgraphs = non_isomorphic(subgraphs)
+    for i, subgraph in tqdm(zip(subgraph_ids, subgraphs), desc="looping over subgraphs"):
         # general concerns
         if len(subgraph) == 1:
             continue
-        if boundary(subgraph):
-            continue
+        # if boundary(subgraph): # if so, will violate conformity
+        #     continue
         # domain-specific concerns
         if "ckt" in DATASET:
             if check_input_xor_output(subgraph):
@@ -215,20 +221,24 @@ def find_embedding(subgraphs, graph, find_iso, edges=False):
         print(subgraph.nodes, ism_subgraph.nodes)
         max_clique = approximate_best_clique(ism_subgraph)
         # max_clique = list(nx.find_cliques(ism_subgraph))
-        better = False
         if edges:
             expr = len(max_clique) * len(subgraph.edges)
         else:
             expr = len(max_clique) * len(subgraph)
         better = expr > max_len
         if better:
+            best_i = i
             max_len = expr
             best_ism = ism_subgraph
             best_clique = max_clique
     # ism_subgraph: compatibility graph
     # best_ism: best subgraph
     # best cliques: best clique in ism_subgraph for best_ism
-    # return best_ism, best_clique
+    # return best_ism, best_clique    
+    if best_clique is not None:
+        best_comps = list(set([best_ism.nodes[c]['ism'][0].split(':')[0] for c in best_clique]))
+        logger.info("done find embedding")
+        logger.info(f"subgraph {best_i} occurred {len(best_clique)} times across components {sorted(best_comps)}")
     return best_ism, best_clique
 
 def subgraphs_isomorphism(graph, subgraph):

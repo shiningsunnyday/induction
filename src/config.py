@@ -30,10 +30,13 @@ CACHE_DIR = f"{wd}/cache/{METHOD}_{DATASET}_{GRAMMAR}/"
 
 NUM_THREADS = 1
 NUM_PROCS = 1
-VISUALIZE = False
+VISUALIZE = True
 VERBOSE = True
 CACHE = False
 MAX_TRIES = 10
+
+# EDNCE parameters
+LINEAR = True # at most 1 nt per comp, and subgraph must contain nt if present
 
 TOP_DIFF = 30
 SEED = 5

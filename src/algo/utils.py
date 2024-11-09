@@ -72,6 +72,7 @@ def run_subdue(tmp_path, subdue_call="../subdue-5.2.2/bin/subdue"):
 
 
 def setup():
+    logger = logging.getLogger('global_logger')
     os.makedirs(IMG_DIR, exist_ok=True)
     os.makedirs(CACHE_DIR, exist_ok=True)
     cache_path = None
@@ -80,4 +81,8 @@ def setup():
         if int(f.split(".pkl")[0]) > cache_iter:
             cache_iter = int(f.split(".pkl")[0])
             cache_path = os.path.join(CACHE_DIR, f"{cache_iter}.pkl")
+    if cache_iter == 0:
+        logger.info(f"init grammar")
+    else:
+        logger.info(f"loading grammar from iter {cache_iter} from {cache_path}")
     return cache_iter, cache_path
