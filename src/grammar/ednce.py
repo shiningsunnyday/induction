@@ -22,6 +22,7 @@ from utils import is_valid_Circuit, is_valid_DAG
 import igraph
 from tqdm import tqdm
 
+graph_proxy = None
 
 def specification(graph):
     if "ckt" in DATASET:
@@ -499,6 +500,36 @@ def insets_and_outsets(graph, nodes):
     return poss
 
 
+def add_edge(pair_list, graph_proxy):    
+    graph, ism_graph, isms = graph_proxy['graph'], graph_proxy['ism_graph'], graph_proxy['isms']
+    res = []
+    for i, j in pair_list:
+        if int(i.split("_")[0]) == int(j.split("_")[0]):
+            res.append(False)
+            continue
+        ismA = isms[int(i.split("_")[0])]
+        ismB = isms[int(j.split("_")[0])]
+        # if ednce is linear
+            # if i, j in same component
+                # don't add edge    
+        if LINEAR:
+            if get_prefix(list(ismA)[0]) == get_prefix(list(ismB)[0]):
+                res.append(False)
+                continue
+        touch = touching(graph, ismA, ismB)
+        if touch:
+            res.append(False)    
+            continue
+        inset_i = ism_graph.nodes[i]["ins"]
+        outset_i = ism_graph.nodes[i]["out"]
+        inset_j = ism_graph.nodes[j]["ins"]
+        outset_j = ism_graph.nodes[j]["out"]
+        overlap = (inset_i | inset_j) & (outset_i | outset_j)
+        res.append(not overlap)
+    print(f"{len(pair_list)} done")
+    return res
+
+
 def touching(graph, ismA, ismB):
     nodesA = set(ismA)
     neisA = set(neis(graph, ismA))
@@ -506,31 +537,11 @@ def touching(graph, ismA, ismB):
     neisB = set(neis(graph, ismB))
     touch = bool((nodesA | neisA) & nodesB) | bool(nodesA & (nodesB | neisB))
     return touch
-
-
-def add_edge(i, j, graph, ism_graph, isms):    
-    if int(i.split("_")[0]) == int(j.split("_")[0]):
-        return []
-    ismA = isms[int(i.split("_")[0])]
-    ismB = isms[int(j.split("_")[0])]
-    # if ednce is linear
-        # if i, j in same component
-            # don't add edge    
-    if LINEAR:
-        if get_prefix(list(ismA)[0]) == get_prefix(list(ismB)[0]):
-            return []
-    touch = touching(graph, ismA, ismB)
-    if touch:
-        return []            
-    inset_i = ism_graph.nodes[i]["ins"]
-    outset_i = ism_graph.nodes[i]["out"]
-    inset_j = ism_graph.nodes[j]["ins"]
-    outset_j = ism_graph.nodes[j]["out"]
-    overlap = (inset_i | inset_j) & (outset_i | outset_j)
-    return [] if overlap else [(i, j)]
+    
 
 
 def find_iso(subgraph, graph, rule=None):
+    global graph_proxy
     isms = fast_subgraph_isomorphism(graph, subgraph)
     # if ednce is linear
         # if subgraph is terminal-only
@@ -569,20 +580,25 @@ def find_iso(subgraph, graph, rule=None):
             ism_graph.add_node(
                 f"{i}_{a}_{b}", ins=inset, out=outset, ism=list(ismA), dirs=dirs, ps=ps
             )
-
-    # with mp.Manager() as manager:
-    #     graph_proxy = manager.dict(graph=graph, ism_graph=ism_graph, isms=isms)
-    #     with mp.Pool(10) as p:
-    #         res = p.starmap(add_edge, tqdm([(i, j, graph_proxy['graph'], graph_proxy['ism_graph'], graph_proxy['isms']) \
-    #             for (i, j) in product(list(ism_graph), list(ism_graph))], desc="looping over pairs"))
-    res = tqdm(
-        [
-            add_edge(i, j, graph, ism_graph, isms)
-            for (i, j) in product(list(ism_graph), list(ism_graph))
-        ],
-        desc="looping over pairs",
-    )
-    edges = sum(res, [])
-    for i, j in edges:
-        ism_graph.add_edge(i, j)
+    
+    with mp.Manager() as manager:
+        graph_proxy = manager.dict(graph=graph, ism_graph=ism_graph, isms=isms)
+        batch_size = 10000
+        all_args = list(product(list(ism_graph), list(ism_graph)))
+        num_batches = (len(all_args)+batch_size-1)//batch_size
+        print(f"{num_batches} batches")
+        args_batch_list = [(all_args[k*batch_size:(k+1)*batch_size], graph_proxy) for k in range(num_batches)]        
+        with mp.Pool(30) as p:
+            res = p.starmap(add_edge, tqdm(args_batch_list, desc="looping over pairs"))
+    # res = tqdm(
+    #     [
+    #         add_edge(i, j, graph, ism_graph, isms)
+    #         for (i, j) in product(list(ism_graph), list(ism_graph))
+    #     ],
+    #     desc="looping over pairs",
+    # )
+    res = sum(res, [])
+    for (i, j), should_add in tqdm(zip(all_args, res), "adding edges"):
+        if should_add:
+            ism_graph.add_edge(i, j)
     return ism_graph

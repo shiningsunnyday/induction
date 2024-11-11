@@ -105,62 +105,6 @@ class TransformerVAE(nn.Module):
         eps = torch.randn_like(std)
         return mu + eps * std
 
-    def decode(self, z, attention_mask):
-        # Get the actual sequence length from attention_mask
-        actual_seq_len = attention_mask.size(1) + 1
-        # Use the learned start token embedding as the initial input
-        start_token = self.start_token_embedding.expand(z.size(0), -1, -1)  # Shape (batch, 1, embed_dim)        
-        # Project z to the embedding dimension and repeat across the sequence
-        z_projected = self.fc_decode(z).unsqueeze(1).expand(-1, actual_seq_len - 1, -1)
-        
-        # Apply causal mask and padding mask for autoregressive decoding
-        breakpoint()
-        inputs = torch.cat([start_token, z_projected], dim=1)
-        # Pad the attention mask with an additional True for the start token
-        padded_attention_mask = torch.cat([torch.ones((attention_mask.size(0), 1), dtype=attention_mask.dtype, device=attention_mask.device), attention_mask], dim=1)        
-        causal_mask = torch.triu(torch.ones((actual_seq_len, actual_seq_len), dtype=torch.bool), diagonal=1).to(z.device)
-
-        # Transformer decoder with causal and padding masks
-        decoded_seq = self.transformer_decoder(
-            inputs.permute(1, 0, 2),  # (seq_len, batch, embed_dim)
-            src_key_padding_mask=~padded_attention_mask,
-            mask=causal_mask
-        )
-        
-        decoded_seq = decoded_seq.permute(1, 0, 2)  # Convert back to (batch, seq_len, embed_dim)
-        logits = self.output_layer(decoded_seq)
-        return logits[:, 1:]
-    
-    # def autoregressive_training_step(self, x, z, max_seq_len=10):
-    #     # Initialize with the start token embedding
-    #     input_token = self.start_token_embedding.expand(x.size(0), -1, -1)  # Start token embedding
-    #     z_context = self.fc_decode(z).unsqueeze(1)  # Shape (batch, 1, embed_dim)
-    #     generated_logits = []
-
-    #     for t in range(max_seq_len):
-    #         # Concatenate input_token and z_context for the current step
-    #         embedded_token = torch.cat([input_token, z_context], dim=-1)
-
-    #         # Apply a causal mask that grows with each step t
-    #         causal_mask = torch.triu(torch.ones((t + 1, t + 1), dtype=torch.bool), diagonal=1).to(z.device)
-
-    #         output = self.transformer_decoder(
-    #             embedded_token.permute(1, 0, 2),  # Shape (seq_len, batch, embed_dim)
-    #             mask=causal_mask
-    #         ).permute(1, 0, 2)
-
-    #         # Predict the next token and accumulate logits
-    #         logits = self.output_layer(output[:, -1, :])  # Only the last token's output is needed
-    #         generated_logits.append(logits.unsqueeze(1))
-
-    #         # Update input_token with the actual next token from x during training
-    #         if t < max_seq_len - 1:
-    #             next_token_id = x[:, t + 1].unsqueeze(-1)  # Use teacher forcing
-    #             input_token = self.gnn(graph_data_vocabulary[next_token_id.squeeze(-1)]).unsqueeze(1)
-
-    #     # Concatenate logits across time steps to match the full sequence length
-    #     return torch.cat(generated_logits, dim=1)        
-    
     def autoregressive_training_step(self, x, z, max_seq_len_list):
         # Initialize with the learned start token embedding and z context
         batch_size = z.size(0)
@@ -237,38 +181,6 @@ class TransformerVAE(nn.Module):
         for i, logits in enumerate(generated_logits):
             mask[i, :len(logits)] = 1  # Mark valid positions up to the length of each sequence
         return padded_logits.view(-1, VOCAB_SIZE), mask
-
-    
-    def autoregressive_decode(self, z, max_seq_len=10):
-        # Initialize with the learned start token embedding
-        input_token = self.start_token_embedding.expand(z.size(0), -1, -1)  # Start token embedding
-        
-        # Expand z as a context vector across all decoding steps
-        z_context = self.fc_decode(z).unsqueeze(1)  # Shape (batch, 1, embed_dim)
-        generated_sequence = []
-
-        for t in range(max_seq_len):
-            # Concatenate the start token embedding with z context at each step
-            embedded_token = torch.cat([input_token, z_context], dim=-1)
-            
-            # Autoregressive decoding with causal mask
-            causal_mask = torch.triu(torch.ones((t + 1, t + 1), dtype=torch.bool), diagonal=1).to(z.device)
-            output = self.transformer_decoder(
-                embedded_token.permute(1, 0, 2),  # Transformer expects (seq_len, batch, embed_dim)
-                mask=causal_mask
-            ).permute(1, 0, 2)
-            
-            # Predict the next token and append to sequence
-            logits = self.output_layer(output[:, -1, :])  # Only the last token's output is needed
-            next_token = torch.argmax(logits, dim=-1).unsqueeze(-1)
-            generated_sequence.append(next_token)
-            
-            # Update input token for the next step
-            input_token = self.gnn(graph_data_vocabulary[next_token.squeeze(-1)])
-
-        # Concatenate the generated tokens into a full sequence
-        return torch.cat(generated_sequence, dim=1)    
-    
 
     def autoregressive_inference(self, z, max_seq_len):
         # Initialize with the start token embedding and z context
