@@ -92,6 +92,23 @@ class EDNCEGrammar(NLCGrammar):
             iters += 1
         return cur
 
+    
+    def derive(self, seq, token2rule):
+        # find the initial rule
+        seq = [token2rule[idx] for idx in seq]
+        start_rule = self.rules[seq[0]]
+        cur = start_rule.subgraph
+        assert not check_input_xor_output(cur)
+        for idx in seq[1:]:
+            nt_nodes = self.search_nts(cur, NONTERMS)            
+            if len(nt_nodes) == 0:
+                break
+            assert len(nt_nodes) == 1
+            node = nt_nodes[0]
+            rule = self.rules[idx]
+            cur = rule(cur, node)
+        return cur        
+
 
     def induce_recurse(self, node, model, g):
         fig, ax = plt.subplots()
@@ -575,6 +592,10 @@ def find_iso(subgraph, graph, rule=None):
             if rule is not None:
                 inset = inset | rule.embedding
                 outset = outset & rule.upper
+                # if inset-rule.embedding:
+                #     continue
+                # if outset-rule.upper:
+                #     continue
             if inset & outset:
                 continue
             ism_graph.add_node(
@@ -588,7 +609,7 @@ def find_iso(subgraph, graph, rule=None):
         num_batches = (len(all_args)+batch_size-1)//batch_size
         print(f"{num_batches} batches")
         args_batch_list = [(all_args[k*batch_size:(k+1)*batch_size], graph_proxy) for k in range(num_batches)]        
-        with mp.Pool(30) as p:
+        with mp.Pool(NUM_PROCS) as p:
             res = p.starmap(add_edge, tqdm(args_batch_list, desc="looping over pairs"))
     # res = tqdm(
     #     [

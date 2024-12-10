@@ -161,7 +161,10 @@ def approximate_best_clique(ism_subgraph):
         if len(conn_subgraph) > 1000:
             clique = greedy_max_clique(conn_subgraph)
         else:
-            clique = list(nx.approximation.max_clique(conn_subgraph))
+            try:
+                clique = list(nx.approximation.max_clique(conn_subgraph))
+            except:
+                clique = greedy_max_clique(conn_subgraph)
         if len(clique) > len(max_clique):
             max_clique = clique
         elif len(clique) == len(max_clique):
@@ -241,15 +244,19 @@ def find_embedding(subgraphs, graph, find_iso, edges=False):
         logger.info(f"subgraph {best_i} occurred {len(best_clique)} times across components {sorted(best_comps)}")
     return best_ism, best_clique
 
-def subgraphs_isomorphism(graph, subgraph):
-    gm = DiGraphMatcher(
-        graph,
-        subgraph,
-        node_match=lambda d1, d2: d1.get("label", "#") == d2.get("label", "#"),
-        edge_match=lambda d1, d2: d1.get("label", "#") == d2.get("label", "#"),
-    )
-    isms = list(gm.subgraph_isomorphisms_iter())
-    return isms    
+def subgraphs_isomorphism(batch, graph_proxy):
+    graph = graph_proxy['graph']
+    res = []
+    for conn, subgraph in batch:
+        gm = DiGraphMatcher(
+            copy_graph(graph, conn),
+            subgraph,
+            node_match=lambda d1, d2: d1.get("label", "#") == d2.get("label", "#"),
+            edge_match=lambda d1, d2: d1.get("label", "#") == d2.get("label", "#"),
+        )
+        isms = list(gm.subgraph_isomorphisms_iter())
+        res.append(isms)
+    return res
 
 def fast_subgraph_isomorphism(graph, subgraph):
     assert nx.is_connected(nx.Graph(subgraph))
@@ -258,20 +265,30 @@ def fast_subgraph_isomorphism(graph, subgraph):
     #     graph = copy_graph(graph, conn)
     #     conns = [conn]
     if len(conns) == 1:
-        return subgraphs_isomorphism(graph, subgraph)
-    args = []
-    for conn in tqdm(conns, desc="preparing args"):
-        args.append((copy_graph(graph, conn), subgraph))
+        return subgraphs_isomorphism(graph, subgraph)    
     if NUM_PROCS == 1:
+        args = []
+        for conn in tqdm(conns, desc="preparing args"):
+            args.append((copy_graph(graph, conn), subgraph))        
         ans = [subgraphs_isomorphism(*arg) for arg in tqdm(args, desc="subgraph isomorphism")]
     else:
-        with mp.Pool(50) as p:
-            ans = p.starmap(
-                subgraphs_isomorphism,
-                tqdm(
-                    args,
-                    desc="subgraph isomorphism mp",
-                ),
-        )
+        with mp.Manager() as manager:
+            graph_proxy = manager.dict(graph=graph)
+            batch_size = 100
+            args = []
+            for conn in tqdm(conns, desc="preparing args"):
+                args.append((conn, subgraph))
+            num_batches = (len(args)+batch_size-1)//batch_size
+            print(f"{num_batches} batches")                
+            args_batch_list = [(args[k*batch_size:(k+1)*batch_size], graph_proxy) for k in range(num_batches)]                 
+            with mp.Pool(NUM_PROCS) as p:
+                ans = p.starmap(
+                    subgraphs_isomorphism,
+                    tqdm(
+                        args_batch_list,
+                        desc="subgraph isomorphism mp",
+                    ),
+            )
+                ans = sum(ans, [])
     ans = sum(ans, [])
     return ans

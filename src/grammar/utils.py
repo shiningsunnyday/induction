@@ -1,5 +1,6 @@
 import numpy as np
 from collections.abc import Iterable
+from pathlib import Path
 
 
 def find_next(g, prefix=""):
@@ -15,6 +16,17 @@ def find_next(g, prefix=""):
     else:
         key = str(max(list(map(int, g_nodes))) + 1)
         return f"{prefix}{key}"
+    
+
+def get_next_version(dir: str) -> int:
+    existing_versions = []    
+    for d in Path(dir).glob(f"*.pkl"):        
+        d = d.stem
+        if d.isdigit():
+            existing_versions.append(int(d))
+    if len(existing_versions) == 0:
+        return 0
+    return max(existing_versions) + 1    
 
 
 def next(n):

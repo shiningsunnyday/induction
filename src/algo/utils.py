@@ -78,6 +78,8 @@ def setup():
     cache_path = None
     cache_iter = 0
     for f in os.listdir(CACHE_DIR):
+        if not f.split(".pkl")[0].isdigit():
+            continue
         if int(f.split(".pkl")[0]) > cache_iter:
             cache_iter = int(f.split(".pkl")[0])
             cache_path = os.path.join(CACHE_DIR, f"{cache_iter}.pkl")

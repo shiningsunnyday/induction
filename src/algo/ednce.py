@@ -261,9 +261,7 @@ def compress(g, grammar, anno):
             best_comps = list(set([get_prefix(best_ism.nodes[c]['ism'][0]) for c in best_clique]))    
             logger.info(f"subgraph {best_i} occurred {len(best_clique)} times across components {sorted(best_comps)}")                        
             # update grammar
-            lower_best, ous_best = reduce_to_bounds(
-                [best_ism.nodes[n] for n in best_clique]
-            )
+            lower_best, ous_best = reduce_to_bounds([best_ism.nodes[n] for n in best_clique])
             rule = grammar.rules[best_rule_idx]
             logger.info(f"revising rule {best_rule_idx}")
             rule.embedding = rule.embedding | lower_best
@@ -317,6 +315,7 @@ def learn_grammar(g, args):
         if not change:
             break
         path = os.path.join(IMG_DIR, f"{METHOD}_{iter}.png")
+        logger.info(f"graph at iter {iter} has {len(g)} nodes")        
         if VISUALIZE:
             draw_graph(g, path)
         cache_path = os.path.join(CACHE_DIR, f"{iter}.pkl")
