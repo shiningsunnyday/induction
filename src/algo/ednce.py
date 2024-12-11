@@ -323,7 +323,7 @@ def learn_grammar(g, args):
     g, grammar, model = terminate(g, grammar, anno, iter)
     if isinstance(model, list):
         for j, m in enumerate(model):
-            draw_tree(m, os.path.join(IMG_DIR, f"model_{iter}_{j}.png"))
+            # draw_tree(m, os.path.join(IMG_DIR, f"model_{iter}_{j}.png"))
             model[j] = EDNCEModel(dfs(anno, m.id))
     else:
         model = anno[find_max(anno)]

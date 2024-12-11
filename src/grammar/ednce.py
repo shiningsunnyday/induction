@@ -367,8 +367,54 @@ class EDNCEModel(NLCModel):
         super().__init__(anno)
         self.seq = list(anno)
 
+    def __generate__(self, node, grammar, res):
+        rule_no = node.attrs["rule"]
+        rule = grammar.rules[rule_no]
+        new_res = []
+        for g in res:
+            # try every non-terminal
+            for n in g:
+                if g.nodes[n]["label"] == rule.nt:
+                    new_res.append(rule(g, n))
+        res = new_res
+        res = [r for r in res if nx.is_connected(nx.Graph(r))]
+        # try every order
+        from itertools import permutations
+
+        res_all = []
+        for child_order in permutations(node.children):
+            res_cur = deepcopy(res)
+            for c in child_order:
+                res_cur = self.__generate__(c, grammar, res_cur)
+            res_all += res_cur
+        return res_all
+
     def generate(self, grammar):
         breakpoint()
+        g = nx.DiGraph()
+        n = self.seq[-1]
+        g.add_node(n, label="black")
+        res = [g]
+        res = self.__generate__(self.graph[n], grammar, res)
+        # prune unique
+        new_res = []
+        for r_new in res:
+            if not nx.is_connected(nx.Graph(r_new)):
+                continue
+            exist = False
+            for r_old in new_res:
+                if nx.is_isomorphic(
+                    r_new, r_old, node_match=lambda d1, d2: d1["label"] == d2["label"]
+                ):
+                    exist = True
+                    break
+            if not exist:
+                new_res.append(r_new)
+
+        gen_dir = os.path.join(IMG_DIR, "generate/")
+        os.makedirs(gen_dir, exist_ok=True)
+        for i, g in enumerate(new_res):
+            draw_graph(g, os.path.join(gen_dir, f"graph_{i}.png"))
 
 
 def equiv_class(graph, nodes, out_ns):
