@@ -48,6 +48,13 @@ def get_prefix(name):
     return int(name.split(':')[0])
 
 
+def get_suffix(name):
+    # '5:13' => 13
+    if ':' not in name:
+        raise ValueError(f"{name} has no :")
+    return int(name.split(':')[1])
+
+
 def flatten(nested_iterable):
     if isinstance(nested_iterable, Iterable):
         return sum([flatten(iterable) for iterable in nested_iterable], [])

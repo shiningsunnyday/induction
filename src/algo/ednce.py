@@ -258,19 +258,25 @@ def compress(g, grammar, anno):
                     best_clique = max_clique
                     best_rule_idx = index
         if best_clique is not None:
-            best_comps = list(set([get_prefix(best_ism.nodes[c]['ism'][0]) for c in best_clique]))    
-            logger.info(f"subgraph {best_i} occurred {len(best_clique)} times across components {sorted(best_comps)}")                        
-            # update grammar
+            best_comps = list(set([get_prefix(best_ism.nodes[c]['ism'][0]) for c in best_clique]))                
             lower_best, ous_best = reduce_to_bounds([best_ism.nodes[n] for n in best_clique])
-            rule = grammar.rules[best_rule_idx]
-            logger.info(f"revising rule {best_rule_idx}")
-            rule.embedding = rule.embedding | lower_best
-            rule.upper = rule.upper & ous_best
-            assert not (rule.embedding & rule.upper)
-            grammar.rules[best_rule_idx] = rule
+            ## update grammar
+            # rule = grammar.rules[best_rule_idx]
+            # logger.info(f"revising rule {best_rule_idx}")
+            # rule.embedding = rule.embedding | lower_best
+            # rule.upper = rule.upper & ous_best
+            # assert not (rule.embedding & rule.upper)
+            # grammar.rules[best_rule_idx] = rule
+            ## conserve grammar
+            if (lower_best-rule.embedding): # extra instructions
+                continue
+            if ous_best & rule.embedding: # conflict
+                continue
+            logger.info(f"subgraph {best_i} occurred {len(best_clique)} times across components {sorted(best_comps)}")            
             g, _ = update_graph(
                 g, anno, best_ism, best_clique, grammar, index=best_rule_idx
             )
+            changed = True
     logger.info("done compress grammar")
     return g, anno
 
@@ -320,11 +326,17 @@ def learn_grammar(g, args):
             draw_graph(g, path)
         cache_path = os.path.join(CACHE_DIR, f"{iter}.pkl")
         pickle.dump((grammar, anno, g), open(cache_path, "wb+"))
-    g, grammar, model = terminate(g, grammar, anno, iter)
+    g, grammar, model = terminate(g, grammar, anno, iter)    
     if isinstance(model, list):
         for j, m in enumerate(model):
-            # draw_tree(m, os.path.join(IMG_DIR, f"model_{iter}_{j}.png"))
+            pre = get_prefix(m.id)
+            draw_tree(m, os.path.join(IMG_DIR, f"model_{iter}_{pre}.png"))
             model[j] = EDNCEModel(dfs(anno, m.id))
+        # Debug
+        # revised = lambda rid: re.search(f'revising rule {rid}\n', open('data/api_ckt_ednce.log').read())
+        # revised_seq = [not np.any([revised(anno[rid].attrs['rule']) for rid in m.seq]) for m in model]
+        # model_ids = [get_prefix(m.seq[0]) for m in model]
+        # safe_seqs = [idx for b, idx in zip(revised_seq, model_ids) if b]
     else:
         model = anno[find_max(anno)]
         draw_tree(model, os.path.join(IMG_DIR, f"model_{iter}.png"))

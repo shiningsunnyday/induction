@@ -390,7 +390,6 @@ class EDNCEModel(NLCModel):
         return res_all
 
     def generate(self, grammar):
-        breakpoint()
         g = nx.DiGraph()
         n = self.seq[-1]
         g.add_node(n, label="black")
@@ -413,8 +412,9 @@ class EDNCEModel(NLCModel):
 
         gen_dir = os.path.join(IMG_DIR, "generate/")
         os.makedirs(gen_dir, exist_ok=True)
+        prefix = get_prefix(list(g.nodes)[0])
         for i, g in enumerate(new_res):
-            draw_graph(g, os.path.join(gen_dir, f"graph_{i}.png"))
+            draw_graph(g, os.path.join(gen_dir, f"{prefix}_{i}.png"))
 
 
 def equiv_class(graph, nodes, out_ns):

@@ -39,7 +39,7 @@ def main(args):
         # grammar, model = nlc.learn_grammar(g)
         # grammar, model = mining.learn_stochastic_grammar(g)
     if isinstance(model, list):
-        for m in model:            
+        for m in list(model)[::-1]:
             m.generate(gr)
     else:
         model.generate(gr) # verify logic is correct
