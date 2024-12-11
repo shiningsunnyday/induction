@@ -20,7 +20,7 @@ def load_data(args):
     elif DATASET == "house":
         g = create_house_graph()
     elif DATASET == "ckt":
-        g = load_ckt(4500)
+        g = load_ckt(2)
     elif DATASET == "mol":
         g = read_file(
             f"data/api_mol_hg/{args.dataset}_smiles.txt"
