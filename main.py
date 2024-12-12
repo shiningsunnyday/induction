@@ -7,6 +7,7 @@ from src.config import RADIUS
 from argparse import ArgumentParser
 import pickle
 from src.grammar.common import get_args
+from src.grammar.utils import *
 from src.model import graph_regression, transformer_regression
 
 
@@ -20,7 +21,7 @@ def load_data(args):
     elif DATASET == "house":
         g = create_house_graph()
     elif DATASET == "ckt":
-        g = load_ckt(2)
+        g = load_ckt(50)
     elif DATASET == "mol":
         g = read_file(
             f"data/api_mol_hg/{args.dataset}_smiles.txt"
@@ -40,7 +41,18 @@ def main(args):
         # grammar, model = mining.learn_stochastic_grammar(g)
     if isinstance(model, list):
         for m in list(model)[::-1]:
-            m.generate(gr)
+            res = m.generate(gr)
+            ## Debug
+            match = False
+            for i in range(len(res)):
+                p = get_prefix(list(res[i])[0])
+                nodes = list(filter(lambda x:get_prefix(x)==p, list(g)))
+                g_sub = copy_graph(g, nodes)
+                if nx.is_isomorphic(g_sub, res[i]):
+                    match = True
+                    break
+            if not match:
+                breakpoint()
     else:
         model.generate(gr) # verify logic is correct
 

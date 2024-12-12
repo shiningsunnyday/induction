@@ -415,6 +415,7 @@ class EDNCEModel(NLCModel):
         prefix = get_prefix(list(g.nodes)[0])
         for i, g in enumerate(new_res):
             draw_graph(g, os.path.join(gen_dir, f"{prefix}_{i}.png"))
+        return new_res
 
 
 def equiv_class(graph, nodes, out_ns):

@@ -330,7 +330,7 @@ def learn_grammar(g, args):
     if isinstance(model, list):
         for j, m in enumerate(model):
             pre = get_prefix(m.id)
-            draw_tree(m, os.path.join(IMG_DIR, f"model_{iter}_{pre}.png"))
+            # draw_tree(m, os.path.join(IMG_DIR, f"model_{iter}_{pre}.png"))
             model[j] = EDNCEModel(dfs(anno, m.id))
         # Debug
         # revised = lambda rid: re.search(f'revising rule {rid}\n', open('data/api_ckt_ednce.log').read())
