@@ -296,7 +296,7 @@ def learn_grammar(g, args):
     logger = create_logger(
         "global_logger",
         f"{wd}/data/{METHOD}_{DATASET}_{GRAMMAR}.log",
-    )        
+    )
     cache_iter, cache_path = setup()
     g, grammar, anno, iter = init_grammar(g, cache_iter, cache_path, EDNCEGrammar)
     while not term(g):
@@ -326,7 +326,8 @@ def learn_grammar(g, args):
             draw_graph(g, path)
         cache_path = os.path.join(CACHE_DIR, f"{iter}.pkl")
         pickle.dump((grammar, anno, g), open(cache_path, "wb+"))
-    g, grammar, model = terminate(g, grammar, anno, iter)    
+
+    g, grammar, model = terminate(g, grammar, anno, iter)
     if isinstance(model, list):
         for j, m in enumerate(model):
             pre = get_prefix(m.id)

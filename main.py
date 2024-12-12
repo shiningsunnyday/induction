@@ -39,22 +39,23 @@ def main(args):
         gr, model = grammar.learn_grammar(g, args)
         # grammar, model = nlc.learn_grammar(g)
         # grammar, model = mining.learn_stochastic_grammar(g)
-    if isinstance(model, list):
-        for m in list(model)[::-1]:
-            res = m.generate(gr)
-            ## Debug
-            match = False
-            for i in range(len(res)):
-                p = get_prefix(list(res[i])[0])
-                nodes = list(filter(lambda x:get_prefix(x)==p, list(g)))
-                g_sub = copy_graph(g, nodes)
-                if nx.is_isomorphic(g_sub, res[i]):
-                    match = True
-                    break
-            if not match:
-                breakpoint()
-    else:
-        model.generate(gr) # verify logic is correct
+
+        ## Debug        
+        if isinstance(model, list):
+            for m in list(model)[::-1]:
+                res = m.generate(gr)            
+                match = False
+                for i in range(len(res)):
+                    p = get_prefix(list(res[i])[0])
+                    nodes = list(filter(lambda x:get_prefix(x)==p, list(g)))
+                    g_sub = copy_graph(g, nodes)
+                    if nx.is_isomorphic(g_sub, res[i]):
+                        match = True
+                        break
+                if not match:
+                    breakpoint()
+        else:
+            model.generate(gr) # verify logic is correct
 
     if 'prediction' in args.task:       
         samples = gr.induce(model)
