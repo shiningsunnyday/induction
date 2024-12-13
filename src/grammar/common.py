@@ -17,7 +17,7 @@ def get_args():
     parser.add_argument("--num_threads", dest="global_num_threads", type=int)
     parser.add_argument("--num_procs", dest="global_num_procs", type=int)    
     # hparams
-    parser.add_argument("--scheme", choices=['one','zero'], help='whether to index from 0 or 1', default='zero')
+    parser.add_argument("--scheme", choices=['one','zero'], help='whether to index from 0 or 1', default='zero')    
     # ablations
     parser.add_argument("--ablate_tree", action='store_true') 
     parser.add_argument("--ablate_merge", action='store_true') 
@@ -26,12 +26,21 @@ def get_args():
     parser.add_argument("--task", nargs='+', choices=["learn","generate","prediction"])
     parser.add_argument("--seed")
     parser.add_argument("--grammar_ckpt")
+    # mol dataset args
     parser.add_argument(
-        "--dataset",
+        "--mol-dataset",
         choices=["ptc","hopv","polymers_117", "isocyanates", "chain_extenders", "acrylates"],
     )
+    # ckt dataset args
+    parser.add_argument(
+        "--num-ckt-samples", default=4500, type=int
+    )
+    parser.add_argument("--ambiguous-ckt-file", help='if given and exists, load data from this file to learn grammar; if given and not exist, save ambiguous data to this file after learn grammar')
     parser.add_argument("--num_samples", default=10000, type=int)
-    return parser.parse_args()
+    args = parser.parse_args()
+    if args.ambiguous_ckt_file is not None:
+        assert args.ambiguous_ckt_file[-5:] == '.json'
+    return args
 
 
 def set_global_args(args):
@@ -251,7 +260,7 @@ def find_embedding(subgraphs, graph, find_iso, edges=False):
         logger.info(f"subgraph {best_i} occurred {len(best_clique)} times across components {sorted(best_comps)}")
     return best_ism, best_clique
 
-def subgraphs_isomorphism(batch, graph_proxy):
+def subgraphs_isomorphism_mp(batch, graph_proxy):
     graph = graph_proxy['graph']
     res = []
     for conn, subgraph in batch:
@@ -264,6 +273,17 @@ def subgraphs_isomorphism(batch, graph_proxy):
         isms = list(gm.subgraph_isomorphisms_iter())
         res.append(isms)
     return res
+
+def subgraphs_isomorphism(graph, subgraph):
+    gm = DiGraphMatcher(
+        graph,
+        subgraph,
+        node_match=lambda d1, d2: d1.get("label", "#") == d2.get("label", "#"),
+        edge_match=lambda d1, d2: d1.get("label", "#") == d2.get("label", "#"),
+    )
+    isms = list(gm.subgraph_isomorphisms_iter())
+    return isms
+
 
 def fast_subgraph_isomorphism(graph, subgraph):
     assert nx.is_connected(nx.Graph(subgraph))
@@ -290,7 +310,7 @@ def fast_subgraph_isomorphism(graph, subgraph):
             args_batch_list = [(args[k*batch_size:(k+1)*batch_size], graph_proxy) for k in range(num_batches)]                 
             with mp.Pool(NUM_PROCS) as p:
                 ans = p.starmap(
-                    subgraphs_isomorphism,
+                    subgraphs_isomorphism_mp,
                     tqdm(
                         args_batch_list,
                         desc="subgraph isomorphism mp",

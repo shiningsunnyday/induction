@@ -21,10 +21,10 @@ def load_data(args):
     elif DATASET == "house":
         g = create_house_graph()
     elif DATASET == "ckt":
-        g = load_ckt(50)
+        g = load_ckt(args.num_ckt_samples, args.ambiguous_ckt_file)
     elif DATASET == "mol":
         g = read_file(
-            f"data/api_mol_hg/{args.dataset}_smiles.txt"
+            f"data/api_mol_hg/{args.mol_dataset}_smiles.txt"
         )
     else:
         raise NotImplementedError
@@ -39,23 +39,6 @@ def main(args):
         gr, model = grammar.learn_grammar(g, args)
         # grammar, model = nlc.learn_grammar(g)
         # grammar, model = mining.learn_stochastic_grammar(g)
-
-        ## Debug        
-        if isinstance(model, list):
-            for m in list(model)[::-1]:
-                res = m.generate(gr)            
-                match = False
-                for i in range(len(res)):
-                    p = get_prefix(list(res[i])[0])
-                    nodes = list(filter(lambda x:get_prefix(x)==p, list(g)))
-                    g_sub = copy_graph(g, nodes)
-                    if nx.is_isomorphic(g_sub, res[i]):
-                        match = True
-                        break
-                if not match:
-                    breakpoint()
-        else:
-            model.generate(gr) # verify logic is correct
 
     if 'prediction' in args.task:       
         samples = gr.induce(model)

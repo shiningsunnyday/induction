@@ -38,6 +38,10 @@ def find_start_node(graph):
     return in_n
 
 
+def node_match(d1, d2):
+    return d1.get("label", "#") == d2.get("label", "#")  
+
+
 def postprocess(graph):
     def dfs(n, vis, edges):
         vis[n] = -1
@@ -153,7 +157,7 @@ class EDNCEGrammar(NLCGrammar):
 
     def check_exists(self, rule):
         for i, r in enumerate(self.rules):
-            if not nx.is_isomorphic(rule.subgraph, r.subgraph):
+            if not nx.is_isomorphic(rule.subgraph, r.subgraph, node_match=node_match):
                 continue
             if rule.embedding != r.embedding:
                 continue
@@ -203,7 +207,7 @@ class EDNCEGrammar(NLCGrammar):
             if len(sample) == 0:
                 continue
             for r in res:
-                if nx.is_isomorphic(sample, r):
+                if nx.is_isomorphic(sample, r, node_match=node_match):
                     exist = True
                     break
             if exist:
@@ -403,7 +407,7 @@ class EDNCEModel(NLCModel):
             exist = False
             for r_old in new_res:
                 if nx.is_isomorphic(
-                    r_new, r_old, node_match=lambda d1, d2: d1["label"] == d2["label"]
+                    r_new, r_old, node_match=node_match
                 ):
                     exist = True
                     break
@@ -508,9 +512,9 @@ def insets_and_outsets(graph, nodes):
         poss_ps = list(
             product(*[FINAL for _ in out_ns])
         )
-        # find source
+        # find source        
         prefix = list(nodes)[0][0]
-        assert graph.nodes[f"{prefix}:0"]['type'] == 'input'        
+        assert graph.nodes[f"{prefix}:0"]['type'] == 'input'
         # single source shortest paths
         equiv_dir = []
         for e in equiv:
@@ -564,7 +568,7 @@ def insets_and_outsets(graph, nodes):
     return poss
 
 
-def add_edge(pair_list, graph_proxy):    
+def add_edge_mp(pair_list, graph_proxy):    
     graph, ism_graph, isms = graph_proxy['graph'], graph_proxy['ism_graph'], graph_proxy['isms']
     res = []
     for i, j in pair_list:
@@ -592,6 +596,28 @@ def add_edge(pair_list, graph_proxy):
         res.append(not overlap)
     print(f"{len(pair_list)} done")
     return res
+
+
+def add_edge(i, j, graph, ism_graph, isms):    
+    if int(i.split("_")[0]) == int(j.split("_")[0]):
+        return False
+    ismA = isms[int(i.split("_")[0])]
+    ismB = isms[int(j.split("_")[0])]
+    # if ednce is linear
+        # if i, j in same component
+            # don't add edge    
+    if LINEAR:
+        if get_prefix(list(ismA)[0]) == get_prefix(list(ismB)[0]):
+            return False
+    touch = touching(graph, ismA, ismB)
+    if touch:
+        return False
+    inset_i = ism_graph.nodes[i]["ins"]
+    outset_i = ism_graph.nodes[i]["out"]
+    inset_j = ism_graph.nodes[j]["ins"]
+    outset_j = ism_graph.nodes[j]["out"]
+    overlap = (inset_i | inset_j) & (outset_i | outset_j)
+    return not overlap
 
 
 def touching(graph, ismA, ismB):
@@ -629,7 +655,10 @@ def find_iso(subgraph, graph, rule=None):
             if not term_only:
                 isms_copy.append(ism)
                 continue
-            pre = get_prefix(list(ism)[0])
+            try:
+                pre = get_prefix(list(ism)[0])
+            except:
+                breakpoint()
             has_nt = False
             for n in graph:
                 if get_prefix(n) == pre:
@@ -658,23 +687,26 @@ def find_iso(subgraph, graph, rule=None):
                 f"{i}_{a}_{b}", ins=inset, out=outset, ism=list(ismA), dirs=dirs, ps=ps
             )
     
-    with mp.Manager() as manager:
-        graph_proxy = manager.dict(graph=graph, ism_graph=ism_graph, isms=isms)
-        batch_size = 10000
+    if NUM_PROCS == 1:
         all_args = list(product(list(ism_graph), list(ism_graph)))
-        num_batches = (len(all_args)+batch_size-1)//batch_size
-        print(f"{num_batches} batches")
-        args_batch_list = [(all_args[k*batch_size:(k+1)*batch_size], graph_proxy) for k in range(num_batches)]        
-        with mp.Pool(NUM_PROCS) as p:
-            res = p.starmap(add_edge, tqdm(args_batch_list, desc="looping over pairs"))
-    # res = tqdm(
-    #     [
-    #         add_edge(i, j, graph, ism_graph, isms)
-    #         for (i, j) in product(list(ism_graph), list(ism_graph))
-    #     ],
-    #     desc="looping over pairs",
-    # )
-    res = sum(res, [])
+        res = tqdm(
+            [
+                add_edge(i, j, graph, ism_graph, isms)
+                for (i, j) in all_args
+            ],
+            desc="looping over pairs",
+        )        
+    else:
+        with mp.Manager() as manager:
+            graph_proxy = manager.dict(graph=graph, ism_graph=ism_graph, isms=isms)
+            batch_size = 10000
+            all_args = list(product(list(ism_graph), list(ism_graph)))
+            num_batches = (len(all_args)+batch_size-1)//batch_size
+            print(f"{num_batches} batches")
+            args_batch_list = [(all_args[k*batch_size:(k+1)*batch_size], graph_proxy) for k in range(num_batches)]        
+            with mp.Pool(NUM_PROCS) as p:
+                res = p.starmap(add_edge, tqdm(args_batch_list, desc="looping over pairs"))
+        res = sum(res, [])
     for (i, j), should_add in tqdm(zip(all_args, res), "adding edges"):
         if should_add:
             ism_graph.add_edge(i, j)

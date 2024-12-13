@@ -41,11 +41,11 @@ def run_subdue(tmp_path, subdue_call="../subdue-5.2.2/bin/subdue"):
         "-out",
         out_path,
         "-minsize",
-        "2",
+        "3",
         "-maxsize",
-        "4",
+        "5",
         "-nsubs",
-        "1",
+        "100",
         tmp_path,
     ]
     result = subprocess.run(command, capture_output=True, text=True)

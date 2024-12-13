@@ -216,7 +216,7 @@ def union(gs, gs_dict={}):
     return whole_g
 
 
-def load_ckt(num_graphs=10):
+def load_ckt(num_graphs=4500, ambiguous_file=None):
     """
     Load all ckts, and do union over all the graphs
     Combine graph-level attrs of individual graphs into a graph-level attr lookup
@@ -236,7 +236,12 @@ def load_ckt(num_graphs=10):
     # print(best_i)
     gs = []
     gs_dict = {}
-    for i in tqdm(range(num_graphs)):
+    if ambiguous_file is None or not os.path.exists(ambiguous_file):
+        graph_no_iter = range(num_graphs)
+    else:
+        assert GRAMMAR == "ednce"
+        graph_no_iter = json.load(open(args.ambiguous_ckt_file))['redo']
+    for i in tqdm(graph_no_iter):
         fpath = os.path.join(data_dir, f"{2*i}.json")
         data = json.load(open(fpath))
         g = json_graph.node_link_graph(data)

@@ -3,6 +3,7 @@ import os
 import networkx as nx
 import numpy as np
 import pickle
+import json
 from copy import deepcopy
 from src.grammar.ednce import *
 from src.draw.graph import *
@@ -43,8 +44,6 @@ def terminate(g, grammar, anno, iter):
             g.add_node(new_n, label="black")  # annotate which rule was applied to model
             rewire_graph(g, new_n, nodes, anno)
             model = anno[new_n]
-        cache_path = os.path.join(CACHE_DIR, f"{iter}.pkl")
-        pickle.dump((grammar, anno, g), open(cache_path, "wb+"))
     else:
         model = []
         while conns:
@@ -63,9 +62,153 @@ def terminate(g, grammar, anno, iter):
             g.add_node(new_n, label="black")  # annotate which rule was applied to model            
             rewire_graph(g, new_n, nodes, anno)
             model.append(anno[new_n])
-    cache_path = os.path.join(CACHE_DIR, f"{iter}.pkl")
-    pickle.dump((grammar, anno, g), open(cache_path, "wb+"))
-    return g, grammar, model
+    return grammar, model, anno, g
+
+
+def find_indices(graphs, query):
+    ans = []
+    for i in range(len(graphs)):
+        if nx.is_isomorphic(graphs[i], query, node_match=node_match):
+            ans.append(i)
+    return ans  
+
+
+def find_partial(graphs, query):
+    ans = []
+    # query can be a (possibly disconnected) directed graph
+    # query_und = nx.Graph(query)
+    for i in range(len(graphs)):
+        bad = False
+        if len(query) > len(graphs[i]):
+            continue
+        # for conn in nx.connected_components(query_und):
+            # conn_g = copy_graph(query, conn)
+        gm = DiGraphMatcher(graphs[i], query, node_match=node_match)
+        ism_iter = list(gm.subgraph_isomorphisms_iter())
+        if len(ism_iter) == 0:
+            break
+        if not bad:
+            ans.append(i)
+    return ans
+
+
+def worker(shared_queue, grammar, graphs, found, lock):
+    while True:
+        with lock:
+            if shared_queue.empty():
+                print("process done")
+                break
+            print(f"len(interms): {shared_queue.qsize()}")
+            interm, deriv, poss = shared_queue.get()
+        print(f"deriv: {deriv}")
+        nts = grammar.search_nts(interm, NONTERMS)
+        if len(nts) == 0:
+            if nx.is_isomorphic(interm, graphs[poss], node_match=node_match):
+                with lock:
+                    found[poss].append(deriv)
+                    print(f"found {deriv} graph {poss}, count: {len(found[poss])}")
+        for j, nt in enumerate(nts):
+            for i, rule in enumerate(grammar.rules):                      
+                nt_label = interm.nodes[nt]['label']
+                if rule.nt == nt_label:
+                    c = deepcopy(interm)
+                    c = rule(c, nt)
+                    if nx.is_connected(nx.Graph(c)):
+                        # if poss == 0 and i == 62:
+                        #     pdb.set_trace()                     
+                        ts = [x for x in c if c.nodes[x]['label'] in TERMS]
+                        c_t = copy_graph(c, ts)
+                        exist = find_partial([graphs[poss]], c_t)
+                        if exist:
+                            with lock:
+                                shared_queue.put((c, deriv+[i], poss))       
+
+
+def resolve_ambiguous(model, grammar):
+    logger = logging.getLogger('global_logger')
+    graphs = []
+    for j in range(len(model)):
+        deriv = [model[j].graph[n].attrs['rule'] for n in model[j].seq[::-1]]
+        t2r = {i:i for i in range(len(grammar.rules))}
+        deriv_g = grammar.derive(deriv, t2r)
+        # draw_graph(deriv_g, '/home/msun415/test.png')
+        graphs.append(deriv_g)    
+
+    NUM_PROCS = 50
+    N = len(graphs)
+    manager = mp.Manager()
+    shared_queue = manager.Queue()
+    found = manager.list()
+    g = nx.DiGraph()
+    g.add_node('0', label='black')
+    for j in range(N):
+        shared_queue.put((deepcopy(g), [], j))
+        found.append(manager.list())
+    lock = manager.Lock()    
+    processes = []
+    for _ in range(NUM_PROCS):
+        p = mp.Process(target=worker, args=(shared_queue, grammar, graphs, found, lock))
+        p.start()
+        processes.append(p)
+
+    for p in processes:
+        p.join()
+
+    all_derivs = list(map(list, found))
+    sets_of_sets = []
+    for derivs in all_derivs:
+        sets = []
+        for i in range(len(derivs)):
+            # keep this deriv
+            for j in range(len(derivs)):
+                if j == i:
+                    continue
+                sets.append(set(derivs[j])-set(derivs[i]))
+        sets_of_sets.append(sets)
+
+    poss_elims = []
+    args = [sets for sets in sets_of_sets if sets]  
+    if len(args) == 0:
+        logger.info("no ambiguity, done")
+        return
+    for chosen in product(*args):
+        elim = set.union(*chosen)
+        exist = False
+        for p in poss_elims:
+            if p == elim:
+                exist = True
+                break
+        if not exist:
+            poss_elims.append(elim)
+
+    poss_elims = sorted(poss_elims, key=len)
+    for i in range(len(poss_elims)):
+        if poss_elims[i] is None:
+            continue
+        for j in range(i+1, len(poss_elims)):
+            if poss_elims[j] is None:
+                continue
+            if not (poss_elims[i]-poss_elims[j]):
+                poss_elims[j] = None
+
+    min_poss_elims = list(filter(lambda x: x is not None, poss_elims))
+    best_e = None
+    best_counter = None
+    for e in min_poss_elims:
+        counter = []
+        for i, derivs in enumerate(all_derivs):
+            inters = [bool(set(derivs[j]) & e) for j in range(len(derivs))]
+            if np.all(inters):
+                counter.append(i)
+        if best_counter is None or len(counter) < len(best_counter):
+            best_counter = counter
+            best_e = e
+
+    
+    data = {'rules': best_e,
+            'redo': best_counter}
+    json.dump(data, open(args.ambiguous_ckt_file, 'w+'))
+    logger.info(f"{len(best_counter)} ambiguous: {best_counter} with rules: {best_e}")
 
 
 def spec(u):
@@ -293,6 +436,7 @@ def dfs(anno, k):
 
 
 def learn_grammar(g, args):
+    orig = deepcopy(g)
     logger = create_logger(
         "global_logger",
         f"{wd}/data/{METHOD}_{DATASET}_{GRAMMAR}.log",
@@ -324,10 +468,14 @@ def learn_grammar(g, args):
         logger.info(f"graph at iter {iter} has {len(g)} nodes")        
         if VISUALIZE:
             draw_graph(g, path)
-        cache_path = os.path.join(CACHE_DIR, f"{iter}.pkl")
+        suffix = ('_' + Path(args.ambiguous_ckt_file).stem) if args.ambiguous_ckt_file is not None and os.path.exists(args.ambiguous_ckt_file) else  ''
+        cache_path = os.path.join(CACHE_DIR, f"{iter}{suffix}.pkl")
         pickle.dump((grammar, anno, g), open(cache_path, "wb+"))
 
-    g, grammar, model = terminate(g, grammar, anno, iter)
+    grammar, model, anno, g = terminate(g, grammar, anno, iter)
+    suffix = ('_' + Path(args.ambiguous_ckt_file).stem) if args.ambiguous_ckt_file is not None and os.path.exists(args.ambiguous_ckt_file) else  ''
+    cache_path = os.path.join(CACHE_DIR, f"{iter}{suffix}.pkl")
+    pickle.dump((grammar, anno, g), open(cache_path, "wb+"))        
     if isinstance(model, list):
         for j, m in enumerate(model):
             pre = get_prefix(m.id)
@@ -342,4 +490,22 @@ def learn_grammar(g, args):
         model = anno[find_max(anno)]
         draw_tree(model, os.path.join(IMG_DIR, f"model_{iter}.png"))
         model = EDNCEModel(anno)
+    if args.ambiguous_ckt_file:
+        resolve_ambiguous(model, grammar)        
+    ## Debug
+    if isinstance(model, list):
+        for m in list(model)[::-1]:
+            res = m.generate(grammar)            
+            match = False
+            for i in range(len(res)):
+                p = get_prefix(list(res[i])[0])
+                nodes = list(filter(lambda x:get_prefix(x)==p, list(orig)))
+                g_sub = copy_graph(orig, nodes)
+                if nx.is_isomorphic(g_sub, res[i], node_match=node_match):
+                    match = True
+                    break
+            if not match:
+                breakpoint()
+    else:
+        model.generate(grammar) # verify logic is correct        
     return grammar, model
