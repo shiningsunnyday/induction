@@ -705,7 +705,7 @@ def find_iso(subgraph, graph, rule=None):
             print(f"{num_batches} batches")
             args_batch_list = [(all_args[k*batch_size:(k+1)*batch_size], graph_proxy) for k in range(num_batches)]        
             with mp.Pool(NUM_PROCS) as p:
-                res = p.starmap(add_edge, tqdm(args_batch_list, desc="looping over pairs"))
+                res = p.starmap(add_edge_mp, tqdm(args_batch_list, desc="looping over pairs"))
         res = sum(res, [])
     for (i, j), should_add in tqdm(zip(all_args, res), "adding edges"):
         if should_add:

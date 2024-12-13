@@ -346,27 +346,31 @@ def rewire_graph_ednce(g, new_n, nodes, dirs, ps, anno):
             g.add_edge(k, new_n, label=label)
 
 
-def update_graph(g, anno, best_ism, best_clique, grammar, index=-1):
+def update_graph_mp(g, best_clique, shared_data, lock, index=-1):
+    grammar = shared_data['grammar']
+    best_ism = shared_data['best_ism']
+    anno = shared_data['anno']
     change = False
     for c in best_clique:
-        g_cache = deepcopy(g)
-        anno_cache = deepcopy(anno)
+        # g_cache = deepcopy(g)
+        # anno_cache = deepcopy(anno)
         ism = best_ism.nodes[c]
         nodes = ism["ism"]
         dirs = ism["dirs"]
         ps = ism["ps"]
-        assert len(set([n.split(":")[0] for n in nodes])) == 1
-        no = nodes[0].split(":")[0]
+        assert len(set([get_prefix(n) for n in nodes])) == 1
+        no = get_prefix(nodes[0])
         prefix = f"{no}:"
         new_n = find_next(g, prefix=prefix)
         g.add_node(new_n, label="gray")  # annotate which rule was applied to model        
-        anno[new_n] = EDNCENode(
-            new_n, attrs={
-                "rule": len(grammar.rules) - 1 if index == -1 else index,
-                "nodes": nodes,
-                "feats": [g.nodes[n]['feat'] if 'feat' in g.nodes[n] else 0.0 for n in nodes]
-                }
-        )
+        with lock:
+            anno[new_n] = EDNCENode(
+                new_n, attrs={
+                    "rule": len(grammar.rules)-1 if index == -1 else index,
+                    "nodes": nodes,
+                    "feats": [g.nodes[n]['feat'] if 'feat' in g.nodes[n] else 0.0 for n in nodes]
+                    }
+            )
         print(f"{new_n} new node")
         rewire_graph_ednce(g, new_n, nodes, dirs, ps, anno)
         change = True
@@ -377,6 +381,71 @@ def update_graph(g, anno, best_ism, best_clique, grammar, index=-1):
         # else:
         #     change = True
     return g, change
+
+
+def update_graph(g, anno, best_ism, best_clique, grammar, index=-1):
+    conns = list(nx.connected_components(nx.Graph(g)))        
+    if len(conns) > 1 and NUM_PROCS > 1:
+        by_no = {}
+        for c in best_clique:
+            ism = best_ism.nodes[c]
+            nodes = ism["ism"]
+            no = get_prefix(nodes[0])            
+            by_no[no] = by_no.get(no, []) + [c]
+        args = []        
+        manager = mp.Manager()
+        lock = manager.Lock()
+        shared_data = manager.dict(anno=anno, best_ism=best_ism, grammar=grammar)        
+        for no in by_no:
+            conn = copy_graph(g, [n for n in g if get_prefix(n)==no])
+            args.append((conn, by_no[no], shared_data, lock))
+        with mp.Pool(NUM_PROCS) as p:
+            conns = p.starmap(update_graph_mp, tqdm(args, desc="updating graph"))
+        change = False
+        for i, no in enumerate(by_no):
+            # remove conn
+            conn = args[i][0]
+            for c in conn:
+                g.remove_node(c)
+            # add new conn
+            conn, change_i = conns[i]
+            change |= change_i
+            for n, data in conn.nodes(data=True):
+                g.add_node(n, **data)
+            for e0, e1, data in conn.edges(data=True):
+                g.add_edge(e0, e1, **data)
+        return g, change
+    else:
+        change = False
+        for c in best_clique:
+            # g_cache = deepcopy(g)
+            # anno_cache = deepcopy(anno)
+            ism = best_ism.nodes[c]
+            nodes = ism["ism"]
+            dirs = ism["dirs"]
+            ps = ism["ps"]
+            assert len(set([get_prefix(n) for n in nodes])) == 1
+            no = get_prefix(nodes[0])
+            prefix = f"{no}:"
+            new_n = find_next(g, prefix=prefix)
+            g.add_node(new_n, label="gray")  # annotate which rule was applied to model        
+            anno[new_n] = EDNCENode(
+                new_n, attrs={
+                    "rule": len(grammar.rules) - 1 if index == -1 else index,
+                    "nodes": nodes,
+                    "feats": [g.nodes[n]['feat'] if 'feat' in g.nodes[n] else 0.0 for n in nodes]
+                    }
+            )
+            print(f"{new_n} new node")
+            rewire_graph_ednce(g, new_n, nodes, dirs, ps, anno)
+            change = True
+            # if boundary(g):
+            #     g = g_cache
+            #     anno = anno_cache
+            #     continue
+            # else:
+            #     change = True
+        return g, change
 
 
 def compress(g, grammar, anno):
