@@ -640,6 +640,7 @@ def initialize(path):
 
 
 def find_iso(subgraph, graph, rule=None):
+    logger = logging.getLogger('global_logger')
     global graph_proxy
     isms = fast_subgraph_isomorphism(graph, subgraph)
     # if ednce is linear
@@ -667,26 +668,33 @@ def find_iso(subgraph, graph, rule=None):
                         break
             if not has_nt:
                 isms_copy.append(ism)
-        isms = isms_copy
-            
+        isms = isms_copy            
     ism_graph = nx.Graph()
+    in_err_ct = 0
+    out_err_ct = 0
     for i, ismA in enumerate(isms):
         poss = insets_and_outsets(graph, ismA)        
         for a, b in poss: # each one a possible contraction
             inset, outset, dirs, ps = poss[(a, b)]
             if rule is not None:
-                inset = inset | rule.embedding
-                outset = outset & rule.upper
+                if inset-rule.embedding:
+                    in_err_ct += 1
+                    continue
+                if outset & rule.embedding:
+                    out_err_ct += 1
+                    continue
                 # if inset-rule.embedding:
                 #     continue
                 # if outset-rule.upper:
                 #     continue
-            if inset & outset:
-                continue
+            else:
+                if inset & outset:
+                    continue
             ism_graph.add_node(
                 f"{i}_{a}_{b}", ins=inset, out=outset, ism=list(ismA), dirs=dirs, ps=ps
             )
-    
+    if rule is not None:
+        logger.info(f"inset vs outset conflict count: {in_err_ct} vs {out_err_ct}")    
     if NUM_PROCS == 1:
         all_args = list(product(list(ism_graph), list(ism_graph)))
         res = tqdm(

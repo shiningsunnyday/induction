@@ -322,7 +322,7 @@ def extract_rule(g, best_ism, best_clique, grammar):
     # ask gpt to rank the choices
     # TODO: implement this
     color = "gray"
-    rule = EDNCERule(color, rhs_graph, emb, upper)
+    rule = EDNCERule(color, rhs_graph, L2-upper, upper)
     # rule = EDNCERule(color, rhs_graph, upper)
     rule_no = len(grammar.rules)
     rule.visualize(os.path.join(IMG_DIR, f"rule_{rule_no}.png"))
@@ -459,7 +459,7 @@ def compress(g, grammar, anno):
         best_clique = None
         best_rule_idx = None
         max_len = 0
-        for index, rule in enumerate(grammar.rules):
+        for index, rule in enumerate(grammar.rules):            
             ism_subgraph = find_iso(rule.subgraph, g, rule=rule)
             if len(ism_subgraph):                
                 max_clique = approximate_best_clique(ism_subgraph)
