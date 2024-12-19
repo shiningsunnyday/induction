@@ -169,6 +169,10 @@ def init_grammar(g, cache_iter, cache_path, grammar_class):
         iter = 0
     else:
         grammar, anno, g = pickle.load(open(cache_path, "rb"))
+        # TODO: Remove this
+        for i, r in enumerate(grammar.rules):
+            if not hasattr(r, 'rule_id'):
+                r.rule_id = i
         iter = cache_iter
         # path = os.path.join(IMG_DIR, f'{METHOD}_0.png')
     return g, grammar, anno, iter

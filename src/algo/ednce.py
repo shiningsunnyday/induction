@@ -21,7 +21,7 @@ def edit_grammar(grammar, conn_g):
     if exist is None:
         rule_no = len(grammar.rules)
         rule.visualize(os.path.join(IMG_DIR, f"rule_{rule_no}.png"))
-        grammar.add_rule(rule)
+        grammar.add_rule(rule, rule_no)
     else:
         rule_no = exist
     return rule_no
@@ -327,7 +327,7 @@ def extract_rule(g, best_ism, best_clique, grammar):
     # rule = EDNCERule(color, rhs_graph, upper)
     rule_no = len(grammar.rules)
     rule.visualize(os.path.join(IMG_DIR, f"rule_{rule_no}.png"))
-    grammar.add_rule(rule)
+    grammar.add_rule(rule, rule_no)
 
 
 def rewire_graph_ednce(g, new_n, nodes, dirs, ps, anno):

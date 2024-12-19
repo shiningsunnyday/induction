@@ -37,6 +37,7 @@ CACHE = False
 MAX_TRIES = 10
 
 # EDNCE parameters
+CACHE_SUBG = True
 LINEAR = True # at most 1 nt per comp, and subgraph must contain nt if present
 MIN_EMBEDDING = True # take the minimum or maximum embedding for each rule
 

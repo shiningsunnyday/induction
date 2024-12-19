@@ -20,8 +20,9 @@ class NLCGrammar:
     def __init__(self):
         self.rules = []
 
-    def add_rule(self, rule):
+    def add_rule(self, rule, rule_id):
         self.rules.append(rule)
+        setattr(rule, "rule_id", rule_id)
 
     def __sample__(self):
         # find the initial rule

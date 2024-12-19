@@ -638,11 +638,37 @@ def initialize(path):
     graph, ism_graph, isms = pickle.load(open(path, 'rb'))
 
 
+def retrieve_cache(graph, rule):
+    prefixes = set([get_prefix(n) for n in graph])
+    res = []
+    for conn_no in prefixes:
+        nodes = list(filter(lambda n: get_prefix(n)==conn_no, list(graph)))
+        num_conn = len(nodes)
+        key = (conn_no, num_conn, rule.rule_id)
+        if key not in graph.graph['cache']:
+            isms = subgraphs_isomorphism(copy_graph(graph, nodes), rule.subgraph)            
+            graph.graph['cache'][key] = isms
+        res += graph.graph['cache'][key]
+    # for ism in isms:
+    # conn_no = get_prefix(list(subgraph.nodes)[0])
+    # no_conn = len(list(filter(lambda n: get_prefix(n)==pre), graph.nodes))
+    # rule_id = rule.id    
+    return res
+
 
 def find_iso(subgraph, graph, rule=None):
     logger = logging.getLogger('global_logger')
-    global graph_proxy
-    isms = fast_subgraph_isomorphism(graph, subgraph)
+    global graph_proxy    
+    """
+    subgraph isomorphism is the most called function in the algorithm due to the function compress
+    To speed up, cache tuples of (conn no, |conn|, rule no) dynamically
+    """            
+    if (rule is not None) and CACHE_SUBG:
+        if 'cache' not in graph.graph:
+            graph.graph['cache'] = {}
+        isms = retrieve_cache(graph, rule)
+    else:
+        isms = fast_subgraph_isomorphism(graph, subgraph)
     # if ednce is linear
         # if subgraph is terminal-only
             # remove all subgraph instances in comps with nt
