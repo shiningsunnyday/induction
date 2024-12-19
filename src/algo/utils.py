@@ -41,7 +41,7 @@ def run_subdue(tmp_path, subdue_call="../subdue-5.2.2/bin/subdue"):
         "-out",
         out_path,
         "-minsize",
-        "3",
+        "2",
         "-maxsize",
         "5",
         "-nsubs",

@@ -462,7 +462,7 @@ def compress(g, grammar, anno):
         max_len = 0
         for index, rule in enumerate(grammar.rules):            
             ism_subgraph = find_iso(rule.subgraph, g, rule=rule)
-            if len(ism_subgraph):                
+            if len(ism_subgraph):
                 max_clique = approximate_best_clique(ism_subgraph)
                 if len(max_clique) * len(rule.subgraph) > max_len:
                     best_i = index
