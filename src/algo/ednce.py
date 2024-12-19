@@ -322,7 +322,8 @@ def extract_rule(g, best_ism, best_clique, grammar):
     # ask gpt to rank the choices
     # TODO: implement this
     color = "gray"
-    rule = EDNCERule(color, rhs_graph, L2-upper, upper)
+    emb = lower if MIN_EMBEDDING else L2-upper
+    rule = EDNCERule(color, rhs_graph, emb, upper)
     # rule = EDNCERule(color, rhs_graph, upper)
     rule_no = len(grammar.rules)
     rule.visualize(os.path.join(IMG_DIR, f"rule_{rule_no}.png"))
@@ -508,7 +509,7 @@ def learn_grammar(g, args):
     orig = deepcopy(g)
     logger = create_logger(
         "global_logger",
-        f"{wd}/data/{METHOD}_{DATASET}_{GRAMMAR}.log",
+        f"{wd}/data/{METHOD}_{DATASET}_{GRAMMAR}{SUFFIX}.log",
     )
     cache_iter, cache_path = setup()
     g, grammar, anno, iter = init_grammar(g, cache_iter, cache_path, EDNCEGrammar)

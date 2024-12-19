@@ -22,6 +22,7 @@ wd = os.getcwd()
 METHOD = "api"
 DATASET = "ckt"
 GRAMMAR = "ednce"
+SUFFIX = "" # suffix for log filepath, for concurrent runs
 
 MODEL = "gpt-4o"
 FILE_NAME = f"{wd}/data/{METHOD}_{DATASET}_{GRAMMAR}.txt"
@@ -37,6 +38,7 @@ MAX_TRIES = 10
 
 # EDNCE parameters
 LINEAR = True # at most 1 nt per comp, and subgraph must contain nt if present
+MIN_EMBEDDING = True # take the minimum or maximum embedding for each rule
 
 TOP_DIFF = 30
 SEED = 5
