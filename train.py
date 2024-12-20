@@ -479,7 +479,7 @@ def load_data(cache_dir, num_graphs):
 if __name__ == "__main__":
     cache_dir = 'cache/api_ckt_ednce/'
     version = get_next_version(cache_dir)-1
-    grammar, anno, g = pickle.load(open(os.path.join(cache_dir, f'{version}.pkl'),'rb'))    
-    data, token2rule = load_data(cache_dir, 5)        
+    grammar, anno, g = pickle.load(open(os.path.join(cache_dir, f'{version}.pkl'),'rb'))
+    data, token2rule = load_data(cache_dir, 4500)        
     model = train(data)
     interactive_sample_sequences(model, grammar, token2rule, max_seq_len=10)

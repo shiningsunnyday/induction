@@ -80,10 +80,11 @@ def nx_to_igraph(g):
     return ig
 
 
-def copy_graph(g, nodes):
+def copy_graph(g, nodes, copy_attrs=True):
     g_copy = g.__class__()
-    for k in g.graph:
-        g_copy.graph[k] = g.graph[k]
+    if copy_attrs:
+        for k in g.graph:
+            g_copy.graph[k] = g.graph[k]
     for n in nodes:
         g_copy.add_node(n, **g.nodes[n])    
     if isinstance(g, nx.DiGraph):

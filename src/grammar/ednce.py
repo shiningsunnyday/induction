@@ -16,6 +16,7 @@ from src.grammar.utils import *
 import random
 from collections import Counter
 import sys
+import time
 
 sys.path.append(os.path.join(os.getcwd(), "../CktGNN/"))
 from utils import is_valid_Circuit, is_valid_DAG
@@ -637,6 +638,7 @@ def initialize(path):
 
 
 def retrieve_cache(graph, rule):
+    logger = logging.getLogger('global_logger')
     prefixes = set([get_prefix(n) for n in graph])
     res = []
     for conn_no in prefixes:
@@ -644,8 +646,10 @@ def retrieve_cache(graph, rule):
         num_conn = len(nodes)
         key = f"{conn_no}_{num_conn}_{rule.rule_id}"
         if key not in graph.graph['cache']:
-            isms = subgraphs_isomorphism(copy_graph(graph, nodes), rule.subgraph)            
+            isms = subgraphs_isomorphism(copy_graph(graph, nodes, copy_attrs=False), rule.subgraph)
             graph.graph['cache'][key] = isms
+        else:
+            logger.info(f"{key} in subg cache")
         res += graph.graph['cache'][key]
     # for ism in isms:
     # conn_no = get_prefix(list(subgraph.nodes)[0])
@@ -663,8 +667,10 @@ def find_iso(subgraph, graph, rule=None):
     """            
     if (rule is not None) and CACHE_SUBG:
         if 'cache' not in graph.graph:
-            graph.graph['cache'] = {}
+            graph.graph['cache'] = {}     
+        start_time = time.time()
         isms = retrieve_cache(graph, rule)
+        logger.info(f"find_iso took {time.time()-start_time}")
     else:
         isms = fast_subgraph_isomorphism(graph, subgraph)
     # if ednce is linear
@@ -696,6 +702,7 @@ def find_iso(subgraph, graph, rule=None):
     ism_graph = nx.Graph()
     in_err_ct = 0
     out_err_ct = 0
+    start_time = time.time()
     for i, ismA in enumerate(isms):
         poss = insets_and_outsets(graph, ismA)        
         for a, b in poss: # each one a possible contraction
@@ -717,8 +724,9 @@ def find_iso(subgraph, graph, rule=None):
             ism_graph.add_node(
                 f"{i}_{a}_{b}", ins=inset, out=outset, ism=list(ismA), dirs=dirs, ps=ps
             )
+    logger.info(f"ism_graph nodes took {time.time()-start_time}")
     if rule is not None:
-        logger.info(f"inset vs outset conflict count: {in_err_ct} vs {out_err_ct}")    
+        logger.info(f"inset vs outset conflict count: {in_err_ct} vs {out_err_ct}")
     if NUM_PROCS == 1:
         all_args = list(product(list(ism_graph), list(ism_graph)))
         res = tqdm(
