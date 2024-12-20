@@ -629,8 +629,6 @@ def touching(graph, ismA, ismB):
     return touch
     
 
-
-
 def initialize(path):
     global graph
     global ism_graph
@@ -644,7 +642,7 @@ def retrieve_cache(graph, rule):
     for conn_no in prefixes:
         nodes = list(filter(lambda n: get_prefix(n)==conn_no, list(graph)))
         num_conn = len(nodes)
-        key = (conn_no, num_conn, rule.rule_id)
+        key = f"{conn_no}_{num_conn}_{rule.rule_id}"
         if key not in graph.graph['cache']:
             isms = subgraphs_isomorphism(copy_graph(graph, nodes), rule.subgraph)            
             graph.graph['cache'][key] = isms
