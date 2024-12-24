@@ -216,11 +216,18 @@ def union(gs, gs_dict={}):
     return whole_g
 
 
-def load_ckt(num_graphs=4500, ambiguous_file=None):
+def load_enas(args):
+    breakpoint()
+    train_data, test_data, graph_args = load_ENAS_graphs('final_structures6', n_types=6, fmt=input_fmt)
+
+
+def load_ckt(args):    
     """
     Load all ckts, and do union over all the graphs
     Combine graph-level attrs of individual graphs into a graph-level attr lookup
     """
+    num_graphs = args.num_data_samples
+    ambiguous_file = args.ambiguous_file
     cwd = os.getcwd()
     data_dir = f"{cwd}/data/nx/ckt/"
     whole_g = nx.DiGraph()
@@ -262,7 +269,8 @@ def load_ckt(num_graphs=4500, ambiguous_file=None):
     return whole_g
 
 
-def read_file(filename, num_samples=-1):
+def load_mols(args, num_samples=-1):
+    filename = f"data/api_mol_hg/{args.mol_dataset}_smiles.txt"
     # debug ptc
     # smiles_list = ['COP(=O)(OC)OC=C(Cl)Cl']
     # return smiles_list

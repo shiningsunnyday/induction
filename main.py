@@ -21,11 +21,11 @@ def load_data(args):
     elif DATASET == "house":
         g = create_house_graph()
     elif DATASET == "ckt":
-        g = load_ckt(args.num_ckt_samples, args.ambiguous_ckt_file)
+        g = load_ckt(args)
+    elif DATASET == "enas":
+        g = load_enas(args)
     elif DATASET == "mol":
-        g = read_file(
-            f"data/api_mol_hg/{args.mol_dataset}_smiles.txt"
-        )
+        g = load_mols(args)
     else:
         raise NotImplementedError
     return g

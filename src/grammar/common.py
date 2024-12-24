@@ -31,15 +31,14 @@ def get_args():
         "--mol-dataset",
         choices=["ptc","hopv","polymers_117", "isocyanates", "chain_extenders", "acrylates"],
     )
-    # ckt dataset args
     parser.add_argument(
-        "--num-ckt-samples", default=4500, type=int
+        "--num-data-samples", type=int, required=True
     )
-    parser.add_argument("--ambiguous-ckt-file", help='if given and exists, load data from this file to learn grammar; if given and not exist, save ambiguous data to this file after learn grammar')
-    parser.add_argument("--num_samples", default=10000, type=int)
+    parser.add_argument("--ambiguous-file", help='if given and exists, load data from this file to learn grammar; if given and not exist, save ambiguous data to this file after learn grammar')
+    parser.add_argument("--num_samples", default=10000, type=int, help='how much to generate')
     args = parser.parse_args()
-    if args.ambiguous_ckt_file is not None:
-        assert args.ambiguous_ckt_file[-5:] == '.json'
+    if args.ambiguous_file is not None:
+        assert args.ambiguous_file[-5:] == '.json'
     return args
 
 

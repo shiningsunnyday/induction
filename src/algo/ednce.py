@@ -541,14 +541,14 @@ def learn_grammar(g, args):
         logger.info(f"graph at iter {iter} has {len(g)} nodes")        
         if VISUALIZE:
             draw_graph(g, path)
-        suffix = ('_' + Path(args.ambiguous_ckt_file).stem) if args.ambiguous_ckt_file is not None and os.path.exists(args.ambiguous_ckt_file) else  ''
+        suffix = ('_' + Path(args.ambiguous_file).stem) if args.ambiguous_file is not None and os.path.exists(args.ambiguous_file) else  ''
         cache_path = os.path.join(CACHE_DIR, f"{iter}{suffix}.pkl")
         pickle.dump((grammar, anno, g), open(cache_path, "wb+"))
 
     num_anno = len(anno)
     grammar, model, anno, g = terminate(g, grammar, anno, iter)
     logger.info(f"anno size: {num_anno}->{len(anno)}")
-    suffix = ('_' + Path(args.ambiguous_ckt_file).stem) if args.ambiguous_ckt_file is not None and os.path.exists(args.ambiguous_ckt_file) else  ''
+    suffix = ('_' + Path(args.ambiguous_file).stem) if args.ambiguous_file is not None and os.path.exists(args.ambiguous_file) else  ''
     cache_path = os.path.join(CACHE_DIR, f"{iter}{suffix}.pkl")
     pickle.dump((grammar, anno, g), open(cache_path, "wb+"))        
     if isinstance(model, list):
@@ -565,8 +565,8 @@ def learn_grammar(g, args):
         model = anno[find_max(anno)]
         draw_tree(model, os.path.join(IMG_DIR, f"model_{iter}.png"))
         model = EDNCEModel(anno)
-    if args.ambiguous_ckt_file:
-        resolve_ambiguous(model, grammar, args.ambiguous_ckt_file)
+    if args.ambiguous_file:
+        resolve_ambiguous(model, grammar, args.ambiguous_file)
     ## Debug
     if isinstance(model, list):
         for m in list(model)[::-1]:
