@@ -240,7 +240,7 @@ def load_ckt(num_graphs=4500, ambiguous_file=None):
         graph_no_iter = range(num_graphs)
     else:
         assert GRAMMAR == "ednce"
-        graph_no_iter = json.load(open(args.ambiguous_ckt_file))['redo']
+        graph_no_iter = json.load(open(ambiguous_file))['redo']
     for i in tqdm(graph_no_iter):
         fpath = os.path.join(data_dir, f"{2*i}.json")
         data = json.load(open(fpath))

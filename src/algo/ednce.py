@@ -106,7 +106,7 @@ def worker(shared_queue, grammar, graphs, found, lock):
             if nx.is_isomorphic(interm, graphs[poss], node_match=node_match):
                 with lock:
                     found[poss].append(deriv)
-                    print(f"found {deriv} graph {poss}, count: {len(found[poss])}")
+                    print(f"found {deriv} graph {poss}, count: {len(found[poss])}")        
         for j, nt in enumerate(nts):
             for i, rule in enumerate(grammar.rules):                      
                 nt_label = interm.nodes[nt]['label']
@@ -117,14 +117,14 @@ def worker(shared_queue, grammar, graphs, found, lock):
                         # if poss == 0 and i == 62:
                         #     pdb.set_trace()                     
                         ts = [x for x in c if c.nodes[x]['label'] in TERMS]
-                        c_t = copy_graph(c, ts)
+                        c_t = copy_graph(c, ts, copy_attrs=False)
                         exist = find_partial([graphs[poss]], c_t)
                         if exist:
                             with lock:
                                 shared_queue.put((c, deriv+[i], poss))       
 
 
-def resolve_ambiguous(model, grammar):
+def resolve_ambiguous(model, grammar, save_path):
     logger = logging.getLogger('global_logger')
     graphs = []
     for j in range(len(model)):
@@ -202,12 +202,12 @@ def resolve_ambiguous(model, grammar):
                 counter.append(i)
         if best_counter is None or len(counter) < len(best_counter):
             best_counter = counter
-            best_e = e
+            best_e = list(sorted(e))
 
     
     data = {'rules': best_e,
             'redo': best_counter}
-    json.dump(data, open(args.ambiguous_ckt_file, 'w+'))
+    json.dump(data, open(save_path, 'w+'))
     logger.info(f"{len(best_counter)} ambiguous: {best_counter} with rules: {best_e}")
 
 
@@ -347,7 +347,7 @@ def rewire_graph_ednce(g, new_n, nodes, dirs, ps, anno):
             g.add_edge(k, new_n, label=label)
 
 
-def update_graph_mp(g, best_clique, shared_data, lock, index=-1):
+def update_graph_mp(g, best_clique, shared_data, index=-1):
     grammar = shared_data['grammar']
     best_ism = shared_data['best_ism']
     anno = shared_data['anno']
@@ -364,14 +364,13 @@ def update_graph_mp(g, best_clique, shared_data, lock, index=-1):
         prefix = f"{no}:"
         new_n = find_next(g, prefix=prefix)
         g.add_node(new_n, label="gray")  # annotate which rule was applied to model        
-        with lock:
-            anno[new_n] = EDNCENode(
-                new_n, attrs={
-                    "rule": len(grammar.rules)-1 if index == -1 else index,
-                    "nodes": nodes,
-                    "feats": [g.nodes[n]['feat'] if 'feat' in g.nodes[n] else 0.0 for n in nodes]
-                    }
-            )
+        anno[new_n] = EDNCENode(
+            new_n, attrs={
+                "rule": len(grammar.rules)-1 if index == -1 else index,
+                "nodes": nodes,
+                "feats": [g.nodes[n]['feat'] if 'feat' in g.nodes[n] else 0.0 for n in nodes]
+                }
+        )
         print(f"{new_n} new node")
         rewire_graph_ednce(g, new_n, nodes, dirs, ps, anno)
         change = True
@@ -381,7 +380,7 @@ def update_graph_mp(g, best_clique, shared_data, lock, index=-1):
         #     continue
         # else:
         #     change = True
-    return g, change
+    return g, anno, change
 
 
 def update_graph(g, anno, best_ism, best_clique, grammar, index=-1):
@@ -394,12 +393,11 @@ def update_graph(g, anno, best_ism, best_clique, grammar, index=-1):
             no = get_prefix(nodes[0])            
             by_no[no] = by_no.get(no, []) + [c]
         args = []        
-        manager = mp.Manager()
-        lock = manager.Lock()
+        manager = mp.Manager()    
         shared_data = manager.dict(anno=anno, best_ism=best_ism, grammar=grammar)        
         for no in by_no:
             conn = copy_graph(g, [n for n in g if get_prefix(n)==no])
-            args.append((conn, by_no[no], shared_data, lock))
+            args.append((conn, by_no[no], shared_data))
         with mp.Pool(NUM_PROCS) as p:
             conns = p.starmap(update_graph_mp, tqdm(args, desc="updating graph"))
         change = False
@@ -409,13 +407,14 @@ def update_graph(g, anno, best_ism, best_clique, grammar, index=-1):
             for c in conn:
                 g.remove_node(c)
             # add new conn
-            conn, change_i = conns[i]
+            conn, local_anno, change_i = conns[i]
+            anno.update(local_anno)
             change |= change_i
             for n, data in conn.nodes(data=True):
                 g.add_node(n, **data)
             for e0, e1, data in conn.edges(data=True):
                 g.add_edge(e0, e1, **data)
-        return g, change
+        return g, anno, change
     else:
         change = False
         for c in best_clique:
@@ -446,7 +445,7 @@ def update_graph(g, anno, best_ism, best_clique, grammar, index=-1):
             #     continue
             # else:
             #     change = True
-        return g, change
+        return g, anno, change
 
 
 def compress(g, grammar, anno):
@@ -485,10 +484,12 @@ def compress(g, grammar, anno):
                 continue
             if ous_best & rule.embedding: # conflict
                 continue
-            logger.info(f"subgraph {best_i} occurred {len(best_clique)} times across components {sorted(best_comps)}")            
-            g, _ = update_graph(
+            logger.info(f"subgraph {best_i} occurred {len(best_clique)} times across components {sorted(best_comps)}")
+            num_anno = len(anno)
+            g, anno, _ = update_graph(
                 g, anno, best_ism, best_clique, grammar, index=best_rule_idx
             )
+            logger.info(f"anno size: {num_anno}->{len(anno)}")
             changed = True
     logger.info("done compress grammar")
     return g, anno
@@ -531,7 +532,9 @@ def learn_grammar(g, args):
         if best_ism is None:
             break
         extract_rule(g, best_ism, best_clique, grammar)
-        g, change = update_graph(g, anno, best_ism, best_clique, grammar)
+        num_anno = len(anno)
+        g, anno, change = update_graph(g, anno, best_ism, best_clique, grammar)
+        logger.info(f"anno size: {num_anno}->{len(anno)}")
         if not change:
             break
         path = os.path.join(IMG_DIR, f"{METHOD}_{iter}.png")
@@ -542,14 +545,16 @@ def learn_grammar(g, args):
         cache_path = os.path.join(CACHE_DIR, f"{iter}{suffix}.pkl")
         pickle.dump((grammar, anno, g), open(cache_path, "wb+"))
 
+    num_anno = len(anno)
     grammar, model, anno, g = terminate(g, grammar, anno, iter)
+    logger.info(f"anno size: {num_anno}->{len(anno)}")
     suffix = ('_' + Path(args.ambiguous_ckt_file).stem) if args.ambiguous_ckt_file is not None and os.path.exists(args.ambiguous_ckt_file) else  ''
     cache_path = os.path.join(CACHE_DIR, f"{iter}{suffix}.pkl")
     pickle.dump((grammar, anno, g), open(cache_path, "wb+"))        
     if isinstance(model, list):
         for j, m in enumerate(model):
             pre = get_prefix(m.id)
-            # draw_tree(m, os.path.join(IMG_DIR, f"model_{iter}_{pre}.png"))
+            draw_tree(m, os.path.join(IMG_DIR, f"model_{iter}_{pre}.png"))
             model[j] = EDNCEModel(dfs(anno, m.id))
         # Debug
         # revised = lambda rid: re.search(f'revising rule {rid}\n', open('data/api_ckt_ednce.log').read())
@@ -561,7 +566,7 @@ def learn_grammar(g, args):
         draw_tree(model, os.path.join(IMG_DIR, f"model_{iter}.png"))
         model = EDNCEModel(anno)
     if args.ambiguous_ckt_file:
-        resolve_ambiguous(model, grammar)        
+        resolve_ambiguous(model, grammar, args.ambiguous_ckt_file)
     ## Debug
     if isinstance(model, list):
         for m in list(model)[::-1]:

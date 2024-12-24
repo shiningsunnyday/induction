@@ -638,18 +638,20 @@ def initialize(path):
 
 
 def retrieve_cache(graph, rule):
-    logger = logging.getLogger('global_logger')
     prefixes = set([get_prefix(n) for n in graph])
     res = []
+    lookup = {}
+    for n in graph:
+        if get_prefix(n) not in lookup:
+            lookup[get_prefix(n)] = []    
+        lookup[get_prefix(n)].append(n)
     for conn_no in prefixes:
-        nodes = list(filter(lambda n: get_prefix(n)==conn_no, list(graph)))
+        nodes = lookup[conn_no]
         num_conn = len(nodes)
         key = f"{conn_no}_{num_conn}_{rule.rule_id}"
         if key not in graph.graph['cache']:
             isms = subgraphs_isomorphism(copy_graph(graph, nodes, copy_attrs=False), rule.subgraph)
             graph.graph['cache'][key] = isms
-        else:
-            logger.info(f"{key} in subg cache")
         res += graph.graph['cache'][key]
     # for ism in isms:
     # conn_no = get_prefix(list(subgraph.nodes)[0])
@@ -724,29 +726,29 @@ def find_iso(subgraph, graph, rule=None):
             ism_graph.add_node(
                 f"{i}_{a}_{b}", ins=inset, out=outset, ism=list(ismA), dirs=dirs, ps=ps
             )
-    logger.info(f"ism_graph nodes took {time.time()-start_time}")
+    # logger.info(f"ism_graph nodes took {time.time()-start_time}")
     if rule is not None:
         logger.info(f"inset vs outset conflict count: {in_err_ct} vs {out_err_ct}")
-    if NUM_PROCS == 1:
-        all_args = list(product(list(ism_graph), list(ism_graph)))
-        res = tqdm(
-            [
-                add_edge(i, j, graph, ism_graph, isms)
-                for (i, j) in all_args
-            ],
-            desc="looping over pairs",
-        )        
-    else:
-        with mp.Manager() as manager:
-            graph_proxy = manager.dict(graph=graph, ism_graph=ism_graph, isms=isms)
-            batch_size = 10000
-            all_args = list(product(list(ism_graph), list(ism_graph)))
-            num_batches = (len(all_args)+batch_size-1)//batch_size
-            print(f"{num_batches} batches")
-            args_batch_list = [(all_args[k*batch_size:(k+1)*batch_size], graph_proxy) for k in range(num_batches)]        
-            with mp.Pool(NUM_PROCS) as p:
-                res = p.starmap(add_edge_mp, tqdm(args_batch_list, desc="looping over pairs"))
-        res = sum(res, [])
+    # if NUM_PROCS == 1:
+    all_args = list(product(list(ism_graph), list(ism_graph)))
+    res = tqdm(
+        [
+            add_edge(i, j, graph, ism_graph, isms)
+            for (i, j) in all_args
+        ],
+        desc="looping over pairs",
+    )        
+    # else:
+    #     with mp.Manager() as manager:
+    #         graph_proxy = manager.dict(graph=graph, ism_graph=ism_graph, isms=isms)
+    #         batch_size = 10000
+    #         all_args = list(product(list(ism_graph), list(ism_graph)))
+    #         num_batches = (len(all_args)+batch_size-1)//batch_size
+    #         print(f"{num_batches} batches")
+    #         args_batch_list = [(all_args[k*batch_size:(k+1)*batch_size], graph_proxy) for k in range(num_batches)]        
+    #         with mp.Pool(NUM_PROCS) as p:
+    #             res = p.starmap(add_edge_mp, tqdm(args_batch_list, desc="looping over pairs"))
+    #     res = sum(res, [])
     for (i, j), should_add in tqdm(zip(all_args, res), "adding edges"):
         if should_add:
             ism_graph.add_edge(i, j)
