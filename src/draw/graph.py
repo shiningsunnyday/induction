@@ -173,6 +173,8 @@ def draw_graph(
         node_sizes = []
         for n in g:
             if "label" in g.nodes[n]:
+                if g.nodes[n]['label'] == 'light_grey':
+                    breakpoint()
                 c = to_rgba(g.nodes[n]["label"])
             else:
                 c = to_rgba("r")
@@ -257,7 +259,7 @@ def draw_graph(
 
 
 def add_node(graph, node_id, label, shape="box", style="filled"):
-    color = CKT_LOOKUP[label]
+    color = LOOKUP[label]
     label = f"({node_id}) {label}"
     # label = f"{label}"
     graph.add_node(

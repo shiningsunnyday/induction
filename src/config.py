@@ -20,7 +20,7 @@ def create_logger(name, log_file, level=logging.INFO):
 wd = os.getcwd()
 
 METHOD = "api"
-DATASET = "ckt"
+DATASET = "enas"
 GRAMMAR = "ednce"
 SUFFIX = "" # suffix for log filepath, for concurrent runs
 
@@ -30,8 +30,8 @@ IMG_DIR = f"{wd}/data/{METHOD}_{DATASET}_{GRAMMAR}/"
 CACHE_DIR = f"{wd}/cache/{METHOD}_{DATASET}_{GRAMMAR}/"
 
 NUM_THREADS = 1
-NUM_PROCS = 100
-VISUALIZE = False
+NUM_PROCS = 1
+VISUALIZE = True
 VERBOSE = True
 CACHE = False
 MAX_TRIES = 10
@@ -83,7 +83,7 @@ elif DATASET == "ckt":
     NONTERMS = ['gray','black']
     NONFINAL = ['gray']
     FINAL = ['black']
-    CKT_LOOKUP = {'input': 'orchid',
+    LOOKUP = {'input': 'orchid',
         'output': 'pink',
         'R': 'yellow',
         'C': 'lawngreen',
@@ -110,35 +110,7 @@ elif DATASET == "ckt":
         'R serie C serie +gm-': 'mediumpurple',
         'R serie C serie -gm-': 'blueviolet'
     }
-    INVERSE_LOOKUP = {
-        'orchid': 'input',
-        'pink': 'output',
-        'yellow': 'R',
-        'lawngreen': 'C',
-        'greenyellow': 'R serie C',
-        'yellowgreen': 'R paral C',
-        'cyan': '+gm+',
-        'lightblue': '-gm+',
-        'deepskyblue': '+gm-',
-        'dodgerblue': '-gm-',
-        'lime': 'C paral +gm+',
-        'seagreen': 'C paral -gm+',
-        'springgreen': 'C paral +gm-',
-        'limegreen': 'C paral -gm-',
-        'lightcoral': 'R paral +gm+',
-        'coral': 'R paral -gm+',
-        'salmon': 'R paral +gm-',
-        'red': 'R paral gm-',
-        'darkorange': 'R paral C paral +gm+',
-        'bisque': 'R paral C paral -gm+',
-        'navajowhite': 'R paral C paral +gm-',
-        'orange': 'R paral C paral -gm-',
-        'plum': 'R serie C serie +gm+',
-        'violet': 'R serie C serie -gm+',
-        'mediumpurple': 'R serie C serie +gm-',
-        'blueviolet': 'R serie C serie -gm-',
-    }
-
+    INVERSE_LOOKUP = {v:k for (k, v) in LOOKUP.items()}
     ### CKT
     TERMS = [
         "yellow",
@@ -148,14 +120,14 @@ elif DATASET == "ckt":
         "deepskyblue",
         "dodgerblue",
         "silver",
-        "light_grey",
+        "lightgrey",
         "orchid",
         "pink",
     ]
     NONTERMS = ["gray", "black"]  # assumes last one is init symbol S
     NONFINAL = ["gray"]
     FINAL = ["black"]
-    CKT_LOOKUP = {
+    LOOKUP = {
         "R": "yellow",
         "C": "lawngreen",
         "+gm+": "cyan",
@@ -163,19 +135,33 @@ elif DATASET == "ckt":
         "+gm-": "deepskyblue",
         "-gm-": "dodgerblue",
         "sudo_in": "silver",
-        "sudo_out": "light_grey",
+        "sudo_out": "lightgrey",
         "input": "orchid",
         "output": "pink",
     }
-    INVERSE_LOOKUP = {
-        "yellow": "R",
-        "lawngreen": "C",
-        "cyan": "+gm+",
-        "lightblue": "-gm+",
-        "deepskyblue": "+gm-",
-        "dodgerblue": "-gm-",
-        "silver": "sudo_in",
-        "light_grey": "sudo_out",
-        "orchid": "input",
-        "pink": "output",
+    INVERSE_LOOKUP = {v:k for (k, v) in LOOKUP.items()}
+elif DATASET == "enas":
+    NONTERMS = ["gray", "black"]
+    NONFINAL = ["gray"]
+    FINAL = ["black"]
+    TERMS = [
+        "skyblue",
+        "pink",
+        "yellow",
+        "orange",
+        "greenyellow",
+        "seagreen",
+        "azure",
+        "beige"
+    ]
+    LOOKUP = {
+        "input": "skyblue",
+        "output": "pink",
+        "conv3": "yellow",
+        "sep3": "orange",
+        "conv5": "greenyellow",
+        "sep5": "seagreen",
+        "avg3": "azure",
+        "max3": "beige"
     }
+    INVERSE_LOOKUP = {v:k for (k, v) in LOOKUP.items()}

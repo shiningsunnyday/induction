@@ -7,6 +7,9 @@ import numpy as np
 import json
 from src.draw.color import to_hex, CMAP
 import importlib
+import igraph
+import argparse
+import os
 
 if "api" in METHOD:
     grammar = importlib.import_module(f"src.algo.{GRAMMAR}")
@@ -14,7 +17,6 @@ else:
     grammar = importlib.import_module(f"src.algo.mining.{GRAMMAR}")
 from src.draw.graph import draw_graph
 from networkx.readwrite import json_graph
-import os
 from tqdm import tqdm
 from src.grammar.common import copy_graph
 import rdkit.Chem as Chem
@@ -216,9 +218,78 @@ def union(gs, gs_dict={}):
     return whole_g
 
 
+def decode_ENAS_to_igraph(row):
+    if type(row) == str:
+        row = eval(row)  # convert string to list of lists
+    n = len(row)
+    g = igraph.Graph(directed=True)
+    g.add_vertices(n+2)
+    g.vs[0]['type'] = 0  # input node
+    for i, node in enumerate(row):
+        g.vs[i+1]['type'] = node[0] + 2  # assign 2, 3, ... to other types
+        g.add_edge(i, i+1)  # always connect from last node
+        for j, edge in enumerate(node[1:]):
+            if edge == 1:
+                g.add_edge(j, i+1)
+    g.vs[n+1]['type'] = 1  # output node
+    g.add_edge(n, n+1)
+    # note that the nodes 0, 1, ... n+1 are in a topological order
+    return g, n+2
+
+
+def load_ENAS_graphs(path, num_samples, n_types=6, fmt='igraph', rand_seed=0, with_y=True, burn_in=1000):
+    graph_args = argparse.Namespace()
+    # load ENAS format NNs to igraphs or tensors
+    g_list = []
+    max_n = 0  # maximum number of nodes
+    with open(path, 'r') as f:
+        for i, row in enumerate(tqdm(f)):
+            if i < burn_in:
+                continue
+            if row is None:
+                break
+            if with_y:
+                row, y = eval(row)
+            else:
+                row = eval(row)
+                y = 0.0
+            if fmt == 'igraph':
+                g, n = decode_ENAS_to_igraph(row)
+            elif fmt == 'string':
+                g, n = decode_ENAS_to_tensor(row, n_types)
+            max_n = max(max_n, n)
+            g_list.append((g, y)) 
+            if len(g_list) == num_samples:
+                break
+    graph_args.num_vertex_type = n_types + 2  # original types + start/end types
+    graph_args.max_n = max_n  # maximum number of nodes
+    graph_args.START_TYPE = 0  # predefined start vertex type
+    graph_args.END_TYPE = 1 # predefined end vertex type
+    ng = len(g_list)
+    print('# node types: %d' % graph_args.num_vertex_type)
+    print('maximum # nodes: %d' % graph_args.max_n)
+    # return g_list[:int(ng*0.9)], g_list[int(ng*0.9):], graph_args
+    return g_list, graph_args
+
+
 def load_enas(args):
-    breakpoint()
-    train_data, test_data, graph_args = load_ENAS_graphs('final_structures6', n_types=6, fmt=input_fmt)
+    num_samples = args.num_data_samples
+    data, graph_args = load_ENAS_graphs('D-VAE/data/final_structures6.txt', num_samples, n_types=6, fmt='igraph')
+    whole_g = nx.DiGraph()
+    gs = []
+    for i in range(len(data)):
+        g = data[i][0].to_networkx()
+        for n in g:
+            g.nodes[n]["type"] = list(LOOKUP)[g.nodes[n]["type"]]
+            g.nodes[n]["label"] = LOOKUP[g.nodes[n]["type"]]
+        for e in g.edges:
+            g.edges[e]["label"] = "black"        
+        node_map = {n: f"{i}:{n}" for n in g}
+        g = nx.relabel_nodes(g, node_map)
+        gs.append(g)
+    whole_g = union(gs)
+    return whole_g
+        
 
 
 def load_ckt(args):    
@@ -251,11 +322,10 @@ def load_ckt(args):
     for i in tqdm(graph_no_iter):
         fpath = os.path.join(data_dir, f"{2*i}.json")
         data = json.load(open(fpath))
-        g = json_graph.node_link_graph(data)
-        lookup = CKT_LOOKUP
+        g = json_graph.node_link_graph(data)        
         for n in g:
-            g.nodes[n]["type"] = list(lookup)[g.nodes[n]["type"]]
-            g.nodes[n]["label"] = lookup[g.nodes[n]["type"]]
+            g.nodes[n]["type"] = list(LOOKUP)[g.nodes[n]["type"]]
+            g.nodes[n]["label"] = LOOKUP[g.nodes[n]["type"]]
         for e in g.edges:
             g.edges[e]["label"] = "black"
         for attr in g.graph:

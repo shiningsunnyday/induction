@@ -13,7 +13,7 @@ def term(g):
     return min([g.nodes[n]["label"] in NONTERMS for n in g])
 
 
-def preprocess_ckt(g):
+def preprocess_io(g):
     interm_nodes = []
     for n in g:
         if g.nodes[n]["label"] in INVERSE_LOOKUP and INVERSE_LOOKUP[g.nodes[n]["label"]] in ['input', 'output']:
@@ -23,8 +23,8 @@ def preprocess_ckt(g):
 
 
 def extract_motifs(g):  
-    if DATASET == 'ckt':
-        g = preprocess_ckt(g)
+    if DATASET in ['ckt', 'enas']:
+        g = preprocess_io(g)
     mapping = {n: str(i + 1) for i, n in enumerate(g)}
     inv_mapping = {v: k for k, v in mapping.items()}
     g = nx.relabel_nodes(g, mapping)  # subdue assumes nodes are consecutive 1,2,...
@@ -45,7 +45,7 @@ def extract_motifs(g):
             continue
         subgraphs[i] = nx.relabel_nodes(subgraphs[i], {v: inv_mapping[k] for (k,v) in occur.items()})
     g = nx.relabel_nodes(g, inv_mapping)
-    if DATASET == 'ckt':
+    if DATASET in ['ckt', 'enas']:
         for sub in subgraphs:
             for e in sub.edges:
                 sub.edges[e]['label'] = 'black'

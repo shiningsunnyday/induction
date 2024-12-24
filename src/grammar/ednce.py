@@ -188,13 +188,14 @@ class EDNCEGrammar(NLCGrammar):
             if sample is None:
                 print("sample is None")
                 continue
-            bad = False
-            for e in sample.edges:
-                if sample.edges[e]["label"] in NONFINAL:
-                    bad = True
-            if bad:
-                print("non-final nodes or edges")
-                continue
+            # bad = False
+            # for e in sample.edges:
+            #     if sample.edges[e]["label"] in NONFINAL:
+            #         bad = True
+            # if bad:
+            #     print("non-final edges")
+            #     breakpoint()
+            #     continue
             exist = False
             # for circuits
             if not nx.is_connected(nx.Graph(sample)):
@@ -205,6 +206,8 @@ class EDNCEGrammar(NLCGrammar):
                     sample = postprocess(sample)
                 except:
                     continue
+            else:
+                breakpoint()
             if len(sample) == 0:
                 continue
             for r in res:
@@ -380,7 +383,10 @@ class EDNCEModel(NLCModel):
             # try every non-terminal
             for n in g:
                 if g.nodes[n]["label"] == rule.nt:
-                    new_res.append(rule(g, n))
+                    g_n = rule(g, n)
+                    if not nx.is_connected(nx.Graph(g_n)):
+                        breakpoint()
+                    new_res.append(g_n)
         res = new_res
         res = [r for r in res if nx.is_connected(nx.Graph(r))]
         # try every order
@@ -394,13 +400,14 @@ class EDNCEModel(NLCModel):
             res_all += res_cur
         return res_all
 
+
     def generate(self, grammar):
         g = nx.DiGraph()
         n = self.seq[-1]
         g.add_node(n, label="black")
         res = [g]
         res = self.__generate__(self.graph[n], grammar, res)
-        # prune unique
+        # prune unique        
         new_res = []
         for r_new in res:
             if not nx.is_connected(nx.Graph(r_new)):
@@ -501,18 +508,17 @@ def insets_and_outsets(graph, nodes):
     # then it is always better for the poss dir of n2 to be the same as n1
     # because if n2 is different, then this creates redundant instructions in the outset
     poss_ps = list(
-        product(*[NONFINAL for _ in out_ns])
+        product(*[FINAL for _ in out_ns])
     )  # try every edge non-final label
 
-    if "ckt" in DATASET:
+    if DATASET in ['ckt', 'enas']:
         ### for CKT ONLY
         # we can further reduce poss_dirs if all nodes in equiv class "precede" nodes or "succeed" nodes on the input-output path
         # do dfs from input to each node in equiv class
         # if no path crosses nodes, then it's true
-        # TODO: implement this
-        poss_ps = list(
-            product(*[FINAL for _ in out_ns])
-        )
+        # poss_ps = list(
+        #     product(*[FINAL for _ in out_ns])
+        # )
         # find source        
         prefix = list(nodes)[0][0]
         assert graph.nodes[f"{prefix}:0"]['type'] == 'input'
@@ -556,11 +562,11 @@ def insets_and_outsets(graph, nodes):
                         res_inset.add((mu, p, q, i, d, d_))
                     if not graph.has_edge(x, y):
                         d_ = "out"
-                        for q in FINAL + NONFINAL:
+                        for q in FINAL:
                             res_outset.add((mu, p, q, i, d, d_))
                     if not graph.has_edge(y, x):
                         d_ = "in"
-                        for q in FINAL + NONFINAL:
+                        for q in FINAL:
                             res_outset.add((mu, p, q, i, d, d_))
             # (a, b) stores the index of realizations
             res_dirs = {y: dirs[lookup[y]] for y in out_ns}

@@ -212,12 +212,12 @@ def resolve_ambiguous(model, grammar, save_path):
 
 
 def spec(u):
-    # ignore rules of a certain form
-    if "ckt" in DATASET:
+    # only process rules of a certain form
+    if DATASET in ['ckt', 'enas']:
         return (
-            u[1] in NONFINAL
-            and u[2] in FINAL
-            and u[0] not in ["silver", "light_grey", "gray", "black"]
+            u[0] not in ["silver", "light_grey", "gray", "black"]
+            and u[1] in FINAL
+            and u[2] in FINAL            
         )
     else:
         raise NotImplementedError
@@ -285,7 +285,7 @@ def gpt_add_diff(rhs_graph, diff):
         if mat:
             comp, type_, dir = mat.groups()
             type_name = inv_rename[type_]
-            mu = CKT_LOOKUP[type_name]
+            mu = LOOKUP[type_name]
             x = int(comp) - 1
             for d in ["in", "out"]:
                 rank.append((mu, "gray", "black", x, "in", dir))
@@ -302,8 +302,8 @@ def extract_rule(g, best_ism, best_clique, grammar):
         list(
             product(
                 TERMS + NONTERMS,
-                FINAL + NONFINAL,
-                FINAL + NONFINAL,
+                FINAL,
+                FINAL,
                 range(len(rhs_graph)),
                 ["in", "out"],
                 ["in", "out"],
@@ -312,9 +312,9 @@ def extract_rule(g, best_ism, best_clique, grammar):
     )
     upper = L2 - ous
     # don't add unneccessary non-final edges
-    diff = set(u for u in upper if u not in lower and spec(u))
+    # diff = set(u for u in upper if u not in lower and spec(u))
     # ask gpt if any of the ones in diff should be added
-    emb = lower
+    # emb = lower
     # if 'ckt' in DATASET:
     #     if np.all(['type' in rhs_graph.nodes[n] for n in rhs_graph]):
     #         emb_diff = gpt_add_diff(rhs_graph, diff)
@@ -322,7 +322,7 @@ def extract_rule(g, best_ism, best_clique, grammar):
     # ask gpt to rank the choices
     # TODO: implement this
     color = "gray"
-    emb = lower if MIN_EMBEDDING else L2-upper
+    emb = lower if MIN_EMBEDDING else upper
     rule = EDNCERule(color, rhs_graph, emb, upper)
     # rule = EDNCERule(color, rhs_graph, upper)
     rule_no = len(grammar.rules)
@@ -514,6 +514,10 @@ def learn_grammar(g, args):
     )
     cache_iter, cache_path = setup()
     g, grammar, anno, iter = init_grammar(g, cache_iter, cache_path, EDNCEGrammar)
+    path = os.path.join(IMG_DIR, f"{METHOD}_{iter}.png")
+    logger.info(f"graph at iter {iter} has {len(g)} nodes")        
+    if VISUALIZE:
+        draw_graph(g, path)
     while not term(g):
         iter += 1
         # img_paths = partition_graph(g, iter, NUM_PARTITON_SAMPLES_FOR_MOTIFS)
@@ -570,7 +574,7 @@ def learn_grammar(g, args):
     ## Debug
     if isinstance(model, list):
         for m in list(model)[::-1]:
-            res = m.generate(grammar)            
+            res = m.generate(grammar)
             match = False
             for i in range(len(res)):
                 p = get_prefix(list(res[i])[0])

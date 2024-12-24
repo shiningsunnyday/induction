@@ -67,7 +67,7 @@ def check_input_xor_output(subgraph):
 def nx_to_igraph(g):
     g = deepcopy(g)
     for n in g:
-        g.nodes[n]["type"] = list(CKT_LOOKUP).index(g.nodes[n]["type"])
+        g.nodes[n]["type"] = list(LOOKUP).index(g.nodes[n]["type"])
     for e in g.edges:
         if "_igraph_index" in g.edges[e]:
             g.edges[e].pop("_igraph_index")
@@ -126,7 +126,7 @@ def neis(graph, nodes, direction=["out"]):
 
 def reduce_to_bounds(compats):
     lower = reduce(lambda x, y: x | y, [compat["ins"] for compat in compats])
-    ous = reduce(lambda x, y: x & y, [compat["out"] for compat in compats])
+    ous = reduce(lambda x, y: x | y, [compat["out"] for compat in compats])
     return lower, ous
 
 
@@ -231,7 +231,7 @@ def find_embedding(subgraphs, graph, find_iso, edges=False):
         # if boundary(subgraph): # if so, will violate conformity
         #     continue
         # domain-specific concerns
-        if "ckt" in DATASET:
+        if DATASET in ["ckt", "enas"]:
             if check_input_xor_output(subgraph):
                 continue
         ism_subgraph = find_iso(subgraph, graph)

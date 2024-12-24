@@ -14,7 +14,10 @@ def find_next(g, prefix=""):
             breakpoint()
         return max(list(g)) + 1
     else:
-        key = str(max(list(map(int, g_nodes))) + 1)
+        try:
+            key = str(max(list(map(int, g_nodes))) + 1)
+        except:
+            breakpoint()
         return f"{prefix}{key}"
     
 
