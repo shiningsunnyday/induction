@@ -231,7 +231,7 @@ def find_embedding(subgraphs, graph, find_iso, edges=False):
         # if boundary(subgraph): # if so, will violate conformity
         #     continue
         # domain-specific concerns
-        if DATASET in ["ckt", "enas"]:
+        if DATASET in ["ckt", "enas", "bn"]:
             if check_input_xor_output(subgraph):
                 continue
         ism_subgraph = find_iso(subgraph, graph)

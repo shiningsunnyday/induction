@@ -23,7 +23,7 @@ def preprocess_io(g):
 
 
 def extract_motifs(g):  
-    if DATASET in ['ckt', 'enas']:
+    if DATASET in ['ckt', 'enas', 'bn']:
         g = preprocess_io(g)
     mapping = {n: str(i + 1) for i, n in enumerate(g)}
     inv_mapping = {v: k for k, v in mapping.items()}
@@ -45,7 +45,7 @@ def extract_motifs(g):
             continue
         subgraphs[i] = nx.relabel_nodes(subgraphs[i], {v: inv_mapping[k] for (k,v) in occur.items()})
     g = nx.relabel_nodes(g, inv_mapping)
-    if DATASET in ['ckt', 'enas']:
+    if DATASET in ['ckt', 'enas', 'bn']:
         for sub in subgraphs:
             for e in sub.edges:
                 sub.edges[e]['label'] = 'black'

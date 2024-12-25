@@ -213,7 +213,7 @@ def resolve_ambiguous(model, grammar, save_path):
 
 def spec(u):
     # only process rules of a certain form
-    if DATASET in ['ckt', 'enas']:
+    if DATASET in ['ckt', 'enas', 'bn']:
         return (
             u[0] not in ["silver", "light_grey", "gray", "black"]
             and u[1] in FINAL

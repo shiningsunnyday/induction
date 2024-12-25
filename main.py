@@ -24,6 +24,8 @@ def load_data(args):
         g = load_ckt(args)
     elif DATASET == "enas":
         g = load_enas(args)
+    elif DATASET == "bn":
+        g = load_bn(args)
     elif DATASET == "mol":
         g = load_mols(args)
     else:

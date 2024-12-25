@@ -237,6 +237,29 @@ def decode_ENAS_to_igraph(row):
     return g, n+2
 
 
+def decode_BN_to_igraph(row):
+    if type(row) == str:
+        row = eval(row)  # convert string to list of lists
+    n = len(row)
+    g = igraph.Graph(directed=True)
+    g.add_vertices(n+2)
+    g.vs[0]['type'] = 0  # input node
+    for i, node in enumerate(row):
+        cur_type = node[0] + 2
+        g.vs[i+1]['type'] = cur_type
+        if sum(node[1:]) == 0:  # if no connections from previous nodes, connect from input
+            g.add_edge(0, i+1)
+        else:
+            for j, edge in enumerate(node[1:]):
+                if edge == 1:
+                    g.add_edge(j+1, i+1)
+    g.vs[n+1]['type'] = 1  # output node
+    end_vertices = [v.index for v in g.vs.select(_outdegree_eq=0) if v.index != n+1]
+    for j in end_vertices:  # connect all loose-end vertices to the output node
+        g.add_edge(j, n+1)
+    return g, n+2
+
+
 def load_ENAS_graphs(path, num_samples, n_types=6, fmt='igraph', rand_seed=0, with_y=True, burn_in=1000):
     graph_args = argparse.Namespace()
     # load ENAS format NNs to igraphs or tensors
@@ -271,6 +294,43 @@ def load_ENAS_graphs(path, num_samples, n_types=6, fmt='igraph', rand_seed=0, wi
     # return g_list[:int(ng*0.9)], g_list[int(ng*0.9):], graph_args
     return g_list, graph_args
 
+    
+def load_BN_graphs(path, num_samples, n_types=8, fmt='igraph', rand_seed=0, with_y=True):
+    # load raw Bayesian network strings to igraphs or tensors
+    graph_args = argparse.Namespace()
+    g_list = []
+    max_n = 0
+    with open(path, 'r') as f:
+        for i, row in enumerate(tqdm(f)):
+            if row is None:
+                break
+            if with_y:
+                row, y = eval(row)
+            else:
+                row = eval(row)
+                y = 0.0
+            if fmt == 'igraph':
+                g, n = decode_BN_to_igraph(row)
+            elif fmt == 'string':
+                g, n = decode_BN_to_tensor(row, n_types)
+            max_n = max(max_n, n)
+            assert(max_n == n)  # all BNs should have the same node number
+            g_list.append((g, y)) 
+            if len(g_list) == num_samples:
+                break            
+
+    graph_args.num_class = 1  # how many classes of graphs
+    graph_args.num_vertex_type = n_types + 2  # how many vertex types
+    graph_args.max_n = max_n  # maximum number of nodes
+    graph_args.START_TYPE = 0  # predefined start vertex type
+    graph_args.END_TYPE = 1 # predefined end vertex type
+    ng = len(g_list)
+    print('# classes: %d' % graph_args.num_class)
+    print('# node types: %d' % graph_args.num_vertex_type)
+    print('maximum # nodes: %d' % graph_args.max_n)
+    # return g_list[:int(ng*0.9)], g_list[int(ng*0.9):], graph_args    
+    return g_list, graph_args
+
 
 def load_enas(args):
     num_samples = args.num_data_samples
@@ -289,6 +349,25 @@ def load_enas(args):
         gs.append(g)
     whole_g = union(gs)
     return whole_g
+
+
+def load_bn(args):
+    num_samples = args.num_data_samples
+    data, graph_args = load_BN_graphs('D-VAE/data/asia_200k.txt', num_samples, n_types=8, fmt='igraph')
+    whole_g = nx.DiGraph()
+    gs = []
+    for i in range(len(data)):
+        g = data[i][0].to_networkx()
+        for n in g:
+            g.nodes[n]["type"] = list(LOOKUP)[g.nodes[n]["type"]]
+            g.nodes[n]["label"] = LOOKUP[g.nodes[n]["type"]]
+        for e in g.edges:
+            g.edges[e]["label"] = "black"        
+        node_map = {n: f"{i}:{n}" for n in g}
+        g = nx.relabel_nodes(g, node_map)
+        gs.append(g)
+    whole_g = union(gs)    
+    return whole_g    
         
 
 

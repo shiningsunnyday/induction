@@ -20,7 +20,7 @@ def create_logger(name, log_file, level=logging.INFO):
 wd = os.getcwd()
 
 METHOD = "api"
-DATASET = "enas"
+DATASET = "bn"
 GRAMMAR = "ednce"
 SUFFIX = "" # suffix for log filepath, for concurrent runs
 
@@ -163,5 +163,34 @@ elif DATASET == "enas":
         "sep5": "seagreen",
         "avg3": "azure",
         "max3": "beige"
+    }
+    INVERSE_LOOKUP = {v:k for (k, v) in LOOKUP.items()}
+elif DATASET == "bn":
+    NONTERMS = ["gray", "black"]
+    NONFINAL = ["gray"]
+    FINAL = ["black"]    
+    TERMS = [
+        "orchid",
+        "pink",
+        "dodgerblue",
+        "tomato",
+        "limegreen",
+        "blueviolet",
+        "aqua",
+        "salmon",
+        "gold",
+        "green"
+    ]
+    LOOKUP = {
+        "input": "orchid",
+        "output": "pink",
+        "D": "dodgerblue",
+        "T": "tomato",
+        "L": "limegreen",
+        "B": "blueviolet",
+        "A": "aqua",
+        "S": "salmon",
+        "X": "gold",
+        "E": "green"
     }
     INVERSE_LOOKUP = {v:k for (k, v) in LOOKUP.items()}
