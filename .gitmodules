@@ -10,3 +10,6 @@
 [submodule "my_data_efficient_grammar"]
 	path = my_data_efficient_grammar
 	url = https://github.com/gmh14/my_data_efficient_grammar.git
+[submodule "RevTrack"]
+	path = RevTrack
+	url = https://github.com/MITIBMxGraph/RevTrack.git
