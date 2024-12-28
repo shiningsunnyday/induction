@@ -30,8 +30,8 @@ IMG_DIR = f"{wd}/data/{METHOD}_{DATASET}_{GRAMMAR}/"
 CACHE_DIR = f"{wd}/cache/{METHOD}_{DATASET}_{GRAMMAR}/"
 
 NUM_THREADS = 1
-NUM_PROCS = 1
-VISUALIZE = True
+NUM_PROCS = 100
+VISUALIZE = False
 VERBOSE = True
 CACHE = False
 MAX_TRIES = 10
@@ -40,6 +40,13 @@ MAX_TRIES = 10
 CACHE_SUBG = True
 LINEAR = True # at most 1 nt per comp, and subgraph must contain nt if present
 MIN_EMBEDDING = False # take the minimum or maximum embedding for each rule
+LIMIT_FOR_GREEDY = 1000
+LIMIT_FOR_DYNAMIC = 5000
+
+# motif args
+MAX_NUM_COMPS_FOR_MOTIF_MINING = 5000
+MOTIF_MIN_SIZE = 2
+MOTIF_MAX_SIZE = 5
 
 TOP_DIFF = 30
 SEED = 5
@@ -194,3 +201,33 @@ elif DATASET == "bn":
         "E": "green"
     }
     INVERSE_LOOKUP = {v:k for (k, v) in LOOKUP.items()}
+    MOTIF_MAX_SIZE = 4
+elif DATASET == "ast":
+    NONTERMS = ["gray", "black"]
+    NONFINAL = ["gray"]
+    FINAL = ["black"]    
+    TERMS = [
+        "orchid",
+        "pink",
+        "dodgerblue",
+        "tomato",
+        "limegreen",
+        "blueviolet",
+        "aqua",
+        "salmon",
+        "gold",
+        "green"
+    ]
+    LOOKUP = {
+        "input": "orchid",
+        "output": "pink",
+        "D": "dodgerblue",
+        "T": "tomato",
+        "L": "limegreen",
+        "B": "blueviolet",
+        "A": "aqua",
+        "S": "salmon",
+        "X": "gold",
+        "E": "green"
+    }
+    INVERSE_LOOKUP = {v:k for (k, v) in LOOKUP.items()}    

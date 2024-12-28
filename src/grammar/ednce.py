@@ -250,7 +250,7 @@ class EDNCERule:
         node_map = {}
         for n in rhs:
             node_map[n] = start
-            start = next(start)
+            start = next_n(start)
         inv_node_map = {v: k for k, v in node_map.items()}
         rhs = nx.relabel_nodes(rhs, node_map)
         cur = nx.union(cur, rhs)
@@ -644,7 +644,7 @@ def initialize(path):
 
 
 def retrieve_cache(graph, rule):
-    prefixes = set([get_prefix(n) for n in graph])
+    prefixes = get_comp_names(graph)
     res = []
     lookup = {}
     for n in graph:
@@ -666,76 +666,14 @@ def retrieve_cache(graph, rule):
     return res
 
 
-def find_iso(subgraph, graph, rule=None):
-    logger = logging.getLogger('global_logger')
-    global graph_proxy    
-    """
-    subgraph isomorphism is the most called function in the algorithm due to the function compress
-    To speed up, cache tuples of (conn no, |conn|, rule no) dynamically
-    """            
-    if (rule is not None) and CACHE_SUBG:
-        if 'cache' not in graph.graph:
-            graph.graph['cache'] = {}     
-        start_time = time.time()
-        isms = retrieve_cache(graph, rule)
-        logger.info(f"find_iso took {time.time()-start_time}")
-    else:
-        isms = fast_subgraph_isomorphism(graph, subgraph)
-    # if ednce is linear
-        # if subgraph is terminal-only
-            # remove all subgraph instances in comps with nt
-    if LINEAR:
-        isms_copy = []
-        for ism in isms:
-            term_only = True
-            for n in subgraph:
-                if subgraph.nodes[n]['label'] in NONTERMS:
-                    term_only = False
-            if not term_only:
-                isms_copy.append(ism)
-                continue
-            try:
-                pre = get_prefix(list(ism)[0])
-            except:
-                breakpoint()
-            has_nt = False
-            for n in graph:
-                if get_prefix(n) == pre:
-                    if graph.nodes[n]['label'] in NONTERMS:
-                        has_nt = True
-                        break
-            if not has_nt:
-                isms_copy.append(ism)
-        isms = isms_copy            
-    ism_graph = nx.Graph()
-    in_err_ct = 0
-    out_err_ct = 0
-    start_time = time.time()
-    for i, ismA in enumerate(isms):
-        poss = insets_and_outsets(graph, ismA)        
-        for a, b in poss: # each one a possible contraction
-            inset, outset, dirs, ps = poss[(a, b)]
-            if rule is not None:
-                if inset-rule.embedding:
-                    in_err_ct += 1
-                    continue
-                if outset & rule.embedding:
-                    out_err_ct += 1
-                    continue
-                # if inset-rule.embedding:
-                #     continue
-                # if outset-rule.upper:
-                #     continue
-            else:
-                if inset & outset:
-                    continue
-            ism_graph.add_node(
-                f"{i}_{a}_{b}", ins=inset, out=outset, ism=list(ismA), dirs=dirs, ps=ps
-            )
-    # logger.info(f"ism_graph nodes took {time.time()-start_time}")
-    if rule is not None:
-        logger.info(f"inset vs outset conflict count: {in_err_ct} vs {out_err_ct}")
-    # if NUM_PROCS == 1:
+def build_ism_graph(graph, ism_graph, isms):
+    if len(ism_graph) > LIMIT_FOR_DYNAMIC:
+        """
+        Instead of building the entire ism_graph
+        Due to memory, output a should_add_edge function
+        """
+        should_add_edge = lambda i, j: add_edge(i, j, graph, ism_graph, isms)
+        return (ism_graph, should_add_edge)
     all_args = list(product(list(ism_graph), list(ism_graph)))
     res = tqdm(
         [
@@ -758,4 +696,88 @@ def find_iso(subgraph, graph, rule=None):
     for (i, j), should_add in tqdm(zip(all_args, res), "adding edges"):
         if should_add:
             ism_graph.add_edge(i, j)
+    return ism_graph
+
+
+
+def find_iso(subgraph, graph, rule=None):
+    logger = logging.getLogger('global_logger')
+    global graph_proxy    
+    """
+    subgraph isomorphism is the most called function in the algorithm due to the function compress
+    To speed up, cache tuples of (conn no, |conn|, rule no) dynamically
+    """            
+    if (rule is not None) and CACHE_SUBG:
+        if 'cache' not in graph.graph:
+            graph.graph['cache'] = {}     
+        start_time = time.time()
+        logger.info(f"start retrieve rule cache")
+        isms = retrieve_cache(graph, rule)
+        logger.info(f"retrieve rule cache took {time.time()-start_time}")
+    else:
+        start_time = time.time()
+        isms = fast_subgraph_isomorphism(graph, subgraph)
+        logger.info(f"fast_subgraph_isomorphism took {time.time()-start_time}")
+    # if ednce is linear
+        # if subgraph is terminal-only
+            # remove all subgraph instances in comps with nt
+    if LINEAR:
+        start_time = time.time()
+        logger.info(f"linear option activated, start checking isms")
+        isms_copy = []
+        for ism in isms:
+            term_only = True
+            for n in subgraph:
+                if subgraph.nodes[n]['label'] in NONTERMS:
+                    term_only = False
+            if not term_only:
+                isms_copy.append(ism)
+                continue
+            try:
+                pre = get_prefix(list(ism)[0])
+            except:
+                breakpoint()
+            has_nt = False
+            for n in graph.comps[pre]:
+                if graph.nodes[n]['label'] in NONTERMS:
+                    has_nt = True
+                    break
+            if not has_nt:
+                isms_copy.append(ism)
+        isms = isms_copy
+        logger.info(f"linear option activated, checking isms took {time.time()-start_time}")
+    ism_graph = nx.Graph()
+    in_err_ct = 0
+    out_err_ct = 0
+    start_time = time.time()
+    logger.info("start building ism_graph nodes")
+    for i, ismA in enumerate(isms):
+        poss = insets_and_outsets(graph, ismA)        
+        for a, b in poss: # each one a possible contraction
+            inset, outset, dirs, ps = poss[(a, b)]
+            if rule is not None:
+                if inset-rule.embedding:
+                    in_err_ct += 1
+                    continue
+                if outset & rule.embedding:
+                    out_err_ct += 1
+                    continue
+                # if inset-rule.embedding:
+                #     continue
+                # if outset-rule.upper:
+                #     continue
+            else:
+                if inset & outset:
+                    continue
+            ism_graph.add_node(
+                f"{i}_{a}_{b}", ins=inset, out=outset, ism=list(ismA), dirs=dirs, ps=ps
+            )
+    logger.info(f"building ism_graph nodes took {time.time()-start_time}")
+    if rule is not None:
+        logger.info(f"inset vs outset conflict count: {in_err_ct} vs {out_err_ct}")
+    # if NUM_PROCS == 1:
+    start_time = time.time()
+    logger.info("start building ism_graph edges")
+    ism_graph = build_ism_graph(graph, ism_graph, isms)
+    logger.info(f"building ism_graph edges took {time.time()-start_time}")
     return ism_graph

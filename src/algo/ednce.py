@@ -79,7 +79,9 @@ def find_partial(graphs, query):
     # query_und = nx.Graph(query)
     for i in range(len(graphs)):
         bad = False
-        if len(query) > len(graphs[i]):
+        if len(query) >= len(graphs[i]):
+            continue
+        if len(query.edges) >= len(graphs[i].edges):
             continue
         # for conn in nx.connected_components(query_und):
             # conn_g = copy_graph(query, conn)
@@ -463,12 +465,14 @@ def compress(g, grammar, anno):
             ism_subgraph = find_iso(rule.subgraph, g, rule=rule)
             if len(ism_subgraph):
                 max_clique = approximate_best_clique(ism_subgraph)
-                if len(max_clique) * len(rule.subgraph) > max_len:
+                if len(max_clique) * count_num_terms(rule.subgraph) > max_len:
                     best_i = index
-                    max_len = len(max_clique) * len(rule.subgraph)
+                    max_len = len(max_clique) * count_num_terms(rule.subgraph)
                     best_ism = ism_subgraph
                     best_clique = max_clique
                     best_rule_idx = index
+        if isinstance(best_ism, tuple):
+            best_ism = best_ism[0]
         if best_clique is not None:
             best_comps = list(set([get_prefix(best_ism.nodes[c]['ism'][0]) for c in best_clique]))                
             lower_best, ous_best = reduce_to_bounds([best_ism.nodes[n] for n in best_clique])
@@ -515,7 +519,7 @@ def learn_grammar(g, args):
     cache_iter, cache_path = setup()
     g, grammar, anno, iter = init_grammar(g, cache_iter, cache_path, EDNCEGrammar)
     path = os.path.join(IMG_DIR, f"{METHOD}_{iter}.png")
-    logger.info(f"graph at iter {iter} has {len(g)} nodes")        
+    logger.info(f"graph at iter {iter} has {len(g)} nodes")
     if VISUALIZE:
         draw_graph(g, path)
     while not term(g):
@@ -531,7 +535,7 @@ def learn_grammar(g, args):
         # path = os.path.join(IMG_DIR, f'{METHOD}_{iter-1}_compress.png')
         # draw_graph(g, path)
         best_ism, best_clique = find_embedding(
-            all_subgraphs, g, find_iso=find_iso, edges=True
+            all_subgraphs, g, find_iso=find_iso
         )
         if best_ism is None:
             break

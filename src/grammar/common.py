@@ -1,5 +1,6 @@
 import networkx as nx
 from src.config import *
+from src.grammar.utils import *
 import igraph
 from copy import deepcopy
 import re
@@ -8,6 +9,8 @@ from tqdm import tqdm
 from argparse import ArgumentParser
 from networkx.algorithms.isomorphism import DiGraphMatcher
 import multiprocessing as mp
+import time
+import random
 
 def get_args():
     parser = ArgumentParser()
@@ -32,7 +35,7 @@ def get_args():
         choices=["ptc","hopv","polymers_117", "isocyanates", "chain_extenders", "acrylates"],
     )
     parser.add_argument(
-        "--num-data-samples", type=int, required=True
+        "--num-data-samples", type=int
     )
     parser.add_argument("--ambiguous-file", help='if given and exists, load data from this file to learn grammar; if given and not exist, save ambiguous data to this file after learn grammar')
     parser.add_argument("--num_samples", default=10000, type=int, help='how much to generate')
@@ -40,6 +43,20 @@ def get_args():
     if args.ambiguous_file is not None:
         assert args.ambiguous_file[-5:] == '.json'
     return args
+
+
+# import pygraphviz as pgv
+class MyGraph(nx.DiGraph):
+    def __init__(self, graph=None):
+        if graph is None:
+            graph = nx.DiGraph()
+        self.comps = {}   
+        for n in graph:
+            pre = get_prefix(n)
+            if pre not in self.comps:
+                self.comps[pre] = []
+            self.comps[pre].append(n)
+        super().__init__(graph)
 
 
 def set_global_args(args):
@@ -110,6 +127,14 @@ def boundary(g):
     return bad
 
 
+def count_num_terms(subgraph):
+    ct = 0
+    for n in subgraph:
+        if subgraph.nodes[n]['label'] not in NONTERMS:
+            ct += 1
+    return ct
+
+
 def neis(graph, nodes, direction=["out"]):
     res = []
     if "out" in direction:
@@ -167,30 +192,65 @@ def greedy_max_clique(graph):
     return max_clique
 
 
-def approximate_best_clique(ism_subgraph):
+def random_search_max_clique(g, should_add_edge):
     max_clique = []
-    for ism_conn_subgraph in nx.connected_components(ism_subgraph):
-        conn_subgraph = copy_graph(ism_subgraph, ism_conn_subgraph)
-        print(
-            f"approx max clique {len(conn_subgraph)} nodes {len(conn_subgraph.edges)} edges"
-        )
-        if len(conn_subgraph) > 1000:
-            clique = greedy_max_clique(conn_subgraph)
-        else:
-            try:
-                clique = list(nx.approximation.max_clique(conn_subgraph))
-            except:
-                clique = greedy_max_clique(conn_subgraph)
+    for k in tqdm(range(3), desc="random_search_max_clique"):
+        graph = MyGraph(g) # copy, for comps
+        n = random.choice(list(graph))
+        clique = [n]
+        add_back = graph.comps[get_prefix(n)]
+        graph.comps.pop(get_prefix(n))
+        for c in tqdm(graph.comps, "iterating through comps"):
+            for m in graph.comps[c]:
+                violate = False
+                for c in clique:
+                    if not should_add_edge(c, m):
+                        violate = True
+                        break
+                if not violate:
+                    clique.append(m)      
+                    added = True
+                    break            
+        graph.comps[get_prefix(n)] = add_back
         if len(clique) > len(max_clique):
             max_clique = clique
-        elif len(clique) == len(max_clique):
-            lower_best, ous_best = reduce_to_bounds(
-                [ism_subgraph.nodes[n] for n in max_clique]
+    return max_clique
+        
+
+def approximate_best_clique(graph):    
+    logger = logging.getLogger('global_logger')
+    start_time = time.time()
+    logger.info("begin approximate_best_clique")
+    if isinstance(graph, tuple):
+        graph, should_add_edge = graph
+        # a lightweight randomized search algorithm
+        logger.info("begin random_search_max_clique")
+        max_clique = random_search_max_clique(graph, should_add_edge)
+    else:
+        max_clique = []
+        for ism_conn_subgraph in nx.connected_components(graph):
+            conn_subgraph = copy_graph(graph, ism_conn_subgraph)
+            print(
+                f"approx max clique {len(conn_subgraph)} nodes {len(conn_subgraph.edges)} edges"
             )
-            lower, ous = reduce_to_bounds([ism_subgraph.nodes[n] for n in clique])
-            if len(lower) + len(ous) < len(lower_best) + len(ous_best):
-                print("better clique")
+            if len(conn_subgraph) > LIMIT_FOR_GREEDY:
+                clique = greedy_max_clique(conn_subgraph)
+            else:
+                try:
+                    clique = list(nx.approximation.max_clique(conn_subgraph))
+                except:
+                    clique = greedy_max_clique(conn_subgraph)
+            if len(clique) > len(max_clique):
                 max_clique = clique
+            elif len(clique) == len(max_clique):
+                lower_best, ous_best = reduce_to_bounds(
+                    [graph.nodes[n] for n in max_clique]
+                )
+                lower, ous = reduce_to_bounds([graph.nodes[n] for n in clique])
+                if len(lower) + len(ous) < len(lower_best) + len(ous_best):
+                    print("better clique")
+                    max_clique = clique
+    logger.info(f"approximate_best_clique took {time.time()-start_time}")
     return max_clique
 
 
@@ -235,15 +295,20 @@ def find_embedding(subgraphs, graph, find_iso, edges=False):
             if check_input_xor_output(subgraph):
                 continue
         ism_subgraph = find_iso(subgraph, graph)
-        if len(ism_subgraph) == 0:
-            continue
-        print(subgraph.nodes, ism_subgraph.nodes)
+        if isinstance(ism_subgraph, tuple):
+            print(subgraph.nodes, ism_subgraph[0].nodes)
+            if len(ism_subgraph[0]) == 0:
+                continue
+        else:
+            print(subgraph.nodes, ism_subgraph.nodes)
+            if len(ism_subgraph) == 0:
+                continue        
         max_clique = approximate_best_clique(ism_subgraph)
         # max_clique = list(nx.find_cliques(ism_subgraph))
-        if edges:
-            expr = len(max_clique) * len(subgraph.edges)
-        else:
-            expr = len(max_clique) * len(subgraph)
+        # if edges:
+        #     expr = len(max_clique) * len(subgraph.edges)
+        # else:                
+        expr = len(max_clique) * count_num_terms(subgraph)
         better = expr > max_len
         if better:
             best_i = i
@@ -254,18 +319,19 @@ def find_embedding(subgraphs, graph, find_iso, edges=False):
     # best_ism: best subgraph
     # best cliques: best clique in ism_subgraph for best_ism
     # return best_ism, best_clique    
+    if isinstance(best_ism, tuple):
+        best_ism = best_ism[0]    
     if best_clique is not None:
         best_comps = list(set([best_ism.nodes[c]['ism'][0].split(':')[0] for c in best_clique]))
         logger.info("done find embedding")
         logger.info(f"subgraph {best_i} occurred {len(best_clique)} times across components {sorted(best_comps)}")
     return best_ism, best_clique
 
-def subgraphs_isomorphism_mp(batch, graph_proxy):
-    graph = graph_proxy['graph']
+def subgraphs_isomorphism_mp(batch):
     res = []
     for conn, subgraph in batch:
         gm = DiGraphMatcher(
-            copy_graph(graph, conn),
+            conn,
             subgraph,
             node_match=lambda d1, d2: d1.get("label", "#") == d2.get("label", "#"),
             edge_match=lambda d1, d2: d1.get("label", "#") == d2.get("label", "#"),
@@ -299,23 +365,23 @@ def fast_subgraph_isomorphism(graph, subgraph):
             args.append((copy_graph(graph, conn), subgraph))        
         ans = [subgraphs_isomorphism(*arg) for arg in tqdm(args, desc="subgraph isomorphism")]
     else:
-        with mp.Manager() as manager:
-            graph_proxy = manager.dict(graph=graph)
-            batch_size = 100
-            args = []
-            for conn in tqdm(conns, desc="preparing args"):
-                args.append((conn, subgraph))
-            num_batches = (len(args)+batch_size-1)//batch_size
-            print(f"{num_batches} batches")                
-            args_batch_list = [(args[k*batch_size:(k+1)*batch_size], graph_proxy) for k in range(num_batches)]                 
-            with mp.Pool(NUM_PROCS) as p:
-                ans = p.starmap(
-                    subgraphs_isomorphism_mp,
-                    tqdm(
-                        args_batch_list,
-                        desc="subgraph isomorphism mp",
-                    ),
+        # with mp.Manager() as manager:
+            # graph_proxy = manager.dict(graph=graph)
+        batch_size = 100
+        args = []
+        for conn in tqdm(conns, desc="preparing args"):
+            args.append((copy_graph(graph, conn), subgraph))
+        num_batches = (len(args)+batch_size-1)//batch_size
+        print(f"{num_batches} batches")                
+        args_batch_list = [(args[k*batch_size:(k+1)*batch_size],) for k in range(num_batches)]                 
+        with mp.Pool(NUM_PROCS) as p:
+            ans = p.starmap(
+                subgraphs_isomorphism_mp,
+                tqdm(
+                    args_batch_list,
+                    desc="subgraph isomorphism mp",
+                ),
             )
-                ans = sum(ans, [])
+            ans = sum(ans, [])
     ans = sum(ans, [])
     return ans

@@ -11,11 +11,13 @@ import igraph
 import argparse
 import os
 
+from ogb.graphproppred import PygGraphPropPredDataset
+
 if "api" in METHOD:
     grammar = importlib.import_module(f"src.algo.{GRAMMAR}")
 else:
     grammar = importlib.import_module(f"src.algo.mining.{GRAMMAR}")
-from src.draw.graph import draw_graph
+from src.draw.graph import draw_graph, MyGraph
 from networkx.readwrite import json_graph
 from tqdm import tqdm
 from src.grammar.common import copy_graph
@@ -317,7 +319,7 @@ def load_BN_graphs(path, num_samples, n_types=8, fmt='igraph', rand_seed=0, with
             assert(max_n == n)  # all BNs should have the same node number
             g_list.append((g, y)) 
             if len(g_list) == num_samples:
-                break            
+                break
 
     graph_args.num_class = 1  # how many classes of graphs
     graph_args.num_vertex_type = n_types + 2  # how many vertex types
@@ -353,7 +355,7 @@ def load_enas(args):
 
 def load_bn(args):
     num_samples = args.num_data_samples
-    data, graph_args = load_BN_graphs('D-VAE/data/asia_200k.txt', num_samples, n_types=8, fmt='igraph')
+    data, graph_args = load_BN_graphs('D-VAE/data/asia_200k.txt', num_samples, n_types=8, fmt='igraph')    
     whole_g = nx.DiGraph()
     gs = []
     for i in range(len(data)):
@@ -367,8 +369,17 @@ def load_bn(args):
         g = nx.relabel_nodes(g, node_map)
         gs.append(g)
     whole_g = union(gs)    
-    return whole_g    
-        
+    whole_g = MyGraph(whole_g)
+    return whole_g   
+
+
+def load_ast(args):    
+    dataset = PygGraphPropPredDataset(name="ogbg-code2")
+    breakpoint()
+    
+
+def load_finance(args):
+    breakpoint()
 
 
 def load_ckt(args):    
@@ -376,7 +387,15 @@ def load_ckt(args):
     Load all ckts, and do union over all the graphs
     Combine graph-level attrs of individual graphs into a graph-level attr lookup
     """
-    num_graphs = args.num_data_samples
+    if args.num_data_samples is None:
+        num_graphs = args.num_data_samples
+    else:
+        num_graphs = 0        
+        while True:            
+            if os.path.exists(os.path.join(data_dir, f"{2*num_graphs+2}.json")):
+                num_graphs += 1
+            else:
+                break
     ambiguous_file = args.ambiguous_file
     cwd = os.getcwd()
     data_dir = f"{cwd}/data/nx/ckt/"
@@ -398,6 +417,7 @@ def load_ckt(args):
     else:
         assert GRAMMAR == "ednce"
         graph_no_iter = json.load(open(ambiguous_file))['redo']
+    i = 0
     for i in tqdm(graph_no_iter):
         fpath = os.path.join(data_dir, f"{2*i}.json")
         data = json.load(open(fpath))

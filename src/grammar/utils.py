@@ -32,7 +32,7 @@ def get_next_version(dir: str) -> int:
     return max(existing_versions) + 1    
 
 
-def next(n):
+def next_n(n):
     if isinstance(n, str):
         if ":" in n:
             prefix, n = n.split(":")
@@ -46,9 +46,13 @@ def next(n):
 
 def get_prefix(name):
     # '5:13' => 5
-    if ':' not in name:
-        raise ValueError(f"{name} has no :")
-    return int(name.split(':')[0])
+    if ':' in name:
+        return int(name.split(':')[0])
+    elif '_' in name:
+        return int(name.split('_')[0])
+    else:
+        raise ValueError(f"{name} has no : or _")
+    
 
 
 def get_suffix(name):
@@ -71,3 +75,7 @@ def find_max(g):
         return max(list(g))
     else:
         return str(max(list(map(int, g))))
+
+
+def get_comp_names(g):
+    return set([get_prefix(n) for n in g])

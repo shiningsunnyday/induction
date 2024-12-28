@@ -10,8 +10,6 @@ from src.grammar.common import *
 import matplotlib.colors as mcolors
 import igraph
 
-# import pygraphviz as pgv
-
 
 def draw_custom_arrows(
     ax,

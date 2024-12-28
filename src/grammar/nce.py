@@ -37,7 +37,7 @@ class NCEGrammar(NLCGrammar):
             node_map = {}
             for n in rhs:
                 node_map[n] = start
-                start = next(start)
+                start = next_n(start)
                 num_nts += rhs.nodes[n]["label"] == "gray"
             num_nts -= 1
             inv_node_map = {v: k for k, v in node_map.items()}

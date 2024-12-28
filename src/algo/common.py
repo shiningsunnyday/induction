@@ -13,38 +13,55 @@ def term(g):
     return min([g.nodes[n]["label"] in NONTERMS for n in g])
 
 
-def preprocess_io(g):
+def preprocess(g):
+    """
+    1. Remove the input/output nodes
+    2. Randomly downsize g if too big for motif mining
+    """
+    comps = get_comp_names(g)
+    check_prefix = False
+    if len(comps) > MAX_NUM_COMPS_FOR_MOTIF_MINING:
+        check_prefix = True
+        comps = set(list(comps)[:MAX_NUM_COMPS_FOR_MOTIF_MINING])
     interm_nodes = []
     for n in g:
+        if check_prefix and get_prefix(n) not in comps:
+            continue
         if g.nodes[n]["label"] in INVERSE_LOOKUP and INVERSE_LOOKUP[g.nodes[n]["label"]] in ['input', 'output']:
             continue
         interm_nodes.append(n)
     return copy_graph(g, interm_nodes)
 
 
-def extract_motifs(g):  
+def extract_motifs(g):
+    logger = logging.getLogger('global_logger')
     if DATASET in ['ckt', 'enas', 'bn']:
-        g = preprocess_io(g)
-    mapping = {n: str(i + 1) for i, n in enumerate(g)}
-    inv_mapping = {v: k for k, v in mapping.items()}
-    g = nx.relabel_nodes(g, mapping)  # subdue assumes nodes are consecutive 1,2,...
-    hash_val = hash_graph(g)    
+        g_motif = preprocess(g)
+    mapping = {n: str(i + 1) for i, n in enumerate(g_motif)}
+    # inv_mapping = {v: k for k, v in mapping.items()}
+    g_motif = nx.relabel_nodes(g_motif, mapping)  # subdue assumes nodes are consecutive 1,2,...
+    hash_val = hash_graph(g_motif)
     tmp_path = os.path.join(IMG_DIR, f"g_{hash_val}.g")
-    prepare_subdue_file(g, tmp_path)
-    subgraphs = run_subdue(tmp_path)      
+    prepare_subdue_file(g_motif, tmp_path)
+    subgraphs = run_subdue(tmp_path)
+    logger.info("begin extracting motifs")
+    start_time = time.time()
     for i in tqdm(range(len(subgraphs)), "grounding subs"):
         gm = DiGraphMatcher(
             g,
             subgraphs[i],
             node_match=lambda d1, d2: d1.get("label", "#") == d2.get("label", "#"),
-        )        
-        ism_iter = gm.subgraph_isomorphisms_iter()        
+        )
+        ism_iter = gm.subgraph_isomorphisms_iter()
         try:
             occur = next(ism_iter)
-        except:
+        except Exception as e:
+            print(str(e))
             continue
-        subgraphs[i] = nx.relabel_nodes(subgraphs[i], {v: inv_mapping[k] for (k,v) in occur.items()})
-    g = nx.relabel_nodes(g, inv_mapping)
+        subgraphs[i] = copy_graph(g, list(occur))
+        # subgraphs[i] = nx.relabel_nodes(subgraphs[i], {v: inv_mapping[k] for (k,v) in occur.items()})
+    # g = nx.relabel_nodes(g, inv_mapping)
+    logger.info(f"grounding subs took {time.time()-start_time}")
     if DATASET in ['ckt', 'enas', 'bn']:
         for sub in subgraphs:
             for e in sub.edges:

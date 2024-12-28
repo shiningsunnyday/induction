@@ -26,6 +26,8 @@ def load_data(args):
         g = load_enas(args)
     elif DATASET == "bn":
         g = load_bn(args)
+    elif DATASET == "ast":
+        g = load_ast(args)
     elif DATASET == "mol":
         g = load_mols(args)
     else:
