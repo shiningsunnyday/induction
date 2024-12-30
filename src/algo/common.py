@@ -24,12 +24,17 @@ def preprocess(g):
         check_prefix = True
         comps = set(list(comps)[:MAX_NUM_COMPS_FOR_MOTIF_MINING])
     interm_nodes = []
-    for n in g:
-        if check_prefix and get_prefix(n) not in comps:
-            continue
-        if g.nodes[n]["label"] in INVERSE_LOOKUP and INVERSE_LOOKUP[g.nodes[n]["label"]] in ['input', 'output']:
-            continue
-        interm_nodes.append(n)
+    if check_prefix:
+        for pre in comps:
+            for n in g.comps[pre]:
+                if g.nodes[n]["label"] in INVERSE_LOOKUP and INVERSE_LOOKUP[g.nodes[n]["label"]] in ['input', 'output']:
+                    continue
+                interm_nodes.append(n)                
+    else:
+        for n in g:
+            if g.nodes[n]["label"] in INVERSE_LOOKUP and INVERSE_LOOKUP[g.nodes[n]["label"]] in ['input', 'output']:
+                continue
+            interm_nodes.append(n)
     return copy_graph(g, interm_nodes)
 
 
@@ -44,6 +49,11 @@ def extract_motifs(g):
     tmp_path = os.path.join(IMG_DIR, f"g_{hash_val}.g")
     prepare_subdue_file(g_motif, tmp_path)
     subgraphs = run_subdue(tmp_path)
+    # added = nx.DiGraph()
+    # added.add_edge('2', '1')
+    # added.nodes['2']['label'] = LOOKUP['-gm+']
+    # added.nodes['1']['label'] = 'gray'
+    # subgraphs = [added] + subgraphs
     logger.info("begin extracting motifs")
     start_time = time.time()
     for i in tqdm(range(len(subgraphs)), "grounding subs"):

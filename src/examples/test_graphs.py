@@ -350,6 +350,7 @@ def load_enas(args):
         g = nx.relabel_nodes(g, node_map)
         gs.append(g)
     whole_g = union(gs)
+    whole_g = MyGraph(whole_g)
     return whole_g
 
 
@@ -387,7 +388,10 @@ def load_ckt(args):
     Load all ckts, and do union over all the graphs
     Combine graph-level attrs of individual graphs into a graph-level attr lookup
     """
-    if args.num_data_samples is None:
+    ambiguous_file = args.ambiguous_file
+    cwd = os.getcwd()
+    data_dir = f"{cwd}/data/nx/ckt/"
+    if args.num_data_samples is not None:
         num_graphs = args.num_data_samples
     else:
         num_graphs = 0        
@@ -395,10 +399,7 @@ def load_ckt(args):
             if os.path.exists(os.path.join(data_dir, f"{2*num_graphs+2}.json")):
                 num_graphs += 1
             else:
-                break
-    ambiguous_file = args.ambiguous_file
-    cwd = os.getcwd()
-    data_dir = f"{cwd}/data/nx/ckt/"
+                break    
     whole_g = nx.DiGraph()
     # best_i = 0
     # max_size = 0
@@ -418,7 +419,7 @@ def load_ckt(args):
         assert GRAMMAR == "ednce"
         graph_no_iter = json.load(open(ambiguous_file))['redo']
     i = 0
-    for i in tqdm(graph_no_iter):
+    for i in tqdm(graph_no_iter, desc="loading graphs"):
         fpath = os.path.join(data_dir, f"{2*i}.json")
         data = json.load(open(fpath))
         g = json_graph.node_link_graph(data)        
@@ -435,6 +436,7 @@ def load_ckt(args):
         g = nx.relabel_nodes(g, node_map)
         gs.append(g)
     whole_g = union(gs, gs_dict)
+    whole_g = MyGraph(whole_g)
     return whole_g
 
 

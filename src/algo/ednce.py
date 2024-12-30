@@ -12,6 +12,8 @@ from src.algo.utils import *
 from src.algo.common import *
 from src.grammar.common import *
 from src.grammar.utils import *
+import sys
+sys.setrecursionlimit(1500)
 
 
 def edit_grammar(grammar, conn_g):
@@ -78,19 +80,18 @@ def find_partial(graphs, query):
     # query can be a (possibly disconnected) directed graph
     # query_und = nx.Graph(query)
     for i in range(len(graphs)):
-        bad = False
-        if len(query) >= len(graphs[i]):
-            continue
-        if len(query.edges) >= len(graphs[i].edges):
-            continue
+        # if len(query) >= len(graphs[i]):
+        #     continue
+        # if len(query.edges) >= len(graphs[i].edges):
+        #     continue
         # for conn in nx.connected_components(query_und):
             # conn_g = copy_graph(query, conn)
         gm = DiGraphMatcher(graphs[i], query, node_match=node_match)
-        ism_iter = list(gm.subgraph_isomorphisms_iter())
-        if len(ism_iter) == 0:
-            break
-        if not bad:
-            ans.append(i)
+        try: 
+            next(gm.subgraph_isomorphisms_iter())
+        except:
+            continue
+        ans.append(i)
     return ans
 
 
@@ -113,8 +114,7 @@ def worker(shared_queue, grammar, graphs, found, lock):
             for i, rule in enumerate(grammar.rules):                      
                 nt_label = interm.nodes[nt]['label']
                 if rule.nt == nt_label:
-                    c = deepcopy(interm)
-                    c = rule(c, nt)
+                    c = rule(cur, nt)
                     if nx.is_connected(nx.Graph(c)):
                         # if poss == 0 and i == 62:
                         #     pdb.set_trace()                     
@@ -126,17 +126,7 @@ def worker(shared_queue, grammar, graphs, found, lock):
                                 shared_queue.put((c, deriv+[i], poss))       
 
 
-def resolve_ambiguous(model, grammar, save_path):
-    logger = logging.getLogger('global_logger')
-    graphs = []
-    for j in range(len(model)):
-        deriv = [model[j].graph[n].attrs['rule'] for n in model[j].seq[::-1]]
-        t2r = {i:i for i in range(len(grammar.rules))}
-        deriv_g = grammar.derive(deriv, t2r)
-        # draw_graph(deriv_g, '/home/msun415/test.png')
-        graphs.append(deriv_g)    
-
-    NUM_PROCS = 50
+def enumerate_rules_mp(graphs, grammar):
     N = len(graphs)
     manager = mp.Manager()
     shared_queue = manager.Queue()
@@ -154,8 +144,178 @@ def resolve_ambiguous(model, grammar, save_path):
         processes.append(p)
 
     for p in processes:
-        p.join()
+        p.join()    
+    return found
 
+
+def top_sort(edge_index, graph_size):
+    node_ids = np.arange(graph_size, dtype=int)
+    node_order = np.zeros(graph_size, dtype=int)
+    unevaluated_nodes = np.ones(graph_size, dtype=bool)
+    parent_nodes = edge_index[0]
+    child_nodes = edge_index[1]
+    n = 0
+    while unevaluated_nodes.any():
+        # Find which parent nodes have not been evaluated
+        unevaluated_mask = unevaluated_nodes[parent_nodes]
+        # Find the child nodes of unevaluated parents
+        unready_children = child_nodes[unevaluated_mask]
+        # Mark nodes that have not yet been evaluated
+        # and which are not in the list of children with unevaluated parent nodes
+        nodes_to_evaluate = unevaluated_nodes & ~np.isin(node_ids, unready_children)
+        node_order[nodes_to_evaluate] = n
+        unevaluated_nodes[nodes_to_evaluate] = False
+        n += 1
+
+    return node_order
+
+
+def wl_hash_node(g, n, colors):
+    if n in colors:
+        return colors[n]
+    if g[n]:
+        cs = sorted([wl_hash_node(g, c, colors) for c in g[n]])
+        val = str((TERMS+NONTERMS).index(g.nodes[n]['label']))
+        val = f"{val},"+' '.join(cs)                
+    else:
+        val = str((TERMS+NONTERMS).index(g.nodes[n]['label']))
+    colors[n] = val
+    return colors[n]
+
+
+
+def wl_hash(g):    
+    g = deepcopy(g)
+    tmp_path = f"{uuid.uuid4()}.txt"
+    g = nx.relabel_nodes(g, dict(zip(sorted(g.nodes()), range(len(g)))))        
+    m = len(g.edges)
+    edge_index = np.empty((2, m))
+    edge_index[:, :m] = np.array(g.edges).T
+    roots = np.setdiff1d(np.arange(len(g)), edge_index[1])
+    # order = compute_canon_order(g, tmp_path)
+    # order = list(map(int, order.strip().rstrip().split()))
+    # g = nx.relabel_nodes(g, {o: f"{j}:{g.nodes[o]['label']}" for j, o in enumerate(order)})    
+    # adj_list = nx.to_dict_of_lists(g)    
+    # adj_list_str = str(sorted(adj_list.items()))
+    # hash_value = hashlib.sha256(adj_list_str.encode()).hexdigest()
+    # os.remove(tmp_path)
+    colors = {}
+    for r in roots:
+        wl_hash_node(g, r, colors)
+    ans = '|'.join(sorted([colors[r] for r in roots]))
+    hash_value = hashlib.sha256(ans.encode()).hexdigest()
+    return hash_value
+    # return nx.weisfeiler_lehman_graph_hash(g)
+
+
+def recurse_rules(cur, target, grammar, mem, st):
+    # output all partial rule seqs from cur to target
+    if time.time()-st > 100:
+        return None
+    hash_val = wl_hash(cur)
+    if hash_val in mem:
+        return mem[hash_val]
+    nts = grammar.search_nts(cur, NONTERMS)
+    if len(nts) == 0:
+        if nx.is_isomorphic(cur, target, node_match=node_match):
+            mem[hash_val] = [[]]
+        else:
+            mem[hash_val] = []
+        return mem[hash_val]
+    res = []
+    for j, nt in enumerate(nts):
+        for i, rule in enumerate(grammar.rules):                      
+            nt_label = cur.nodes[nt]['label']
+            if rule.nt == nt_label:
+                c = rule(cur, nt)                
+                if not nx.is_connected(nx.Graph(c)):
+                    continue
+                if not nx.is_directed_acyclic_graph(c):
+                    continue
+                ts = [x for x in c if c.nodes[x]['label'] in TERMS]
+                c_t = copy_graph(c, ts, copy_attrs=False)
+                exist = find_partial([target], c_t)
+                if not exist:
+                    continue
+                res_in = recurse_rules(c, target, grammar, mem, st)
+                if res_in is None:
+                    return None
+                for seq in res_in:
+                    res.append([i]+deepcopy(seq))
+    mem[hash_val] = res
+    return res
+
+
+
+def recurse_rules_single(graphs, j, grammar):    
+    g = nx.DiGraph()
+    g.add_node('0', label='black')
+    mem = {}
+    st = time.time()
+    ans = recurse_rules(g, graphs[j], grammar, mem, st)
+    print("done")
+    return ans
+
+
+    # shared_queue = [(g, [])]
+    # found = []
+    # hash_dict = {}
+    # while True:
+    #     print(f"len(hashes): {len(hash_dict)}")
+    #     interm, deriv = shared_queue.pop(-1)
+    #     val = wl_hash(g)
+    #     if val in hash_dict:
+    #         hash_dict[val] += [deriv]
+    #         continue
+    #     else:
+    #         hash_dict[val] = [deriv]
+    #     nts = grammar.search_nts(interm, NONTERMS)
+    #     if len(nts) == 0:
+    #         continue
+    #     for j, nt in enumerate(nts):
+    #         for i, rule in enumerate(grammar.rules):                      
+    #             nt_label = interm.nodes[nt]['label']
+    #             if rule.nt == nt_label:
+    #                 c = deepcopy(interm)
+    #                 c = rule(c, nt)
+    #                 if nx.is_connected(nx.Graph(c)):
+    #                     # if poss == 0 and i == 62:
+    #                     #     pdb.set_trace()                     
+    #                     ts = [x for x in c if c.nodes[x]['label'] in TERMS]
+    #                     c_t = copy_graph(c, ts, copy_attrs=False)
+    #                     exist = find_partial([graphs[poss]], c_t)
+    #                     if exist:                            
+    #                         shared_queue.append((c, deriv+[i]))
+
+
+def enumerate_rules(graphs, grammar):
+    N = len(graphs)
+    found = []  
+    if NUM_PROCS == 1:
+        for j in tqdm(range(N), "enumerate rules"):
+            found_single = recurse_rules_single(graphs, j, grammar)
+            found.append(found_single)
+    else:
+        with mp.Pool(NUM_PROCS) as p:
+            found = p.starmap(recurse_rules_single, [(graphs, j, grammar) for j in range(N)])
+    return found
+
+
+def resolve_ambiguous(model, grammar, save_path):
+    logger = logging.getLogger('global_logger')
+    graphs = []
+    for j in range(len(model)):
+        deriv = [model[j].graph[n].attrs['rule'] for n in model[j].seq[::-1]]
+        t2r = {i:i for i in range(len(grammar.rules))}
+        deriv_g = grammar.derive(deriv, t2r)
+        # draw_graph(deriv_g, '/home/msun415/test.png')
+        graphs.append(deriv_g)    
+
+    # if NUM_PROCS > 1:
+    #     found = enumerate_rules_mp(graphs, grammar)
+    # else:
+    found = enumerate_rules(graphs, grammar)    
+    breakpoint()
     all_derivs = list(map(list, found))
     sets_of_sets = []
     for derivs in all_derivs:
@@ -349,7 +509,7 @@ def rewire_graph_ednce(g, new_n, nodes, dirs, ps, anno):
             g.add_edge(k, new_n, label=label)
 
 
-def update_graph_mp(g, best_clique, shared_data, index=-1):
+def update_graph_single(g, best_clique, shared_data, index=-1):
     grammar = shared_data['grammar']
     best_ism = shared_data['best_ism']
     anno = shared_data['anno']
@@ -398,10 +558,10 @@ def update_graph(g, anno, best_ism, best_clique, grammar, index=-1):
         manager = mp.Manager()    
         shared_data = manager.dict(anno=anno, best_ism=best_ism, grammar=grammar)        
         for no in by_no:
-            conn = copy_graph(g, [n for n in g if get_prefix(n)==no])
+            conn = copy_graph(g, g.comps[no])
             args.append((conn, by_no[no], shared_data))
         with mp.Pool(NUM_PROCS) as p:
-            conns = p.starmap(update_graph_mp, tqdm(args, desc="updating graph"))
+            conns = p.starmap(update_graph_single, tqdm(args, desc="updating graph"))
         change = False
         for i, no in enumerate(by_no):
             # remove conn
@@ -450,6 +610,15 @@ def update_graph(g, anno, best_ism, best_clique, grammar, index=-1):
         return g, anno, change
 
 
+def compress_rule(g, index, rule):
+    ism_subgraph = find_iso(rule.subgraph, g, rule=rule)
+    if len(ism_subgraph):
+        max_clique = approximate_best_clique(ism_subgraph)
+    else:
+        max_clique = None
+    return (ism_subgraph, max_clique)
+
+
 def compress(g, grammar, anno):
     logger = logging.getLogger('global_logger')
     logger.info("begin compress grammar")
@@ -461,16 +630,17 @@ def compress(g, grammar, anno):
         best_clique = None
         best_rule_idx = None
         max_len = 0
-        for index, rule in enumerate(grammar.rules):            
-            ism_subgraph = find_iso(rule.subgraph, g, rule=rule)
-            if len(ism_subgraph):
-                max_clique = approximate_best_clique(ism_subgraph)
-                if len(max_clique) * count_num_terms(rule.subgraph) > max_len:
-                    best_i = index
-                    max_len = len(max_clique) * count_num_terms(rule.subgraph)
-                    best_ism = ism_subgraph
-                    best_clique = max_clique
-                    best_rule_idx = index
+        with mp.Pool(NUM_PROCS) as p:
+            max_cliques = p.starmap(compress_rule, tqdm([(g, index, rule) for (index, rule) in enumerate(grammar.rules)], desc="compressing over rules"))
+        for (ism_subgraph, max_clique), (index, rule) in zip(max_cliques, enumerate(grammar.rules)):
+            if max_clique is None:
+                continue
+            if len(max_clique) * count_num_terms(rule.subgraph) > max_len:
+                best_i = index
+                max_len = len(max_clique) * count_num_terms(rule.subgraph)
+                best_ism = ism_subgraph
+                best_clique = max_clique
+                best_rule_idx = index
         if isinstance(best_ism, tuple):
             best_ism = best_ism[0]
         if best_clique is not None:
@@ -493,6 +663,7 @@ def compress(g, grammar, anno):
             g, anno, _ = update_graph(
                 g, anno, best_ism, best_clique, grammar, index=best_rule_idx
             )
+            assert nx.is_directed_acyclic_graph(g) # remove
             logger.info(f"anno size: {num_anno}->{len(anno)}")
             changed = True
     logger.info("done compress grammar")
@@ -514,7 +685,7 @@ def learn_grammar(g, args):
     orig = deepcopy(g)
     logger = create_logger(
         "global_logger",
-        f"{wd}/data/{METHOD}_{DATASET}_{GRAMMAR}{SUFFIX}.log",
+        f"data/{METHOD}_{DATASET}_{GRAMMAR}{SUFFIX}.log",
     )
     cache_iter, cache_path = setup()
     g, grammar, anno, iter = init_grammar(g, cache_iter, cache_path, EDNCEGrammar)
@@ -541,7 +712,9 @@ def learn_grammar(g, args):
             break
         extract_rule(g, best_ism, best_clique, grammar)
         num_anno = len(anno)
-        g, anno, change = update_graph(g, anno, best_ism, best_clique, grammar)
+        g, anno, change = update_graph(g, anno, best_ism, best_clique, grammar)        
+        if not nx.is_directed_acyclic_graph(g): # remove
+            breakpoint()
         logger.info(f"anno size: {num_anno}->{len(anno)}")
         if not change:
             break

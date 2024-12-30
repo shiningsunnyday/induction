@@ -50,13 +50,56 @@ class MyGraph(nx.DiGraph):
     def __init__(self, graph=None):
         if graph is None:
             graph = nx.DiGraph()
-        self.comps = {}   
+        self.comps = {}
         for n in graph:
-            pre = get_prefix(n)
+            try:
+                pre = get_prefix(n)
+            except:
+                continue
             if pre not in self.comps:
                 self.comps[pre] = []
             self.comps[pre].append(n)
         super().__init__(graph)
+
+
+    def remove_node(self, n):
+        try:
+            pre = get_prefix(n)
+        except ValueError:
+            super().remove_node(n)
+            return
+        # while True:
+        #     try:
+        #         self.comps[pre].remove(n)
+        #     except ValueError:
+        #         break
+        try:
+            self.comps[pre].remove(n)  
+        except:
+            breakpoint()
+        if len(self.comps[pre]) == 0:
+            self.comps.pop(pre)
+        super().remove_node(n)
+
+
+    def add_node(self, n, **kwargs):
+        try:
+            pre = get_prefix(n)
+        except ValueError:
+            super().add_node(n, **kwargs)
+            return
+        if pre not in self.comps:
+            self.comps[pre] = []
+        self.comps[pre].append(n)
+        super().add_node(n, **kwargs)
+    
+
+    def add_edge(self, u, v, **kwargs):
+        if u not in self:
+            self.add_node(u)
+        if v not in self:
+            self.add_node(v)
+        super().add_edge(u, v, **kwargs)
 
 
 def set_global_args(args):
@@ -192,28 +235,38 @@ def greedy_max_clique(graph):
     return max_clique
 
 
+def random_search_single(g, should_add_edge):
+    add_edge, gg, ism_graph, isms = should_add_edge
+    should_add_edge = lambda i, j: add_edge(i, j, gg, ism_graph, isms)
+    graph = MyGraph(g) # copy, for comps
+    n = random.choice(list(graph))
+    clique = [n]
+    add_back = graph.comps[get_prefix(n)]
+    graph.comps.pop(get_prefix(n))
+    for c in tqdm(graph.comps, "iterating through comps"):
+        for m in graph.comps[c]:
+            violate = False
+            for c in clique:
+                if not should_add_edge(c, m):
+                    violate = True
+                    break
+            if not violate:
+                clique.append(m)      
+                added = True
+                break            
+    graph.comps[get_prefix(n)] = add_back
+    return clique
+
+
 def random_search_max_clique(g, should_add_edge):
     max_clique = []
-    for k in tqdm(range(3), desc="random_search_max_clique"):
-        graph = MyGraph(g) # copy, for comps
-        n = random.choice(list(graph))
-        clique = [n]
-        add_back = graph.comps[get_prefix(n)]
-        graph.comps.pop(get_prefix(n))
-        for c in tqdm(graph.comps, "iterating through comps"):
-            for m in graph.comps[c]:
-                violate = False
-                for c in clique:
-                    if not should_add_edge(c, m):
-                        violate = True
-                        break
-                if not violate:
-                    clique.append(m)      
-                    added = True
-                    break            
-        graph.comps[get_prefix(n)] = add_back
-        if len(clique) > len(max_clique):
-            max_clique = clique
+    # Check if the current process is the main process
+    if mp.current_process().name == 'MainProcess':
+        with mp.Pool(10) as p:
+            cliques = p.starmap(random_search_single, tqdm([(g, should_add_edge) for i in range(NUM_RANDOM_SEARCH_TRIES)], desc="random_search_max_clique mp"))
+    else:
+        cliques = [random_search_single(g, should_add_edge) for i in tqdm(range(NUM_RANDOM_SEARCH_TRIES), desc="random_search_max_clique")]
+    max_clique = max(cliques, key=len)
     return max_clique
         
 

@@ -98,7 +98,9 @@ class EDNCEGrammar(NLCGrammar):
         return cur
 
     
-    def derive(self, seq, token2rule):
+    def derive(self, seq, token2rule=None):
+        if token2rule is None:
+            token2rule = {i:i for i in range(len(self.rules))}
         # find the initial rule
         seq = [token2rule[idx] for idx in seq]
         start_rule = self.rules[seq[0]]
@@ -128,10 +130,13 @@ class EDNCEGrammar(NLCGrammar):
         rhs = nx.relabel_nodes(rhs, name_map)
         # set the feats
         for n in rhs:
-            rhs.nodes[n]['feat'] = model.feat_lookup[n]        
+            rhs.nodes[n]['feat'] = model.feat_lookup[n]
         for a, b in rhs.edges:
             rhs.edges[(a,b)]['level'] = 1
-        g = nx.union(g, rhs)
+        for n in rhs:
+            cur.add_node(n, **rhs.nodes[n])
+        for u, v in rhs.edges:
+            cur.add_edge(u, v, **rhs.edges[(u, v)])
         for n in rhs:
             g.add_edge(node, n, level=2, label='black')
         for c in model.graph[node].children:
@@ -242,6 +247,7 @@ class EDNCERule:
         self.upper = upper
 
     def __call__(self, cur, node):
+        cur = deepcopy(cur)
         rhs = nx.DiGraph(self.subgraph)
         if ":" in node:
             start = find_next(cur, node[: node.index(":") + 1])
@@ -253,7 +259,10 @@ class EDNCERule:
             start = next_n(start)
         inv_node_map = {v: k for k, v in node_map.items()}
         rhs = nx.relabel_nodes(rhs, node_map)
-        cur = nx.union(cur, rhs)
+        for n in rhs:
+            cur.add_node(n, **rhs.nodes[n])
+        for u, v in rhs.edges:
+            cur.add_edge(u, v, **rhs.edges[(u, v)])
         cur_neis = neis(cur, [node], direction=["in", "out"])
         for cur_nei in cur_neis:
             mu = cur.nodes[cur_nei]["label"]
@@ -442,7 +451,8 @@ def equiv_class(graph, nodes, out_ns):
         for node in nodes:
             e = label_edge(n, node) + "_" + label_edge(node, n)
             key.append(e)
-        key = "__".join(key)
+        label = graph.nodes[n]['label']
+        key = f"{label}:"+"__".join(key)
         if key not in lookup:
             lookup[key] = []
         lookup[key].append(n)
@@ -522,33 +532,44 @@ def insets_and_outsets(graph, nodes):
         # find source        
         prefix = list(nodes)[0][0]
         assert graph.nodes[f"{prefix}:0"]['type'] == 'input'
-        # single source shortest paths
         equiv_dir = []
         for e in equiv:
-            try:
-                has_paths = [nx.has_path(graph, n, ei) for n in nodes for ei in e]
-            except:
-                breakpoint()
-            if np.all(has_paths):
-                equiv_dir.append(['out'])
-            elif not np.any(has_paths):
-                equiv_dir.append(['in'])
-            else:
-                equiv_dir.append(["in", "out"])
+            has_paths = np.array([[[nx.has_path(graph, n, ei), nx.has_path(graph, ei, n)] \
+                for n in nodes] \
+                for ei in e])
+            d = []
+            if not np.any(has_paths[..., 0]):
+                d.append('in')
+            if not np.any(has_paths[..., 1]):
+                d.append('out')
+            if len(d) == 0:
+                d = ['in', 'out']
+            equiv_dir.append(d)
         poss_dirs = list(product(*equiv_dir))
+        ### acyclic constraint
+        # for faster pruning when resolving ambiguity later, enforce acyclic constraint on poss_dirs
+        # first, find partial order over out_ns        
+        avoids_nodes = lambda path: all(x not in nodes for x in path)
+        out_ns_order = [[any(avoids_nodes(path) for path in nx.all_simple_paths(graph, a, b)) for b in out_ns] for a in out_ns]
+        # poss_dir is bad if there is a pair of out_ns (a,b) s.t. one of the following happens:
+        #   poss_dirs(a) = in, poss_dirs(b) = out and b->a
+        #   poss_dirs(b) = in, poss_dirs(a) = out and a->b
 
     poss = {}
     for a, dirs in enumerate(poss_dirs):  # for each poss dirs
+        a_ns = np.argwhere(np.array(dirs)=='in')[0]
+        b_ns = np.argwhere(np.array(dirs)=='out')[0]
+        ab_ns = sum([list(product(equiv[i], equiv[j])) for i, j in product(a_ns, b_ns)], [])
+        if any([out_ns_order[out_ns.index(j)][out_ns.index(i)] for i, j in ab_ns]): # cycle created
+            continue
+        # does it violate partial order amongst out_ns?
         for b, ps in enumerate(poss_ps):  # for each poss edge labels
             res_inset = set()
             res_outset = set()
             for i, x in enumerate(nodes):  # for each node
                 for j, y in enumerate(out_ns):  # for each out nei
                     e = lookup[y]
-                    try:
-                        d = dirs[e]
-                    except:
-                        breakpoint()
+                    d = dirs[e]
                     p = ps[e]
                     label_y = graph.nodes[y]["label"]
                     mu = label_y
@@ -672,8 +693,7 @@ def build_ism_graph(graph, ism_graph, isms):
         Instead of building the entire ism_graph
         Due to memory, output a should_add_edge function
         """
-        should_add_edge = lambda i, j: add_edge(i, j, graph, ism_graph, isms)
-        return (ism_graph, should_add_edge)
+        return (ism_graph, (add_edge, graph, ism_graph, isms))
     all_args = list(product(list(ism_graph), list(ism_graph)))
     res = tqdm(
         [

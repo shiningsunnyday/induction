@@ -32,6 +32,62 @@ def hash_graph(g):
 
 
 
+def _build_dreadnaut_file(g):
+    """Prepare file to pass to dreadnaut.
+    Warning
+    -------
+    Assumes that the nodes are represented by the 0 indexed integers.
+    """
+    # dreadnaut options
+    file_content = ["As"]  # sparse mode
+    file_content.append("-a")  # do not print out automorphisms
+    file_content.append("-m")  # do not print out level markers
+    file_content.append("c") # compute canon order
+    file_content.append("d") # directed
+    labels = set()
+    for n in g:
+        labels.add(g.nodes[n]['label'])
+    labels = sorted(list(labels))
+    partitions = [[] for _ in labels]
+    for n in g:
+        index = labels.index(g.nodes[n]['label'])
+        partitions[index].append(str(n))
+    partitions = ' | '.join([','.join(l) for l in partitions])        
+    # specify graph structure
+    file_content.append("n=" + str(g.number_of_nodes()) + " g")
+    file_content.append(f"f=[{partitions}]")
+    for v in sorted(g.nodes()):
+        line = " " + str(v) + " : "
+        for nb in g.neighbors(v):
+            line += str(nb) + " "
+        line += ";"
+        file_content.append(line)
+    # add nauty command    
+    file_content.append(".")    
+    file_content.append("x")
+    file_content.append("o")
+    file_content.append("b")
+    return file_content
+
+
+
+def compute_canon_order(g, tmp_path, dreadnaut_call="/home/msun415/nauty2_8_8/dreadnaut"):
+    # get dreadnaut command file
+    file_content = _build_dreadnaut_file(g)
+    # write to tmp_path
+    with open(tmp_path, 'w') as f:
+        print("\n".join(file_content), file=f)
+    # call dreadnaut    
+    proc = subprocess.run([dreadnaut_call],
+                          input=b"< " + tmp_path.encode(),
+                          stdout=subprocess.PIPE,
+                          stderr=subprocess.DEVNULL)
+    [info, _, orbits] = proc.stdout.decode().strip().split("\n", 2)
+    canon_order = orbits.split('\n')[1]
+    return canon_order
+
+
+
 def run_subdue(tmp_path, subdue_call="../subdue-5.2.2/bin/subdue"):
     is_directed = 'd' if GRAMMAR == "ednce" else 'u'
     out_path = str(Path(tmp_path).with_suffix(".out"))
@@ -45,7 +101,7 @@ def run_subdue(tmp_path, subdue_call="../subdue-5.2.2/bin/subdue"):
         "-maxsize",
         f"{MOTIF_MAX_SIZE}",
         "-nsubs",
-        "100",
+        f"{NUM_MOTIFS}",
         tmp_path,
     ]
     result = subprocess.run(command, capture_output=True, text=True)
