@@ -534,15 +534,18 @@ def insets_and_outsets(graph, nodes):
         assert graph.nodes[f"{prefix}:0"]['type'] == 'input'
         equiv_dir = []
         for e in equiv:
-            has_paths = np.array([[[nx.has_path(graph, n, ei), nx.has_path(graph, ei, n)] \
-                for n in nodes] \
-                for ei in e])
-            d = []
-            if not np.any(has_paths[..., 0]):
-                d.append('in')
-            if not np.any(has_paths[..., 1]):
-                d.append('out')
-            if len(d) == 0:
+            if RESTRICT_POSS_DIRS:
+                has_paths = np.array([[[nx.has_path(graph, n, ei), nx.has_path(graph, ei, n)] \
+                    for n in nodes] \
+                    for ei in e])
+                d = []
+                if not np.any(has_paths[..., 0]):
+                    d.append('in')
+                if not np.any(has_paths[..., 1]):
+                    d.append('out')
+                if len(d) == 0:
+                    d = ['in', 'out']
+            else:
                 d = ['in', 'out']
             equiv_dir.append(d)
         poss_dirs = list(product(*equiv_dir))

@@ -10,6 +10,7 @@ CACHE_DIR: "cache/api_enas_ednce/"
 
 NUM_THREADS: 1
 NUM_PROCS: 100
+UPDATE_GRAPH_MP: True
 VISUALIZE: False
 VERBOSE: True
 CACHE: False

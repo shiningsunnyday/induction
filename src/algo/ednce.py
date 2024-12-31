@@ -547,7 +547,7 @@ def update_graph_single(g, best_clique, shared_data, index=-1):
 
 def update_graph(g, anno, best_ism, best_clique, grammar, index=-1):
     conns = list(nx.connected_components(nx.Graph(g)))        
-    if len(conns) > 1 and NUM_PROCS > 1:
+    if UPDATE_GRAPH_MP and len(conns) > 1 and NUM_PROCS > 1:
         by_no = {}
         for c in best_clique:
             ism = best_ism.nodes[c]
@@ -561,9 +561,10 @@ def update_graph(g, anno, best_ism, best_clique, grammar, index=-1):
             conn = copy_graph(g, g.comps[no])
             args.append((conn, by_no[no], shared_data))
         with mp.Pool(NUM_PROCS) as p:
-            conns = p.starmap(update_graph_single, tqdm(args, desc="updating graph"))
+            conns = p.starmap(update_graph_single, tqdm(args, desc="updating graph mp"))
+        print("done update graph mp")
         change = False
-        for i, no in enumerate(by_no):
+        for i, no in tqdm(enumerate(by_no), desc="rewiring graph post-mp"):
             # remove conn
             conn = args[i][0]
             for c in conn:
@@ -579,7 +580,7 @@ def update_graph(g, anno, best_ism, best_clique, grammar, index=-1):
         return g, anno, change
     else:
         change = False
-        for c in best_clique:
+        for c in tqdm(best_clique, "updating graph"):
             # g_cache = deepcopy(g)
             # anno_cache = deepcopy(anno)
             ism = best_ism.nodes[c]

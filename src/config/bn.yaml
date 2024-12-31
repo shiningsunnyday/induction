@@ -10,6 +10,7 @@ CACHE_DIR: "cache/api_bn_ednce/"
 
 NUM_THREADS: 1
 NUM_PROCS: 100
+UPDATE_GRAPH_MP: False
 VISUALIZE: False
 VERBOSE: True
 CACHE: False

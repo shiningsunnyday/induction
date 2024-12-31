@@ -10,6 +10,7 @@ CACHE_DIR: "cache/api_ckt_ednce/"
 
 NUM_THREADS: 1
 NUM_PROCS: 100
+UPDATE_GRAPH_MP: True
 VISUALIZE: True
 VERBOSE: True
 CACHE: False
@@ -18,6 +19,7 @@ MAX_TRIES: 10
 # EDNCE parameters
 CACHE_SUBG: True
 LINEAR: True # at most 1 nt per comp, and subgraph must contain nt if present
+RESTRICT_POSS_DIRS: True # direction of neighbors limited (tradeoff expressivity vs efficiency)
 MIN_EMBEDDING: False # take the minimum or maximum embedding for each rule
 LIMIT_FOR_GREEDY: 1000
 NUM_RANDOM_SEARCH_TRIES: 10
