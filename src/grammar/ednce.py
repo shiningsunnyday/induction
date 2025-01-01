@@ -560,8 +560,8 @@ def insets_and_outsets(graph, nodes):
 
     poss = {}
     for a, dirs in enumerate(poss_dirs):  # for each poss dirs
-        a_ns = np.argwhere(np.array(dirs)=='in')[0]
-        b_ns = np.argwhere(np.array(dirs)=='out')[0]
+        a_ns = np.argwhere(np.array(dirs)=='in').flatten()
+        b_ns = np.argwhere(np.array(dirs)=='out').flatten()
         ab_ns = sum([list(product(equiv[i], equiv[j])) for i, j in product(a_ns, b_ns)], [])
         if any([out_ns_order[out_ns.index(j)][out_ns.index(i)] for i, j in ab_ns]): # cycle created
             continue
