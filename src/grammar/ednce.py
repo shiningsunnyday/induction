@@ -520,7 +520,7 @@ def insets_and_outsets(graph, nodes):
     poss_ps = list(
         product(*[FINAL for _ in out_ns])
     )  # try every edge non-final label
-
+    
     if DATASET in ['ckt', 'enas', "bn"]:
         ### for CKT ONLY
         # we can further reduce poss_dirs if all nodes in equiv class "precede" nodes or "succeed" nodes on the input-output path

@@ -9,9 +9,9 @@ IMG_DIR: "data/api_ckt_ednce/"
 CACHE_DIR: "cache/api_ckt_ednce/"
 
 NUM_THREADS: 1
-NUM_PROCS: 100
+NUM_PROCS: 1
 UPDATE_GRAPH_MP: True
-VISUALIZE: True
+VISUALIZE: False
 VERBOSE: True
 CACHE: False
 MAX_TRIES: 10

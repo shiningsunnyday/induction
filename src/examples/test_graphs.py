@@ -394,9 +394,9 @@ def load_ckt(args):
     if args.num_data_samples is not None:
         num_graphs = args.num_data_samples
     else:
-        num_graphs = 0        
+        num_graphs = 0
         while True:            
-            if os.path.exists(os.path.join(data_dir, f"{2*num_graphs+2}.json")):
+            if os.path.exists(os.path.join(data_dir, f"{2*num_graphs}.json")):
                 num_graphs += 1
             else:
                 break    
