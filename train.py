@@ -2,6 +2,7 @@ import torch
 import torch.nn as nn
 import torch.optim as optim
 from torch.utils.data import DataLoader, TensorDataset
+from torch.utils.data import Dataset
 import networkx as nx
 import numpy as np
 from torch_geometric.nn import GCNConv
@@ -12,6 +13,8 @@ from tqdm import tqdm
 import matplotlib.pyplot as plt
 from src.config import *
 from src.grammar.utils import get_next_version
+from src.grammar.ednce import *
+from src.examples.test_graphs import *
 from src.draw.graph import draw_graph
 import glob
 import re
@@ -54,10 +57,41 @@ def convert_graph_to_data(graph):
     res = GraphData(x=x, edge_index=edge_index)
     return res, term
 
+def add_ins(g, ins):
+    if ins is None:
+        return g
+    for mu, p, q, i, d, d_ in ins:        
+        n = len(g)
+        g.add_node(n, label=mu)
+        if d_ == 'out':
+            g.add_edge(list(g)[i], n, label=q)        
+        else:
+            g.add_edge(n, list(g)[i], label=q)
+    return g
+
 # Prepare the graph vocabulary
 graph_vocabulary = None # generate_random_graphs(VOCAB_SIZE)
 graph_data_vocabulary = None
 vocabulary_terminate = None
+
+
+class TokenDataset(Dataset):
+    def __init__(self, data):
+        self.data = data
+    
+    def __len__(self):
+        return len(data)
+
+    def __getitem__(self, idx):
+        seq = []
+        graph_seq = []
+        for i in range(len(self.data[idx])):
+            r, g, ins = self.data[idx][i]
+            g = add_ins(g, ins)
+            seq.append(r)
+            graph_seq.append(convert_graph_to_data(g))
+        return torch.tensor(seq), graph_seq
+
 
 # Define GNN-based Token Embedding
 class TokenGNN(nn.Module):
@@ -292,6 +326,7 @@ def vae_loss(recon_logits, mask, x, mu, logvar):
 
 # Padding function
 def collate_batch(batch):
+    breakpoint()
     lengths = [len(seq) for seq in batch]
     max_len = max(lengths)
     padded_batch = torch.zeros(len(batch), max_len, dtype=torch.long)
@@ -326,7 +361,8 @@ def train(data):
     optimizer = optim.Adam(model.parameters(), lr=1e-4)
     
     # Dummy dataset: Replace with actual sequence data
-    dataset = [torch.tensor(seq) for seq in data]
+    # dataset = [torch.tensor(seq) for seq in data]
+    dataset = TokenDataset(data)
     dataloader = DataLoader(dataset, batch_size=BATCH_SIZE, shuffle=True, collate_fn=collate_batch)
 
     # Training loop
@@ -334,7 +370,7 @@ def train(data):
     model = model.to('cuda')
     for i, graph_data in enumerate(graph_data_vocabulary):
         graph_data_vocabulary[i] = graph_data.to('cuda')
-    ckpts = glob.glob('ckpts/*.pth')
+    ckpts = glob.glob('ckpts/api_ckt_ednce/*.pth')
     start_epoch = 0
     best_loss = float("inf")
     best_ckpt_path = None
@@ -351,7 +387,7 @@ def train(data):
     
     for epoch in tqdm(range(start_epoch, EPOCHS)):
         for batch in dataloader:
-            x, attention_mask, seq_len_list = batch            
+            x, attention_mask, seq_len_list = batch
             x, attention_mask = x.to('cuda'), attention_mask.to('cuda')
             optimizer.zero_grad()
             recon_logits, mask, mu, logvar = model(x, attention_mask, seq_len_list)
@@ -360,7 +396,7 @@ def train(data):
             optimizer.step()
         if loss.item() < best_loss:
             best_loss = loss.item()
-            ckpt_path = f'ckpts/epoch={epoch}_loss={best_loss}.pth'
+            ckpt_path = f'ckpts/api_ckt_ednce/epoch={epoch}_loss={best_loss}.pth'
             torch.save(model.state_dict(), ckpt_path)
             print(ckpt_path)            
         print(f"Epoch {epoch+1}, Loss: {loss.item()}")
@@ -445,22 +481,40 @@ def interactive_sample_sequences(model, grammar, token2rule, num_samples=5, max_
 
 def load_data(cache_dir, num_graphs):
     exist = os.path.exists(os.path.join(cache_dir, 'data_and_rule2token.pkl'))
-    if exist:
-        data, rule2token = pickle.load(open(os.path.join(cache_dir, 'data_and_rule2token.pkl'), 'rb'))
-    else:
-        data = []
-        rule2token = {}
-        for pre in tqdm(range(num_graphs), "processing data"): # can change 4500 to debug
-            prefix = f"{pre}:"
-            seq = list(filter(lambda k: k[:len(prefix)]==f'{prefix}', anno))
-            seq = seq[::-1] # derivation
-            rule_ids = [anno[s].attrs['rule'] for s in seq]        
-            for r in rule_ids:
-                rule2token[r] = grammar.rules[r].subgraph
-            data.append(rule_ids)
-        pickle.dump((data, rule2token), open(os.path.join(cache_dir, 'data_and_rule2token.pkl'), 'wb+'))
-    relabel = dict(zip(list(sorted(rule2token)), range(len(rule2token))))
-    data = [[relabel[s] for s in seq] for seq in data]
+    # if exist:
+    #     data, rule2token = pickle.load(open(os.path.join(cache_dir, 'data_and_rule2token.pkl'), 'rb'))
+    # else:
+    data = []
+    rule2token = {}
+    for pre in tqdm(range(num_graphs), "processing data"):
+        prefix = f"{pre}:"
+        seq = list(filter(lambda k: k[:len(prefix)]==f'{prefix}', anno))
+        seq = seq[::-1] # derivation          
+        rule_ids = [anno[s].attrs['rule'] for s in seq]
+        # orig_nodes = [list(anno[s].attrs['nodes']) for s in seq]
+        # orig_feats = [[orig.nodes[n]['feat'] if n in orig else 0.0 for n in nodes] for nodes in orig_nodes]        
+        for i, r in enumerate(rule_ids):
+            # from networkx.algorithms.isomorphism import DiGraphMatcher
+            rule2token[r] = grammar.rules[r].subgraph
+            # matcher = DiGraphMatcher(copy_graph(g, orig_nodes[i]), rule2token[r], node_match=node_match)
+            # breakpoint()
+            # assert any(all([iso[orig_nodes[i][j]] == list(rule2token[r])[j]]) for iso in matcher.isomorphisms_iter())        
+        g, all_applied = grammar.derive(rule_ids, return_applied=True)
+        g_orig = copy_graph(orig, orig.comps[pre])
+        matcher = DiGraphMatcher(g, g_orig, node_match=node_match)
+        iso = next(matcher.isomorphisms_iter())
+        # use iso to embed feats and instructions
+        for i, r in enumerate(rule_ids):
+            sub = deepcopy(grammar.rules[r].subgraph)
+            # node feats
+            for n in sub:
+                if n in iso:
+                    sub.nodes[n]['feat'] = orig.nodes[iso[n]]['feat']
+            rule_ids[i] = (r, sub, all_applied[i-1] if i else None)
+        data.append(rule_ids)
+    pickle.dump((data, rule2token), open(os.path.join(cache_dir, 'data_and_rule2token.pkl'), 'wb+'))
+    relabel = dict(zip(list(sorted(rule2token)), range(len(rule2token))))    
+    data = [[(relabel[s[0]],)+s[1:] for s in seq] for seq in data]
     globals()['graph_vocabulary'] = list(rule2token.values())
     terminate = {}    
     vocab = []
@@ -477,9 +531,14 @@ def load_data(cache_dir, num_graphs):
     
 
 if __name__ == "__main__":
+    from src.grammar.common import get_parser
+    parser = get_parser()
+    args = parser.parse_args()
     cache_dir = 'cache/api_ckt_ednce/'
     version = get_next_version(cache_dir)-1
     grammar, anno, g = pickle.load(open(os.path.join(cache_dir, f'{version}.pkl'),'rb'))
-    data, token2rule = load_data(cache_dir, 4500)        
+    orig = load_ckt(args)
+    data, token2rule = load_data(cache_dir, 50)
+    breakpoint()
     model = train(data)
     interactive_sample_sequences(model, grammar, token2rule, max_seq_len=10)

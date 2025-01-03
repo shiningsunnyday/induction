@@ -98,12 +98,17 @@ class EDNCEGrammar(NLCGrammar):
         return cur
 
     
-    def derive(self, seq, token2rule=None):
+    def derive(self, seq, token2rule=None, return_applied=False):
+        if return_applied:
+            all_applied = []
         if token2rule is None:
             token2rule = {i:i for i in range(len(self.rules))}
         # find the initial rule
         seq = [token2rule[idx] for idx in seq]
-        start_rule = self.rules[seq[0]]
+        try:
+            start_rule = self.rules[seq[0]]
+        except:
+            breakpoint()
         cur = start_rule.subgraph
         assert not check_input_xor_output(cur)
         for idx in seq[1:]:
@@ -113,8 +118,13 @@ class EDNCEGrammar(NLCGrammar):
             assert len(nt_nodes) == 1
             node = nt_nodes[0]
             rule = self.rules[idx]
-            cur = rule(cur, node)
-        return cur        
+            if return_applied:
+                cur, applied = rule(cur, node, return_applied=return_applied)
+                all_applied.append(applied)
+        if return_applied:
+            return cur, all_applied
+        else:
+            return cur
 
 
     def induce_recurse(self, node, model, g):
@@ -246,7 +256,7 @@ class EDNCERule:
         self.embedding = embedding
         self.upper = upper
 
-    def __call__(self, cur, node):
+    def __call__(self, cur, node, return_applied=False):
         cur = deepcopy(cur)
         rhs = nx.DiGraph(self.subgraph)
         if ":" in node:
@@ -264,6 +274,8 @@ class EDNCERule:
         for u, v in rhs.edges:
             cur.add_edge(u, v, **rhs.edges[(u, v)])
         cur_neis = neis(cur, [node], direction=["in", "out"])
+        if return_applied:
+            applied = []
         for cur_nei in cur_neis:
             mu = cur.nodes[cur_nei]["label"]
             for i, cur_node in enumerate(rhs):
@@ -277,12 +289,17 @@ class EDNCERule:
                     for emb in self.embedding:
                         mu_e, p_e, q_e, i_e, d_e, d__e = emb
                         if mu_e == mu and p_e == p and i_e == i and d_e == d:
+                            if return_applied:
+                                applied.append(emb)
                             if d__e == "in":
                                 cur.add_edge(cur_nei, cur_node, label=q_e)
                             else:
                                 cur.add_edge(cur_node, cur_nei, label=q_e)
         cur.remove_node(node)
-        return cur
+        if return_applied:
+            return cur, applied
+        else:
+            return cur
 
     def visualize(self, path):
         g = nx.Graph()

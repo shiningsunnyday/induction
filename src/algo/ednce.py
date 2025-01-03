@@ -50,7 +50,7 @@ def terminate(g, grammar, anno, iter):
         model = []
         while conns:
             conn = conns.pop(-1)
-            nodes = conn
+            nodes = list(conn)
             prefixes = [n.split(":")[0] for n in conn]
             assert len(set(prefixes)) == 1
             prefix = prefixes[0] + ":"
@@ -315,17 +315,16 @@ def resolve_ambiguous(model, grammar, save_path):
     #     found = enumerate_rules_mp(graphs, grammar)
     # else:
     found = enumerate_rules(graphs, grammar)    
-    breakpoint()
     all_derivs = list(map(list, found))
     sets_of_sets = []
-    for derivs in all_derivs:
+    for derivs in all_derivs: # for each graph
         sets = []
-        for i in range(len(derivs)):
-            # keep this deriv
+        for i in range(len(derivs)): # for each deriv
+            # choose to keep this deriv
             for j in range(len(derivs)):
                 if j == i:
                     continue
-                sets.append(set(derivs[j])-set(derivs[i]))
+                sets.append(set(derivs[j])-set(derivs[i])) # the rules that will be eliminated
         sets_of_sets.append(sets)
 
     poss_elims = []
@@ -333,35 +332,47 @@ def resolve_ambiguous(model, grammar, save_path):
     if len(args) == 0:
         logger.info("no ambiguity, done")
         return
-    for chosen in product(*args):
-        elim = set.union(*chosen)
-        exist = False
-        for p in poss_elims:
-            if p == elim:
-                exist = True
-                break
-        if not exist:
-            poss_elims.append(elim)
+    num_prod = reduce(lambda x,y:x*y, [len(l) for l in args])
+    beam_width = 100
+    if num_prod > beam_width: # too big, so let's beam search
+        poss_elims = [set()]        
+        for options in tqdm(args, "beam search"):
+            poss_elims_copy = []
+            for e, o in product(poss_elims, options):
+                poss_elims_copy.append(e.union(o))
+            poss_elims_copy = sorted(poss_elims_copy, key=len)
+            poss_elims = poss_elims_copy[:beam_width]
 
-    poss_elims = sorted(poss_elims, key=len)
-    for i in range(len(poss_elims)):
+    else:
+        for chosen in product(*args):
+            elim = set.union(*chosen) # eliminate these rules
+            exist = False
+            for p in poss_elims:
+                if p == elim:
+                    exist = True
+                    break
+            if not exist:
+                poss_elims.append(elim)
+        poss_elims = sorted(poss_elims, key=len)
+
+    for i in range(len(poss_elims)): # start from minimal set of rules
         if poss_elims[i] is None:
             continue
-        for j in range(i+1, len(poss_elims)):
+        for j in range(i+1, len(poss_elims)): # remove redundant
             if poss_elims[j] is None:
                 continue
             if not (poss_elims[i]-poss_elims[j]):
                 poss_elims[j] = None
 
-    min_poss_elims = list(filter(lambda x: x is not None, poss_elims))
+    min_poss_elims = list(filter(lambda x: x is not None, poss_elims)) # all minimal rule sets
     best_e = None
     best_counter = None
-    for e in min_poss_elims:
+    for e in min_poss_elims: # for each minimal rule set
         counter = []
         for i, derivs in enumerate(all_derivs):
             inters = [bool(set(derivs[j]) & e) for j in range(len(derivs))]
-            if np.all(inters):
-                counter.append(i)
+            if np.all(inters): # all derivs for this graph requires a rule from e
+                counter.append(i) # graph is no longer in language
         if best_counter is None or len(counter) < len(best_counter):
             best_counter = counter
             best_e = list(sorted(e))

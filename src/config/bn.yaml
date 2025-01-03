@@ -23,7 +23,7 @@ RESTRICT_POSS_DIRS: False # direction of neighbors limited (tradeoff expressivit
 MIN_EMBEDDING: False # take the minimum or maximum embedding for each rule
 LIMIT_FOR_GREEDY: 1000
 NUM_RANDOM_SEARCH_TRIES: 10
-LIMIT_FOR_DYNAMIC: 5000
+LIMIT_FOR_DYNAMIC: 3000
 
 # motif args
 MAX_NUM_COMPS_FOR_MOTIF_MINING: 5000

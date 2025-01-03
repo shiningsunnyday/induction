@@ -12,7 +12,7 @@ import multiprocessing as mp
 import time
 import random
 
-def get_args():
+def get_parser():
     parser = ArgumentParser()
     # global args
     parser.add_argument("--visualize", dest="global_visualize", action='store_true')
@@ -39,6 +39,11 @@ def get_args():
     )
     parser.add_argument("--ambiguous-file", help='if given and exists, load data from this file to learn grammar; if given and not exist, save ambiguous data to this file after learn grammar')
     parser.add_argument("--num_samples", default=10000, type=int, help='how much to generate')
+    return parser    
+
+
+def get_args():
+    parser = get_parser()
     args = parser.parse_args()
     if args.ambiguous_file is not None:
         assert args.ambiguous_file[-5:] == '.json'
