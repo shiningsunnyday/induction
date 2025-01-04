@@ -7,8 +7,14 @@ import networkx as nx
 import numpy as np
 from torch_geometric.nn import GCNConv
 from torch_geometric.data import Data as GraphData
+import importlib
+dagnn = importlib.import_module('dagnn.ogbg-code.model.dagnn')
+utils_dag = importlib.import_module('dagnn.src.utils_dag')
+DAGNN = dagnn.DAGNN
+# if error, go to induction/dagnn/ogbg-code/model/dagnn.py, change a line to "from dagnn.src.constants import *""
 import torch.nn.functional as F
 import pickle
+import hashlib
 from tqdm import tqdm
 import matplotlib.pyplot as plt
 from src.config import *
@@ -19,13 +25,17 @@ from src.draw.graph import draw_graph
 import glob
 import re
 
-# Hyperparameters
+# Grammar
 VOCAB_SIZE = 204  # Number of rules
+MAX_RULE_SIZE = 5 # Max size of rule's rhs graph
+SEQ_LEN = 13  # Max length of sequences
+# NN
 EMBED_DIM = 12
 LATENT_DIM = 32
-SEQ_LEN = 13  # Max length of sequences
+# Training
 BATCH_SIZE = 256
 EPOCHS = 30
+CUDA = 'cuda:0'
 
 # Generate a random vocabulary of small graphs using NetworkX
 def generate_random_graphs(vocab_size):
@@ -38,24 +48,107 @@ def generate_random_graphs(vocab_size):
         graphs.append(G)
     return graphs
 
+def hash_object(obj):
+    """Create a deterministic hash for a Python object."""
+    obj_bytes = pickle.dumps(obj)
+    return hashlib.sha256(obj_bytes).hexdigest()
+
+def top_sort(edge_index, graph_size):
+
+    node_ids = np.arange(graph_size, dtype=int)
+
+    node_order = np.zeros(graph_size, dtype=int)
+    unevaluated_nodes = np.ones(graph_size, dtype=bool)
+
+    parent_nodes = edge_index[0].numpy()
+    child_nodes = edge_index[1].numpy()
+
+    n = 0
+    while unevaluated_nodes.any():
+        # Find which parent nodes have not been evaluated
+        unevaluated_mask = unevaluated_nodes[parent_nodes]
+        
+        # Find the child nodes of unevaluated parents
+        unready_children = child_nodes[unevaluated_mask]
+
+        # Mark nodes that have not yet been evaluated
+        # and which are not in the list of children with unevaluated parent nodes
+        nodes_to_evaluate = unevaluated_nodes & ~np.isin(node_ids, unready_children)
+
+        node_order[nodes_to_evaluate] = n
+        unevaluated_nodes[nodes_to_evaluate] = False
+
+        n += 1
+
+    return torch.from_numpy(node_order).long()
+
+
+def assert_order(edge_index, o, ns):
+    # already processed
+    proc = []
+    for i in range(max(o)+1):
+        # nodes in position i in order
+        l = o == i
+        l = ns[l].tolist()
+        for n in l:
+            # predecessors
+            ps = edge_index[0][edge_index[1] == n].tolist()
+            for p in ps:
+                assert p in proc
+        proc += l    
+
+
+# to be able to use pyg's batch split everything into 1-dim tensors
+def add_order_info_01(graph):
+
+    l0 = top_sort(graph.edge_index, graph.num_nodes)
+    ei2 = torch.LongTensor([list(graph.edge_index[1]), list(graph.edge_index[0])])
+    l1 = top_sort(ei2, graph.num_nodes)
+    ns = torch.LongTensor([i for i in range(graph.num_nodes)])
+
+    graph.__setattr__("_bi_layer_idx0", l0)
+    graph.__setattr__("_bi_layer_index0", ns)
+    graph.__setattr__("_bi_layer_idx1", l1)
+    graph.__setattr__("_bi_layer_index1", ns)
+
+    assert_order(graph.edge_index, l0, ns)
+    assert_order(ei2, l1, ns)    
+
+def to_one_hot(y, labels):
+    one_hot_vector = torch.zeros((len(labels),))
+    one_hot_vector[labels.index(y)] = 1.
+    return one_hot_vector
+
+
 # Convert NetworkX graphs to PyTorch Geometric Data objects
 def convert_graph_to_data(graph):
     # Random node features
     graph = nx.relabel_nodes(graph, dict(zip(graph,range(len(graph)))))
-    one_hot_vector = torch.zeros((len(TERMS)+len(NONTERMS),))
     features = []
     term = True
-    for i in range(len(graph)):
-        index = (TERMS+NONTERMS).index(graph.nodes[i]['label'])
-        one_hot_vector[index] = 1.
-        if index >= len(TERMS):
+    for i in range(len(graph)):           
+        one_hot_vector = to_one_hot(graph.nodes[i]['label'], TERMS+NONTERMS)
+        if 'feat' in graph.nodes[i]:
+            feat_val = graph.nodes[i]['feat']
+        else:
+            feat_val = 0.
+        if one_hot_vector.argmax().item() >= len(TERMS):
             term = False # nonterm node
-        features.append(one_hot_vector)
+        feat = torch.cat((one_hot_vector, torch.tensor([feat_val])))
+        features.append(feat)
     x = torch.stack(features, dim=0)
     # x = torch.rand((graph.number_of_nodes(), EMBED_DIM))    
-    edge_index = torch.tensor(list(graph.edges)).t().contiguous()
-    res = GraphData(x=x, edge_index=edge_index)
-    return res, term
+    edge_list = list(graph.edges)
+    edge_index = torch.tensor(edge_list).t().contiguous()
+    roots = np.setdiff1d(np.arange(len(graph)), edge_index[1])    
+    dists = [nx.single_source_shortest_path_length(graph, root) for root in roots]
+    dist = {d: min([dis[d] for dis in dists if d in dis]) for d in range(len(graph))}
+    node_depth = [dist[i] for i in range(len(graph))]
+    edge_attr = torch.stack([to_one_hot(graph.edges[edge]['label'], FINAL+NONFINAL) for edge in edge_list], dim=0)
+    g = GraphData(x=x, edge_index=edge_index, node_depth=torch.tensor(node_depth), edge_attr=edge_attr)
+    add_order_info_01(g) # dagnn
+    g.len_longest_path = float(torch.max(g._bi_layer_idx0).item()) # dagnn
+    return g, term
 
 def add_ins(g, ins):
     if ins is None:
@@ -89,7 +182,8 @@ class TokenDataset(Dataset):
             r, g, ins = self.data[idx][i]
             g = add_ins(g, ins)
             seq.append(r)
-            graph_seq.append(convert_graph_to_data(g))
+            graph, _ = convert_graph_to_data(g)
+            graph_seq.append(graph)
         return torch.tensor(seq), graph_seq
 
 
@@ -110,6 +204,7 @@ class TokenGNN(nn.Module):
         x = self.pooling(x.t()).squeeze(-1)  # Aggregate node features to a single vector
         return x
 
+
 # Define Transformer Encoder
 class TransformerEncoder(nn.Module):
     def __init__(self, embed_dim, num_layers=2):
@@ -125,8 +220,9 @@ class TransformerEncoder(nn.Module):
 # Define VAE
 class TransformerVAE(nn.Module):
     def __init__(self, embed_dim, latent_dim, seq_len):
-        super(TransformerVAE, self).__init__()
-        self.gnn = TokenGNN(embed_dim)
+        super(TransformerVAE, self).__init__()        
+        # self.token_gnn = TokenGNN(embed_dim)
+        self.gnn = DAGNN(None, None, 13, LATENT_DIM, None, w_edge_attr=False, bidirectional=False, num_class=LATENT_DIM)
         self.transformer_encoder = TransformerEncoder(embed_dim)
         self.fc_mu = nn.Linear(embed_dim, latent_dim)
         self.fc_logvar = nn.Linear(embed_dim, latent_dim)
@@ -136,19 +232,24 @@ class TransformerVAE(nn.Module):
         self.output_layer = nn.Linear(embed_dim + latent_dim, VOCAB_SIZE)
         self.start_token_embedding = nn.Parameter(torch.randn(1, 1, embed_dim))
 
-    def embed_tokens(self, token_ids):
+    def embed_tokens(self, token_ids, batch_g_list):        
         if token_ids.dim() == 2:
-            return torch.stack([self.embed_tokens(token_id_seq) for token_id_seq in token_ids], dim=0)
+            return torch.stack([self.embed_tokens(token_id_seq, g_list) for (token_id_seq, g_list) in zip(token_ids, batch_g_list)], dim=0)
+        else:
+            g_list = batch_g_list
         embedded_tokens = []
-        for token_id in token_ids:
-            graph_data = graph_data_vocabulary[token_id]
-            embedded_token = self.gnn(graph_data)
+        for token_id, graph_data in zip(token_ids, g_list):
+            if graph_data is None:
+                embedded_token = torch.zeros((LATENT_DIM,), device=CUDA)
+            else:
+                graph_data.to(CUDA)
+                embedded_token = self.gnn(graph_data).flatten()
             embedded_tokens.append(embedded_token)
         return torch.stack(embedded_tokens, dim=0)
+        # return torch.cat(embedded_tokens, dim=0)
 
-    def encode(self, x, attention_mask):
-        embedded_tokens = self.embed_tokens(x)  # Embeds each token (graph) using GNN
-        encoded_seq = self.transformer_encoder(embedded_tokens.permute(1, 0, 2), src_key_padding_mask=~attention_mask).permute(1, 0, 2)
+    def encode(self, x, attention_mask):        
+        encoded_seq = self.transformer_encoder(x.permute(1, 0, 2), src_key_padding_mask=~attention_mask).permute(1, 0, 2)
         # Apply mean pooling along the sequence length dimension to get a fixed-size representation
         pooled = torch.mean(encoded_seq, dim=1)  # (batch, embed_dim)
         mu, logvar = self.fc_mu(pooled), self.fc_logvar(pooled)
@@ -216,9 +317,10 @@ class TransformerVAE(nn.Module):
             for i, idx in enumerate(active_indices):
                 if t < max_seq_len_list[idx]:  # Ensure there are more ground-truth tokens to process
                     # Get the ground-truth token from x and embed it using the GNN
-                    next_token_id = x[idx, t].unsqueeze(0)  # Ground truth for next token
-                    next_token_embedding = self.gnn(graph_data_vocabulary[next_token_id.item()]).unsqueeze(0)
-
+                    # .unsqueeze(0)  # Ground truth for next token
+                    next_token_embedding = x[idx, t].unsqueeze(0)
+                    # next_token_embedding = self.gnn(graph_data_vocabulary[next_token_id.item()]).unsqueeze(0)                    
+                    # next_token_embedding = batch_g_list[idx][t]
                     # Append the embedded token to this sequence’s token_embeddings list
                     token_embeddings[idx] = torch.cat((token_embeddings[idx], next_token_embedding), dim=0)
 
@@ -307,10 +409,11 @@ class TransformerVAE(nn.Module):
         return generated_sequences
 
 
-    def forward(self, x, attention_mask, seq_len_list):
-        mu, logvar = self.encode(x, attention_mask)
+    def forward(self, x, attention_mask, seq_len_list, batch_g_list):
+        embedded_tokens = self.embed_tokens(x, batch_g_list)  # Embeds each token (graph) using GNN
+        mu, logvar = self.encode(embedded_tokens, attention_mask)
         z = self.reparameterize(mu, logvar)
-        logits, logits_mask = self.autoregressive_training_step(x, z, seq_len_list)
+        logits, logits_mask = self.autoregressive_training_step(embedded_tokens, z, seq_len_list)
         return logits, logits_mask, mu, logvar
 
 
@@ -325,20 +428,19 @@ def vae_loss(recon_logits, mask, x, mu, logvar):
 
 
 # Padding function
-def collate_batch(batch):
-    breakpoint()
-    lengths = [len(seq) for seq in batch]
+def collate_batch(batch):    
+    lengths = [len(seq) for seq, _ in batch]
     max_len = max(lengths)
     padded_batch = torch.zeros(len(batch), max_len, dtype=torch.long)
     seq_len_list = torch.zeros(len(batch), dtype=torch.long)
     attention_mask = torch.zeros((len(batch), max_len), dtype=torch.bool)
-    
-    for i, seq in enumerate(batch):
+    batch_g_list = []
+    for i, (seq, g_list) in enumerate(batch):
         padded_batch[i, :len(seq)] = seq
         seq_len_list[i] = len(seq)  # Mask non-padded positions
         attention_mask[i, :len(seq)] = 1
-    
-    return padded_batch, attention_mask, seq_len_list
+        batch_g_list.append(g_list+[None for _ in range(max_len-len(g_list))])    
+    return padded_batch, attention_mask, seq_len_list, batch_g_list
 
 
 # Sampling new sequences
@@ -348,7 +450,7 @@ def sample(model, num_samples=5, max_seq_len=10):
     with torch.no_grad():
         while len(uniq_sequences) < num_samples:
             z = torch.randn(num_samples, LATENT_DIM)  # Sample from the prior
-            z = z.to('cuda')
+            z = z.to(CUDA)
             generated_sequences = model.autoregressive_inference(z, max_seq_len)  # Decode from latent space            
             uniq_sequences = uniq_sequences | set(map(tuple, generated_sequences))
     uniq_sequences = [list(l) for l in uniq_sequences]
@@ -357,7 +459,7 @@ def sample(model, num_samples=5, max_seq_len=10):
 
 def train(data):
     # Initialize model and optimizer
-    model = TransformerVAE(EMBED_DIM, LATENT_DIM, SEQ_LEN)
+    model = TransformerVAE(LATENT_DIM, LATENT_DIM, SEQ_LEN)
     optimizer = optim.Adam(model.parameters(), lr=1e-4)
     
     # Dummy dataset: Replace with actual sequence data
@@ -367,9 +469,9 @@ def train(data):
 
     # Training loop
     model.train()
-    model = model.to('cuda')
+    model = model.to(CUDA)
     for i, graph_data in enumerate(graph_data_vocabulary):
-        graph_data_vocabulary[i] = graph_data.to('cuda')
+        graph_data_vocabulary[i] = graph_data.to(CUDA)
     ckpts = glob.glob('ckpts/api_ckt_ednce/*.pth')
     start_epoch = 0
     best_loss = float("inf")
@@ -387,10 +489,10 @@ def train(data):
     
     for epoch in tqdm(range(start_epoch, EPOCHS)):
         for batch in dataloader:
-            x, attention_mask, seq_len_list = batch
-            x, attention_mask = x.to('cuda'), attention_mask.to('cuda')
+            x, attention_mask, seq_len_list, batch_g_list = batch
+            x, attention_mask = x.to(CUDA), attention_mask.to(CUDA)
             optimizer.zero_grad()
-            recon_logits, mask, mu, logvar = model(x, attention_mask, seq_len_list)
+            recon_logits, mask, mu, logvar = model(x, attention_mask, seq_len_list, batch_g_list)
             loss = vae_loss(recon_logits, mask, x, mu, logvar)
             loss.backward()
             optimizer.step()
@@ -441,25 +543,27 @@ def interactive_sample_sequences(model, grammar, token2rule, num_samples=5, max_
     model.eval()
     uniq_sequences = set()
     with torch.no_grad():
-        while len(uniq_sequences) < num_samples:
-            z = torch.randn(num_samples, LATENT_DIM)  
-            z = z.to('cuda')            
-            batch_size = z.size(0)
-            z_context = model.fc_decode(z)              
-            token_embeddings = list(torch.unbind(model.start_token_embedding.expand(batch_size, -1, -1), dim=0))  
-            generated_sequences = [[] for _ in range(batch_size)]  
-            for t in range(max_seq_len):
-                temp_batch_embeddings, temp_z_context, active_indices = model._autoregressive_inference_active_indices(z_context, generated_sequences, token_embeddings, max_seq_len)                
-                if not active_indices:
-                    break
-                logits = model._autoregressive_inference_predict_logits(temp_batch_embeddings, temp_z_context)
-                interactive_mask_logits(grammar, generated_sequences, logits)
-                next_tokens = torch.argmax(logits, dim=-1)
-                for i, idx in enumerate(active_indices):
-                    generated_sequences[idx].append(next_tokens[i].item())  
-                    next_token_embedding = model.gnn(graph_data_vocabulary[next_tokens[i].item()]).unsqueeze(0)
-                    token_embeddings[idx] = torch.cat((token_embeddings[idx], next_token_embedding), dim=0)
-            uniq_sequences = uniq_sequences | set(map(tuple, generated_sequences))
+        with tqdm(total=num_samples) as pbar:
+            while len(uniq_sequences) < num_samples:
+                z = torch.randn(num_samples, LATENT_DIM)  
+                z = z.to(CUDA)            
+                batch_size = z.size(0)
+                z_context = model.fc_decode(z)              
+                token_embeddings = list(torch.unbind(model.start_token_embedding.expand(batch_size, -1, -1), dim=0))  
+                generated_sequences = [[] for _ in range(batch_size)]  
+                for t in range(max_seq_len):
+                    temp_batch_embeddings, temp_z_context, active_indices = model._autoregressive_inference_active_indices(z_context, generated_sequences, token_embeddings, max_seq_len)                
+                    if not active_indices:
+                        break
+                    logits = model._autoregressive_inference_predict_logits(temp_batch_embeddings, temp_z_context)
+                    interactive_mask_logits(grammar, generated_sequences, logits)
+                    next_tokens = torch.argmax(logits, dim=-1)
+                    for i, idx in enumerate(active_indices):
+                        generated_sequences[idx].append(next_tokens[i].item())  
+                        next_token_embedding = model.gnn(graph_data_vocabulary[next_tokens[i].item()])
+                        token_embeddings[idx] = torch.cat((token_embeddings[idx], next_token_embedding), dim=0)
+                uniq_sequences = uniq_sequences | set(map(tuple, generated_sequences))                
+                pbar.update(len(uniq_sequences)-pbar.n)
     uniq_sequences = [list(l) for l in uniq_sequences]
     sampled_sequences = uniq_sequences[:num_samples]
     print("===SAMPLED SEQUENCES===")
@@ -505,7 +609,7 @@ def load_data(cache_dir, num_graphs):
         iso = next(matcher.isomorphisms_iter())
         # use iso to embed feats and instructions
         for i, r in enumerate(rule_ids):
-            sub = deepcopy(grammar.rules[r].subgraph)
+            sub = nx.DiGraph(grammar.rules[r].subgraph)
             # node feats
             for n in sub:
                 if n in iso:
@@ -515,6 +619,7 @@ def load_data(cache_dir, num_graphs):
     pickle.dump((data, rule2token), open(os.path.join(cache_dir, 'data_and_rule2token.pkl'), 'wb+'))
     relabel = dict(zip(list(sorted(rule2token)), range(len(rule2token))))    
     data = [[(relabel[s[0]],)+s[1:] for s in seq] for seq in data]
+    globals()['MAX_SEQ_LEN'] = max([len(seq) for seq in data])
     globals()['graph_vocabulary'] = list(rule2token.values())
     terminate = {}    
     vocab = []
@@ -524,7 +629,7 @@ def load_data(cache_dir, num_graphs):
         vocab.append(graph_data)
     globals()['graph_data_vocabulary'] = vocab
     globals()['vocabulary_terminate'] = terminate
-    globals()['VOCAB_SIZE'] = len(rule2token)
+    globals()['VOCAB_SIZE'] = len(rule2token)    
     token2rule = dict(zip(relabel.values(), relabel.keys()))
     return data, token2rule
 
@@ -541,4 +646,4 @@ if __name__ == "__main__":
     data, token2rule = load_data(cache_dir, 50)
     breakpoint()
     model = train(data)
-    interactive_sample_sequences(model, grammar, token2rule, max_seq_len=10)
+    interactive_sample_sequences(model, grammar, token2rule, max_seq_len=MAX_SEQ_LEN)
