@@ -13,3 +13,6 @@
 [submodule "RevTrack"]
 	path = RevTrack
 	url = https://github.com/MITIBMxGraph/RevTrack.git
+[submodule "dagnn"]
+	path = dagnn
+	url = https://github.com/vthost/DAGNN.git
