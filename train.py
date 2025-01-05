@@ -493,6 +493,7 @@ def train(data):
             x, attention_mask = x.to(CUDA), attention_mask.to(CUDA)
             optimizer.zero_grad()
             recon_logits, mask, mu, logvar = model(x, attention_mask, seq_len_list, batch_g_list)
+            breakpoint()
             loss = vae_loss(recon_logits, mask, x, mu, logvar)
             loss.backward()
             optimizer.step()
@@ -583,7 +584,15 @@ def interactive_sample_sequences(model, grammar, token2rule, num_samples=5, max_
     
 
 
-def load_data(cache_dir, num_graphs):
+def load_data(anno, cache_dir, num_graphs):
+    # for ckt only, duplicate and interleave anno
+    anno_copy = deepcopy(anno)
+    anno = {}
+    for n in anno_copy:
+        p = get_prefix(n)
+        s = get_suffix(n)
+        anno[f"{2*p}:{s}"] = anno_copy[n]
+        anno[f"{2*p+1}:{s}"] = deepcopy(anno_copy[n])
     exist = os.path.exists(os.path.join(cache_dir, 'data_and_rule2token.pkl'))
     # if exist:
     #     data, rule2token = pickle.load(open(os.path.join(cache_dir, 'data_and_rule2token.pkl'), 'rb'))
@@ -603,17 +612,18 @@ def load_data(cache_dir, num_graphs):
             # matcher = DiGraphMatcher(copy_graph(g, orig_nodes[i]), rule2token[r], node_match=node_match)
             # breakpoint()
             # assert any(all([iso[orig_nodes[i][j]] == list(rule2token[r])[j]]) for iso in matcher.isomorphisms_iter())        
-        g, all_applied = grammar.derive(rule_ids, return_applied=True)
+        g, all_applied, all_node_maps = grammar.derive(rule_ids, return_applied=True)
         g_orig = copy_graph(orig, orig.comps[pre])
         matcher = DiGraphMatcher(g, g_orig, node_match=node_match)
         iso = next(matcher.isomorphisms_iter())
-        # use iso to embed feats and instructions
+        # use iso to embed feats and instructions        
         for i, r in enumerate(rule_ids):
-            sub = nx.DiGraph(grammar.rules[r].subgraph)
+            sub = deepcopy(nx.DiGraph(grammar.rules[r].subgraph))
             # node feats
             for n in sub:
-                if n in iso:
-                    sub.nodes[n]['feat'] = orig.nodes[iso[n]]['feat']
+                key = all_node_maps[i][n]
+                if key in iso:
+                    sub.nodes[n]['feat'] = orig.nodes[iso[key]]['feat']
             rule_ids[i] = (r, sub, all_applied[i-1] if i else None)
         data.append(rule_ids)
     pickle.dump((data, rule2token), open(os.path.join(cache_dir, 'data_and_rule2token.pkl'), 'wb+'))
@@ -640,10 +650,9 @@ if __name__ == "__main__":
     parser = get_parser()
     args = parser.parse_args()
     cache_dir = 'cache/api_ckt_ednce/'
-    version = get_next_version(cache_dir)-1
-    grammar, anno, g = pickle.load(open(os.path.join(cache_dir, f'{version}.pkl'),'rb'))
-    orig = load_ckt(args)
-    data, token2rule = load_data(cache_dir, 50)
-    breakpoint()
+    version = get_next_version(cache_dir)-1    
+    grammar, anno, g = pickle.load(open(os.path.join(cache_dir, f'{version}.pkl'),'rb'))    
+    orig = load_ckt(args, load_all=True)
+    data, token2rule = load_data(anno, cache_dir, 100)    
     model = train(data)
     interactive_sample_sequences(model, grammar, token2rule, max_seq_len=MAX_SEQ_LEN)

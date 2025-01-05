@@ -101,15 +101,15 @@ class EDNCEGrammar(NLCGrammar):
     def derive(self, seq, token2rule=None, return_applied=False):
         if return_applied:
             all_applied = []
+            all_node_maps = []
         if token2rule is None:
             token2rule = {i:i for i in range(len(self.rules))}
         # find the initial rule
         seq = [token2rule[idx] for idx in seq]
-        try:
-            start_rule = self.rules[seq[0]]
-        except:
-            breakpoint()
-        cur = start_rule.subgraph
+        start_rule = self.rules[seq[0]]
+        cur = deepcopy(start_rule.subgraph)
+        if return_applied:
+            all_node_maps.append({n:n for n in cur})
         assert not check_input_xor_output(cur)
         for idx in seq[1:]:
             nt_nodes = self.search_nts(cur, NONTERMS)            
@@ -119,10 +119,11 @@ class EDNCEGrammar(NLCGrammar):
             node = nt_nodes[0]
             rule = self.rules[idx]
             if return_applied:
-                cur, applied = rule(cur, node, return_applied=return_applied)
+                cur, applied, node_map = rule(cur, node, return_applied=return_applied)
                 all_applied.append(applied)
+                all_node_maps.append(node_map)
         if return_applied:
-            return cur, all_applied
+            return cur, all_applied, all_node_maps
         else:
             return cur
 
@@ -297,7 +298,7 @@ class EDNCERule:
                                 cur.add_edge(cur_node, cur_nei, label=q_e)
         cur.remove_node(node)
         if return_applied:
-            return cur, applied
+            return cur, applied, node_map
         else:
             return cur
 

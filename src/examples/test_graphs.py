@@ -383,10 +383,14 @@ def load_finance(args):
     breakpoint()
 
 
-def load_ckt(args):    
+def load_ckt(args, load_all=False):
     """
     Load all ckts, and do union over all the graphs
     Combine graph-level attrs of individual graphs into a graph-level attr lookup
+
+    The cktbench is comprised of pairs of ckts, 2*i and 2*i+1 have the same topology but different node-level attrs (device parameters)
+
+    load_all: whether to load all ckts or just half
     """
     ambiguous_file = args.ambiguous_file
     cwd = os.getcwd()
@@ -395,8 +399,9 @@ def load_ckt(args):
         num_graphs = args.num_data_samples
     else:
         num_graphs = 0
-        while True:            
-            if os.path.exists(os.path.join(data_dir, f"{2*num_graphs}.json")):
+        while True:
+            expr = num_graphs if load_all else 2*num_graphs
+            if os.path.exists(os.path.join(data_dir, f"{expr}.json")):
                 num_graphs += 1
             else:
                 break    
@@ -420,7 +425,8 @@ def load_ckt(args):
         graph_no_iter = json.load(open(ambiguous_file))['redo']
     i = 0
     for i in tqdm(graph_no_iter, desc="loading graphs"):
-        fpath = os.path.join(data_dir, f"{2*i}.json")
+        expr = i if load_all else 2*i
+        fpath = os.path.join(data_dir, f"{expr}.json")
         data = json.load(open(fpath))
         g = json_graph.node_link_graph(data)        
         for n in g:

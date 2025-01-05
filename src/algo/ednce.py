@@ -642,7 +642,7 @@ def compress(g, grammar, anno):
         best_clique = None
         best_rule_idx = None
         max_len = 0
-        if NUM_PROCS > 1:
+        if COMPRESS_RULE_MP and NUM_PROCS > 1:
             with mp.Pool(NUM_PROCS) as p:
                 max_cliques = p.starmap(compress_rule, tqdm([(g, index, rule) for (index, rule) in enumerate(grammar.rules)], desc="compressing over rules"))
         else:
