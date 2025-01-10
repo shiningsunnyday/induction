@@ -35,35 +35,35 @@ def terminate(g, grammar, anno, iter):
     # create a rule for each connected component
     conns = list(nx.connected_components(nx.Graph(g)))
     conns = sorted(conns, key=lambda c: get_prefix(list(c)[0]))
-    if len(conns) == 1:
-        nodes = list(g)
-        if is_init_graph(g):
-            model = anno[list(anno)[-1]]
-        else:
-            new_n = find_next(g)        
-            rule_no = edit_grammar(grammar, g)
-            anno[new_n] = EDNCENode(new_n, attrs={"rule": rule_no, "nodes": nodes, "feats": [g.nodes[n]['feat'] if 'feat' in g.nodes[n] else 0.0 for n in nodes]})
-            g.add_node(new_n, label="black")  # annotate which rule was applied to model
-            rewire_graph(g, new_n, nodes, anno)
-            model = anno[new_n]
-    else:
-        model = []
-        while conns:
-            conn = conns.pop(-1)
-            nodes = list(conn)
-            prefixes = [n.split(":")[0] for n in conn]
-            assert len(set(prefixes)) == 1
-            prefix = prefixes[0] + ":"
-            conn_g = copy_graph(g, conn)
-            if is_init_graph(conn_g):            
-                model.append(anno[list(conn_g)[-1]])
-                continue
-            new_n = find_next(conn_g, prefix)
-            rule_no = edit_grammar(grammar, conn_g)            
-            anno[new_n] = EDNCENode(new_n, attrs={"rule": rule_no, "nodes": nodes, "feats": [conn_g.nodes[n]['feat'] if 'feat' in conn_g.nodes[n] else 0.0 for n in nodes]})
-            g.add_node(new_n, label="black")  # annotate which rule was applied to model            
-            rewire_graph(g, new_n, nodes, anno)
-            model.append(anno[new_n])
+    # if len(conns) == 1:
+    #     nodes = list(g)
+    #     if is_init_graph(g):
+    #         model = anno[list(anno)[-1]]
+    #     else:
+    #         new_n = find_next(g)        
+    #         rule_no = edit_grammar(grammar, g)
+    #         anno[new_n] = EDNCENode(new_n, attrs={"rule": rule_no, "nodes": nodes, "feats": [g.nodes[n]['feat'] if 'feat' in g.nodes[n] else 0.0 for n in nodes]})
+    #         g.add_node(new_n, label="black")  # annotate which rule was applied to model
+    #         rewire_graph(g, new_n, nodes, anno)
+    #         model = anno[new_n]
+    # else:
+    model = []
+    while conns:
+        conn = conns.pop(-1)
+        nodes = list(conn)
+        prefixes = [n.split(":")[0] for n in conn]
+        assert len(set(prefixes)) == 1
+        prefix = prefixes[0] + ":"
+        conn_g = copy_graph(g, conn)
+        if is_init_graph(conn_g):            
+            model.append(anno[list(conn_g)[-1]])
+            continue
+        new_n = find_next(conn_g, prefix)
+        rule_no = edit_grammar(grammar, conn_g)            
+        anno[new_n] = EDNCENode(new_n, attrs={"rule": rule_no, "nodes": nodes, "feats": [conn_g.nodes[n]['feat'] if 'feat' in conn_g.nodes[n] else 0.0 for n in nodes]})
+        g.add_node(new_n, label="black")  # annotate which rule was applied to model            
+        rewire_graph(g, new_n, nodes, anno)
+        model.append(anno[new_n])
     return grammar, model, anno, g
 
 
@@ -635,7 +635,7 @@ def compress(g, grammar, anno):
     logger = logging.getLogger('global_logger')
     logger.info("begin compress grammar")
     changed = True
-    while changed:
+    while COMPRESS and changed:
         changed = False
         best_i = -1
         best_ism = None

@@ -98,7 +98,13 @@ class EDNCEGrammar(NLCGrammar):
         return cur
 
     
-    def derive(self, seq, token2rule=None, return_applied=False):
+    def derive(self, seq, token2rule=None, return_applied=False, visualize=False):
+        if visualize:                        
+            fig, axes = plt.subplots(len(seq), figsize=(5, 5*(len(seq))))
+            for idx, j in enumerate(map(int, seq)):
+                r = self.rules[j]
+                draw_graph(r.subgraph, ax=axes[idx], scale=5, label_feats=True)
+            return fig           
         if return_applied:
             all_applied = []
             all_node_maps = []
@@ -121,7 +127,7 @@ class EDNCEGrammar(NLCGrammar):
             if return_applied:
                 cur, applied, node_map = rule(cur, node, return_applied=return_applied)
                 all_applied.append(applied)
-                all_node_maps.append(node_map)
+                all_node_maps.append(node_map)       
         if return_applied:
             return cur, all_applied, all_node_maps
         else:
@@ -145,9 +151,9 @@ class EDNCEGrammar(NLCGrammar):
         for a, b in rhs.edges:
             rhs.edges[(a,b)]['level'] = 1
         for n in rhs:
-            cur.add_node(n, **rhs.nodes[n])
+            g.add_node(n, **rhs.nodes[n])
         for u, v in rhs.edges:
-            cur.add_edge(u, v, **rhs.edges[(u, v)])
+            g.add_edge(u, v, **rhs.edges[(u, v)])
         for n in rhs:
             g.add_edge(node, n, level=2, label='black')
         for c in model.graph[node].children:
@@ -160,9 +166,10 @@ class EDNCEGrammar(NLCGrammar):
             return [self.induce(m) for m in model]
         g = nx.DiGraph()
         root = list(model.graph)[-1]
-        nt = self.rules[model.graph[root].attrs['rule']].nt
+        start_rule = model.graph[root].attrs['rule']
+        nt = self.rules[start_rule].nt
         g.add_node(root, label=nt)
-        g = self.induce_recurse(root, model, g)        
+        g = self.induce_recurse(root, model, g)
         return g
 
     def search_rules(self, nt):
@@ -429,11 +436,16 @@ class EDNCEModel(NLCModel):
 
 
     def generate(self, grammar):
+        gen_dir = os.path.join(IMG_DIR, "generate/")
         g = nx.DiGraph()
         n = self.seq[-1]
+        prefix = get_prefix(n)
         g.add_node(n, label="black")
         res = [g]
-        res = self.__generate__(self.graph[n], grammar, res)
+        res = self.__generate__(self.graph[n], grammar, res)        
+        fig = grammar.derive([self.graph[n].attrs['rule'] for n in self.seq], visualize=True)
+        save_path = os.path.join(gen_dir, f"{prefix}_g.png")
+        fig.savefig(save_path)
         # prune unique        
         new_res = []
         for r_new in res:
@@ -447,13 +459,11 @@ class EDNCEModel(NLCModel):
                     exist = True
                     break
             if not exist:
-                new_res.append(r_new)
-
-        gen_dir = os.path.join(IMG_DIR, "generate/")
-        os.makedirs(gen_dir, exist_ok=True)
-        prefix = get_prefix(list(g.nodes)[0])
+                new_res.append(r_new)        
+        os.makedirs(gen_dir, exist_ok=True)        
         for i, g in enumerate(new_res):
-            draw_graph(g, os.path.join(gen_dir, f"{prefix}_{i}.png"))
+            save_path = os.path.join(gen_dir, f"{prefix}_{i}.png")
+            draw_graph(g, save_path, label_feats=True)
         return new_res
 
 

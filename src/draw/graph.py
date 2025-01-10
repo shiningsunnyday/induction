@@ -116,6 +116,7 @@ def draw_graph(
     node_size=NODE_SIZE,
     font_size=FONT_SIZE,
     layout=LAYOUT,
+    label_feats=False,
     ax=None,
 ):
     conns = list(nx.connected_components(nx.Graph(g)))
@@ -192,11 +193,13 @@ def draw_graph(
                 n_ = n.split(":")[-1]
             else:
                 n_ = n
+            labels[n] = f"({n_})"
             if "type" in g.nodes[n]:
                 type_ = g.nodes[n]["type"]
-                labels[n] = f"({n_}) {type_}"
-            else:
-                labels[n] = f"({n_})"
+                labels[n] += f" {type_}"
+            if label_feats and "feat" in g.nodes[n]:
+                feat = g.nodes[n]["feat"]
+                labels[n] += f" {feat}"
         nx.draw_networkx_nodes(
             g, ax=ax_, pos=pos, node_color=colors, node_size=node_sizes
         )

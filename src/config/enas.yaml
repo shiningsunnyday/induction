@@ -9,8 +9,9 @@ IMG_DIR: "data/api_enas_ednce/"
 CACHE_DIR: "cache/api_enas_ednce/"
 
 NUM_THREADS: 1
-NUM_PROCS: 100
+NUM_PROCS: 50
 UPDATE_GRAPH_MP: True
+COMPRESS: True
 COMPRESS_RULE_MP: True
 VISUALIZE: False
 VERBOSE: True

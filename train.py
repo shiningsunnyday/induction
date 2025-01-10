@@ -5,6 +5,10 @@ from torch.utils.data import DataLoader, TensorDataset
 from torch.utils.data import Dataset
 import networkx as nx
 import numpy as np
+from scipy.spatial.distance import pdist
+import scipy.stats as sps
+from scipy.stats import pearsonr
+# torch
 from torch_geometric.nn import GCNConv
 from torch_geometric.data import Data as GraphData
 import importlib
@@ -25,10 +29,15 @@ from src.draw.graph import draw_graph
 import glob
 import re
 
+import sys
+sys.path.append('dagnn/dvae/bayesian_optimization')
+from sparse_gp import SparseGP
+
 # Grammar
 VOCAB_SIZE = 204  # Number of rules
 MAX_RULE_SIZE = 5 # Max size of rule's rhs graph
 SEQ_LEN = 13  # Max length of sequences
+NUM_SAMPLES = 3
 # NN
 EMBED_DIM = 12
 LATENT_DIM = 32
@@ -173,7 +182,7 @@ class TokenDataset(Dataset):
         self.data = data
     
     def __len__(self):
-        return len(data)
+        return len(self.data)
 
     def __getitem__(self, idx):
         seq = []
@@ -184,7 +193,7 @@ class TokenDataset(Dataset):
             seq.append(r)
             graph, _ = convert_graph_to_data(g)
             graph_seq.append(graph)
-        return torch.tensor(seq), graph_seq
+        return torch.tensor(seq), graph_seq, idx
 
 
 # Define GNN-based Token Embedding
@@ -403,7 +412,7 @@ class TransformerVAE(nn.Module):
             # Update each active sequence with the newly generated token
             for i, idx in enumerate(active_indices):
                 generated_sequences[idx].append(next_tokens[i].item())  # Store generated token
-                next_token_embedding = self.gnn(graph_data_vocabulary[next_tokens[i].item()]).unsqueeze(0)
+                next_token_embedding = self.gnn(graph_data_vocabulary[next_tokens[i].item()])
                 # Append the new embedding to this sequence’s token embeddings
                 token_embeddings[idx] = torch.cat((token_embeddings[idx], next_token_embedding), dim=0)
         return generated_sequences
@@ -429,18 +438,20 @@ def vae_loss(recon_logits, mask, x, mu, logvar):
 
 # Padding function
 def collate_batch(batch):    
-    lengths = [len(seq) for seq, _ in batch]
+    lengths = [len(seq) for seq, _, _ in batch]
     max_len = max(lengths)
     padded_batch = torch.zeros(len(batch), max_len, dtype=torch.long)
     seq_len_list = torch.zeros(len(batch), dtype=torch.long)
     attention_mask = torch.zeros((len(batch), max_len), dtype=torch.bool)
     batch_g_list = []
-    for i, (seq, g_list) in enumerate(batch):
+    idxes = []
+    for i, (seq, g_list, idx) in enumerate(batch):
         padded_batch[i, :len(seq)] = seq
         seq_len_list[i] = len(seq)  # Mask non-padded positions
         attention_mask[i, :len(seq)] = 1
         batch_g_list.append(g_list+[None for _ in range(max_len-len(g_list))])    
-    return padded_batch, attention_mask, seq_len_list, batch_g_list
+        idxes.append(idx)
+    return padded_batch, attention_mask, seq_len_list, batch_g_list, idxes
 
 
 # Sampling new sequences
@@ -457,15 +468,23 @@ def sample(model, num_samples=5, max_seq_len=10):
     return uniq_sequences[:num_samples]
 
 
-def train(data):
+def decode_from_latent_space(z, model, max_seq_len=10):
+    generated_sequences = model.autoregressive_inference(z, max_seq_len)
+    return generated_sequences
+    
+
+
+def train(train_data, test_data):
     # Initialize model and optimizer
     model = TransformerVAE(LATENT_DIM, LATENT_DIM, SEQ_LEN)
     optimizer = optim.Adam(model.parameters(), lr=1e-4)
     
     # Dummy dataset: Replace with actual sequence data
     # dataset = [torch.tensor(seq) for seq in data]
-    dataset = TokenDataset(data)
-    dataloader = DataLoader(dataset, batch_size=BATCH_SIZE, shuffle=True, collate_fn=collate_batch)
+    train_dataset = TokenDataset(train_data)
+    train_dataloader = DataLoader(train_dataset, batch_size=BATCH_SIZE, shuffle=True, collate_fn=collate_batch)
+    test_dataset = TokenDataset(test_data)
+    test_dataloader = DataLoader(test_dataset, batch_size=BATCH_SIZE, shuffle=False, collate_fn=collate_batch)    
 
     # Training loop
     model.train()
@@ -487,24 +506,139 @@ def train(data):
         print(f"loaded {best_ckpt_path} loss {best_loss} start_epoch {start_epoch}")
         model.load_state_dict(torch.load(best_ckpt_path))
     
-    for epoch in tqdm(range(start_epoch, EPOCHS)):
-        for batch in dataloader:
-            x, attention_mask, seq_len_list, batch_g_list = batch
+    train_latent = np.empty((len(train_data), LATENT_DIM))
+    test_latent = np.empty((len(test_data), LATENT_DIM))
+    for epoch in tqdm(range(start_epoch, EPOCHS+1)):
+        model.train()
+        train_loss = 0.
+        for batch in train_dataloader:
+            x, attention_mask, seq_len_list, batch_g_list, batch_idxes = batch
             x, attention_mask = x.to(CUDA), attention_mask.to(CUDA)
             optimizer.zero_grad()
-            recon_logits, mask, mu, logvar = model(x, attention_mask, seq_len_list, batch_g_list)
-            breakpoint()
+            recon_logits, mask, mu, logvar = model(x, attention_mask, seq_len_list, batch_g_list)            
             loss = vae_loss(recon_logits, mask, x, mu, logvar)
-            loss.backward()
+            loss.backward()            
+            train_loss += loss.item()
             optimizer.step()
-        if loss.item() < best_loss:
-            best_loss = loss.item()
+            train_latent[batch_idxes] = mu.detach().cpu().numpy()
+        model.eval()
+        val_loss = 0.
+        for batch in test_dataloader:
+            x, attention_mask, seq_len_list, batch_g_list, batch_idxes = batch
+            x, attention_mask = x.to(CUDA), attention_mask.to(CUDA)
+            optimizer.zero_grad()
+            recon_logits, mask, mu, logvar = model(x, attention_mask, seq_len_list, batch_g_list)            
+            loss = vae_loss(recon_logits, mask, x, mu, logvar)            
+            loss.backward()
+            val_loss += loss.item()
+            test_latent[batch_idxes] = mu.detach().cpu().numpy()
+            optimizer.step()            
+        if val_loss < best_loss:
+            best_loss = val_loss
             ckpt_path = f'ckpts/api_ckt_ednce/epoch={epoch}_loss={best_loss}.pth'
             torch.save(model.state_dict(), ckpt_path)
-            print(ckpt_path)            
-        print(f"Epoch {epoch+1}, Loss: {loss.item()}")
-
+            print(ckpt_path)
+        print(f"Epoch {epoch}, Train Loss: {train_loss}, Val Loss: {val_loss}")
+        np.save(f'ckpts/api_ckt_ednce/train_latent_{epoch}.npy', train_latent)
+        np.save(f'ckpts/api_ckt_ednce/test_latent_{epoch}.npy', test_latent)
     return model
+
+
+
+def bo(args, model, y_train, y_test):
+    ckpt_dir = 'ckpts/api_ckt_ednce/'    
+    X_train = np.load(os.path.join(ckpt_dir, f"train_latent_{args.checkpoint}.npy"))    
+    X_test = np.load(os.path.join(ckpt_dir, f"test_latent_{args.checkpoint}.npy"))    
+    iteration = 0
+    best_score = 1e15
+    best_arc = None
+    best_random_score = 1e15
+    best_random_arc = None
+    print("Average pairwise distance between train points = {}".format(np.mean(pdist(X_train))))
+    print("Average pairwise distance between test points = {}".format(np.mean(pdist(X_test))))    
+    while iteration < args.BO_rounds:
+        print("Iteration", iteration)
+        if args.predictor:
+            pred = model.predictor(torch.FloatTensor(X_test).to(CUDA))
+            pred = pred.detach().cpu().numpy()
+            pred = (-pred - mean_y_train) / std_y_train
+            uncert = np.zeros_like(pred)
+        else:
+            # We fit the GP
+            M = 30
+            # other BO hyperparameters
+            lr = 0.0005  # the learning rate to train the SGP model
+            max_iter = 1  # how many iterations to optimize the SGP each time
+            sgp = SparseGP(X_train, 0 * X_train, y_train, M)
+            sgp.train_via_ADAM(X_train, 0 * X_train, y_train, X_test, X_test * 0,  \
+                y_test, minibatch_size = 2 * M, max_iterations = max_iter, learning_rate = lr)
+            pred, uncert = sgp.predict(X_test, 0 * X_test)
+
+        print("predictions: ", pred.reshape(-1))
+        print("real values: ", y_test.reshape(-1))
+        error = np.sqrt(np.mean((pred - y_test)**2))
+        testll = np.mean(sps.norm.logpdf(pred - y_test, scale = np.sqrt(uncert)))
+        print('Test RMSE: ', error)
+        print('Test ll: ', testll)
+        pearson = float(pearsonr(pred.flatten(), y_test.flatten())[0])
+        print('Pearson r: ', pearson)
+        with open('results/' + 'Test_RMSE_ll.txt', 'a') as test_file:
+            test_file.write('Test RMSE: {:.4f}, ll: {:.4f}, Pearson r: {:.4f}\n'.format(error, testll, pearson))
+
+        error_if_predict_mean = np.sqrt(np.mean((np.mean(y_train, 0) - y_test)**2))
+        print('Test RMSE if predict mean: ', error_if_predict_mean)
+        if args.predictor:
+            pred = model.predictor(torch.FloatTensor(X_train).to(CUDA))
+            pred = pred.detach().cpu().numpy()
+            pred = (-pred - mean_y_train) / std_y_train
+            uncert = np.zeros_like(pred)
+        else:
+            pred, uncert = sgp.predict(X_train, 0 * X_train)
+        error = np.sqrt(np.mean((pred - y_train)**2))
+        trainll = np.mean(sps.norm.logpdf(pred - y_train, scale = np.sqrt(uncert)))
+        print('Train RMSE: ', error)
+        print('Train ll: ', trainll)
+        breakpoint()                   
+        next_inputs = sgp.batched_greedy_ei(args.BO_batch_size, np.min(X_train, 0), np.max(X_train, 0), np.mean(X_train, 0), np.std(X_train, 0), sample=args.sample_dist)
+        valid_arcs_final = decode_from_latent_space(torch.FloatTensor(next_inputs).to(CUDA), model)
+        new_features = next_inputs
+        print("Evaluating selected points")
+        scores = []
+        for i in range(len(valid_arcs_final)):
+            arc = valid_arcs_final[ i ]
+            if arc is not None:
+                score = -eva.eval(arc)
+                score = (score - mean_y_train) / std_y_train
+            else:
+                score = max(y_train)[ 0 ]
+            if score < best_score:
+                best_score = score
+                best_arc = arc
+            scores.append(score)
+            # print(i, score)
+        # print("Iteration {}'s selected arcs' scores:".format(iteration))
+        # print(scores, np.mean(scores))
+        save_object(scores, "{}scores{}.dat".format(save_dir, iteration))
+        save_object(valid_arcs_final, "{}valid_arcs_final{}.dat".format(save_dir, iteration))
+
+        if len(new_features) > 0:
+            X_train = np.concatenate([ X_train, new_features ], 0)
+            y_train = np.concatenate([ y_train, np.array(scores)[ :, None ] ], 0)
+        #
+        # print("Current iteration {}'s best score: {}".format(iteration, - best_score * std_y_train - mean_y_train))
+        if best_arc is not None: # and iteration == 10:
+            print("Best architecture: ", best_arc)
+            with open(save_dir + 'best_arc_scores.txt', 'a') as score_file:
+                score_file.write(best_arc + ', {:.4f}\n'.format(-best_score * std_y_train - mean_y_train))
+            if data_type == 'ENAS':
+                row = [int(x) for x in best_arc.split()]
+                g_best, _ = decode_ENAS_to_igraph(flat_ENAS_to_nested(row, max_n-2))
+            elif data_type == 'BN':
+                row = adjstr_to_BN(best_arc)
+                g_best, _ = decode_BN_to_igraph(row)
+            plot_DAG(g_best, save_dir, 'best_arc_iter_{}'.format(iteration), data_type=data_type, pdf=True)
+        #
+        iteration += 1
 
 
 def visualize_sequences(sampled_sequences, grammar, token2rule):
@@ -583,6 +717,13 @@ def interactive_sample_sequences(model, grammar, token2rule, num_samples=5, max_
         draw_graph(g, path=img_path)    
     
 
+def load_y(g, num_graphs):
+    y = []
+    for pre in range(num_graphs):        
+        y.append(g.graph[f'{pre}:fom'])
+    return np.array(y)
+
+
 
 def load_data(anno, cache_dir, num_graphs):
     # for ckt only, duplicate and interleave anno
@@ -594,39 +735,39 @@ def load_data(anno, cache_dir, num_graphs):
         anno[f"{2*p}:{s}"] = anno_copy[n]
         anno[f"{2*p+1}:{s}"] = deepcopy(anno_copy[n])
     exist = os.path.exists(os.path.join(cache_dir, 'data_and_rule2token.pkl'))
-    # if exist:
-    #     data, rule2token = pickle.load(open(os.path.join(cache_dir, 'data_and_rule2token.pkl'), 'rb'))
-    # else:
-    data = []
-    rule2token = {}
-    for pre in tqdm(range(num_graphs), "processing data"):
-        prefix = f"{pre}:"
-        seq = list(filter(lambda k: k[:len(prefix)]==f'{prefix}', anno))
-        seq = seq[::-1] # derivation          
-        rule_ids = [anno[s].attrs['rule'] for s in seq]
-        # orig_nodes = [list(anno[s].attrs['nodes']) for s in seq]
-        # orig_feats = [[orig.nodes[n]['feat'] if n in orig else 0.0 for n in nodes] for nodes in orig_nodes]        
-        for i, r in enumerate(rule_ids):
-            # from networkx.algorithms.isomorphism import DiGraphMatcher
-            rule2token[r] = grammar.rules[r].subgraph
-            # matcher = DiGraphMatcher(copy_graph(g, orig_nodes[i]), rule2token[r], node_match=node_match)
-            # breakpoint()
-            # assert any(all([iso[orig_nodes[i][j]] == list(rule2token[r])[j]]) for iso in matcher.isomorphisms_iter())        
-        g, all_applied, all_node_maps = grammar.derive(rule_ids, return_applied=True)
-        g_orig = copy_graph(orig, orig.comps[pre])
-        matcher = DiGraphMatcher(g, g_orig, node_match=node_match)
-        iso = next(matcher.isomorphisms_iter())
-        # use iso to embed feats and instructions        
-        for i, r in enumerate(rule_ids):
-            sub = deepcopy(nx.DiGraph(grammar.rules[r].subgraph))
-            # node feats
-            for n in sub:
-                key = all_node_maps[i][n]
-                if key in iso:
-                    sub.nodes[n]['feat'] = orig.nodes[iso[key]]['feat']
-            rule_ids[i] = (r, sub, all_applied[i-1] if i else None)
-        data.append(rule_ids)
-    pickle.dump((data, rule2token), open(os.path.join(cache_dir, 'data_and_rule2token.pkl'), 'wb+'))
+    if exist:
+        data, rule2token = pickle.load(open(os.path.join(cache_dir, 'data_and_rule2token.pkl'), 'rb'))
+    else:
+        data = []
+        rule2token = {}
+        for pre in tqdm(range(num_graphs), "processing data"):
+            prefix = f"{pre}:"
+            seq = list(filter(lambda k: k[:len(prefix)]==f'{prefix}', anno))
+            seq = seq[::-1] # derivation          
+            rule_ids = [anno[s].attrs['rule'] for s in seq]
+            # orig_nodes = [list(anno[s].attrs['nodes']) for s in seq]
+            # orig_feats = [[orig.nodes[n]['feat'] if n in orig else 0.0 for n in nodes] for nodes in orig_nodes]        
+            for i, r in enumerate(rule_ids):
+                # from networkx.algorithms.isomorphism import DiGraphMatcher
+                rule2token[r] = grammar.rules[r].subgraph
+                # matcher = DiGraphMatcher(copy_graph(g, orig_nodes[i]), rule2token[r], node_match=node_match)
+                # breakpoint()
+                # assert any(all([iso[orig_nodes[i][j]] == list(rule2token[r])[j]]) for iso in matcher.isomorphisms_iter())        
+            g, all_applied, all_node_maps = grammar.derive(rule_ids, return_applied=True)
+            g_orig = copy_graph(orig, orig.comps[pre])
+            matcher = DiGraphMatcher(g, g_orig, node_match=node_match)
+            iso = next(matcher.isomorphisms_iter())
+            # use iso to embed feats and instructions        
+            for i, r in enumerate(rule_ids):
+                sub = deepcopy(nx.DiGraph(grammar.rules[r].subgraph))
+                # node feats
+                for n in sub:
+                    key = all_node_maps[i][n]
+                    if key in iso:
+                        sub.nodes[n]['feat'] = orig.nodes[iso[key]]['feat']
+                rule_ids[i] = (r, sub, all_applied[i-1] if i else None)
+            data.append(rule_ids)
+        pickle.dump((data, rule2token), open(os.path.join(cache_dir, 'data_and_rule2token.pkl'), 'wb+'))
     relabel = dict(zip(list(sorted(rule2token)), range(len(rule2token))))    
     data = [[(relabel[s[0]],)+s[1:] for s in seq] for seq in data]
     globals()['MAX_SEQ_LEN'] = max([len(seq) for seq in data])
@@ -641,7 +782,17 @@ def load_data(anno, cache_dir, num_graphs):
     globals()['vocabulary_terminate'] = terminate
     globals()['VOCAB_SIZE'] = len(rule2token)    
     token2rule = dict(zip(relabel.values(), relabel.keys()))
-    return data, token2rule
+
+    # split here
+    indices = list(range(len(data)))
+    random.Random(0).shuffle(indices)
+    train_indices, test_indices = indices[:int(len(data)*0.9)], indices[int(len(data)*0.9):]
+    train_data = [data[i] for i in train_indices]
+    test_data = [data[i] for i in test_indices]
+    y = load_y(orig, num_graphs)    
+    train_y = y[train_indices, None]
+    test_y = y[test_indices, None]
+    return train_data, test_data, train_y, test_y, token2rule
 
     
 
@@ -653,6 +804,8 @@ if __name__ == "__main__":
     version = get_next_version(cache_dir)-1    
     grammar, anno, g = pickle.load(open(os.path.join(cache_dir, f'{version}.pkl'),'rb'))    
     orig = load_ckt(args, load_all=True)
-    data, token2rule = load_data(anno, cache_dir, 100)    
-    model = train(data)
-    interactive_sample_sequences(model, grammar, token2rule, max_seq_len=MAX_SEQ_LEN)
+    train_data, test_data, train_y, test_y, token2rule = load_data(anno, cache_dir, 100)        
+    model = train(train_data, test_data)
+    # breakpoint()
+    # bo(args, model, train_y, test_y)
+    interactive_sample_sequences(model, grammar, token2rule, max_seq_len=MAX_SEQ_LEN, num_samples=NUM_SAMPLES)
