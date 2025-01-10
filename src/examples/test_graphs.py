@@ -452,8 +452,8 @@ def load_mols(args, num_samples=-1):
     # smiles_list = ['COP(=O)(OC)OC=C(Cl)Cl']
     # return smiles_list
     # single chain extender
-    smiles_list = ['OCCNC(=O)NCCCCCCNC(=O)NCCO']
-    return smiles_list
+    # smiles_list = ['OCCNC(=O)NCCCCCCNC(=O)NCCO']
+    # return smiles_list
     # top-10 ptc
     # debug_smiles_list = ['COc1c(N)cccc1', 'CC(C)CCCC(C)C1CCC2C3CC=C4CC(OC(=O)Cc5ccc(N(CCCl)CCCl)cc5)CCC4(C)C3CCC12C', 'Nc1nc(=O)n(C2OC(CO)C(O)C2O)cn1', 'CC(=O)C(N=Nc1ccc(-c2ccc(N=NC(C(C)=O)C(=O)Nc3ccccc3)c(Cl)c2)cc1Cl)C(=O)Nc1ccccc1', 'ClCC(Br)CBr', 'ClC1=C(Cl)C2(Cl)C3C4CC(C5OC45)C3C1(Cl)C2(Cl)Cl', 'ClC1=C(Cl)C2(Cl)C3C(Cl)C(Cl)CC3C1(Cl)C2(Cl)Cl', 'CNC(=O)CSP(=S)(OC)OC', 'ClC=C(Cl)Cl', 'COP(=O)(OC)OC=C(Cl)Cl']
     # top-10 hopv

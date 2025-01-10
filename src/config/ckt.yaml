@@ -9,7 +9,7 @@ IMG_DIR: "data/api_ckt_ednce/"
 CACHE_DIR: "cache/api_ckt_ednce/"
 
 NUM_THREADS: 1
-NUM_PROCS: 1
+NUM_PROCS: 100
 UPDATE_GRAPH_MP: True
 COMPRESS: True
 COMPRESS_RULE_MP: True
@@ -21,17 +21,18 @@ MAX_TRIES: 10
 # EDNCE parameters
 CACHE_SUBG: True
 LINEAR: True # at most 1 nt per comp, and subgraph must contain nt if present
-RESTRICT_POSS_DIRS: True # direction of neighbors limited (tradeoff expressivity vs efficiency)
+RESTRICT_POSS_DIRS: False # direction of neighbors limited (tradeoff expressivity vs efficiency)
 MIN_EMBEDDING: False # take the minimum or maximum embedding for each rule
 LIMIT_FOR_GREEDY: 1000
 NUM_RANDOM_SEARCH_TRIES: 10
 LIMIT_FOR_DYNAMIC: 5000
+SUBG_ISO_BATCH_SIZE: 10
 
 # motif args
 MAX_NUM_COMPS_FOR_MOTIF_MINING: 5000
 MOTIF_MIN_SIZE: 2
 MOTIF_MAX_SIZE: 5
-NUM_MOTIFS: 10
+NUM_MOTIFS: 100
 
 TOP_DIFF: 30
 SEED: 5

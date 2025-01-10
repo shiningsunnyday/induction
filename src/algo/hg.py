@@ -583,7 +583,7 @@ def grammar_inference(G, trees):
 def learn_grammar(smiles_or_list, args):
     logger = create_logger(
         "global_logger",
-        f"{wd}/data/{METHOD}_{DATASET}_{GRAMMAR}-{args.dataset}-{args.seed}.log",
+        f"{wd}/data/{METHOD}_{DATASET}_{GRAMMAR}-{args.mol_dataset}-{args.seed}.log",
     )
     if args.grammar_ckpt and os.path.exists(args.grammar_ckpt):
         G, trees = pickle.load(open(args.grammar_ckpt, 'rb'))
@@ -596,7 +596,7 @@ def learn_grammar(smiles_or_list, args):
     #     globals()[k] = v
     idx = 1
     while True:
-        path = f"data/{args.dataset}/api_mol_hg_{idx}.txt" 
+        path = f"data/{args.mol_dataset}/api_mol_hg_{idx}.txt" 
         if os.path.exists(path):
             globals()[f'prompt_{idx}_path'] = path
             idx += 1
@@ -669,12 +669,12 @@ def learn_grammar(smiles_or_list, args):
         pickle.dump(
             G,
             open(
-                os.path.join(IMG_DIR, f"grammar-{args.dataset}-{args.seed}.pkl"), "wb+"
+                os.path.join(IMG_DIR, f"grammar-{args.mol_dataset}-{args.seed}.pkl"), "wb+"
             ),
         )
         pickle.dump(
             trees,
-            open(os.path.join(IMG_DIR, f"trees-{args.dataset}-{args.seed}.pkl"), "wb+"),
+            open(os.path.join(IMG_DIR, f"trees-{args.mol_dataset}-{args.seed}.pkl"), "wb+"),
         )
         return G, trees
     else:
