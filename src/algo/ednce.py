@@ -304,7 +304,7 @@ def enumerate_rules(graphs, grammar):
 def resolve_ambiguous(model, grammar, save_path):
     logger = logging.getLogger('global_logger')
     graphs = []
-    for j in range(len(model)):
+    for j in tqdm(range(len(model)), desc="deriving"):
         deriv = [model[j].graph[n].attrs['rule'] for n in model[j].seq[::-1]]
         t2r = {i:i for i in range(len(grammar.rules))}
         deriv_g = grammar.derive(deriv, t2r)

@@ -174,6 +174,12 @@ def copy_graph(g, nodes, copy_attrs=True):
                 g_copy.add_edge(e[0], e[1], **e[2])
     return g_copy
 
+def copy_graph_mp(g, list_of_nodes, copy_attrs=True):
+    res = []
+    for nodes in list_of_nodes:
+        res.append(copy_graph(g, nodes, copy_attrs=copy_attrs))
+    return res
+
 
 def boundary(g):
     # checks for any non-term connected nodes in g
@@ -436,9 +442,16 @@ def fast_subgraph_isomorphism(graph, subgraph):
         # with mp.Manager() as manager:
             # graph_proxy = manager.dict(graph=graph)
         batch_size = 100
+        num_batches = (len(conns)+batch_size-1)//batch_size
         args = []
-        for conn in tqdm(conns, desc="preparing args"):
-            args.append((copy_graph(graph, conn), subgraph))
+        conn_batches = [conns[k*batch_size:(k+1)*batch_size] for k in range(num_batches)]
+        with mp.Pool(NUM_PROCS) as p:
+            copied = p.starmap(copy_graph_mp, tqdm([(graph, conn_batch) for conn_batch in conn_batches], "preparing args"))
+        copied = sum(copied, [])
+        # for conn in tqdm(conns, desc="preparing args"):
+        #     args.append((copy_graph(graph, conn), subgraph))
+        batch_size = SUBG_ISO_BATCH_SIZE
+        args = [(copy, subgraph) for copy in copied]
         num_batches = (len(args)+batch_size-1)//batch_size
         print(f"{num_batches} batches")                
         args_batch_list = [(args[k*batch_size:(k+1)*batch_size],) for k in range(num_batches)]                 

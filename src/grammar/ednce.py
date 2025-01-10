@@ -725,7 +725,20 @@ def build_ism_graph(graph, ism_graph, isms):
         Due to memory, output a should_add_edge function
         """
         return (ism_graph, (add_edge, graph, ism_graph, isms))
-    all_args = list(product(list(ism_graph), list(ism_graph)))
+    if LINEAR:
+        pre_dic = {}
+        for n in ism_graph:
+            pre = get_prefix(n)
+            if pre not in pre_dic:
+                pre_dic[pre] = []
+            pre_dic[pre].append(n)
+        all_args = []
+        for p1, p2 in product(pre_dic, pre_dic):
+            if p1 == p2:
+                continue
+            all_args += list(product(pre_dic[p1], pre_dic[p2]))
+    else:
+        all_args = list(product(list(ism_graph), list(ism_graph)))
     res = tqdm(
         [
             add_edge(i, j, graph, ism_graph, isms)
