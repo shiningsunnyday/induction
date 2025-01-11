@@ -11,6 +11,7 @@ from networkx.algorithms.isomorphism import DiGraphMatcher
 import multiprocessing as mp
 import time
 import random
+import json
 
 def get_parser():
     parser = ArgumentParser()
@@ -403,7 +404,7 @@ def find_embedding(subgraphs, graph, find_iso, edges=False):
 
 def subgraphs_isomorphism_mp(batch):
     res = []
-    for conn, subgraph in batch:
+    for conn, subgraph in batch:        
         gm = DiGraphMatcher(
             conn,
             subgraph,
@@ -425,7 +426,36 @@ def subgraphs_isomorphism(graph, subgraph):
     return isms
 
 
+def fast_subgraph_isomorphism_mp(graph, conns, subgraph):
+    # with mp.Manager() as manager:
+        # graph_proxy = manager.dict(graph=graph)
+    batch_size = SUBG_ISO_BATCH_SIZE
+    num_batches = (len(conns)+batch_size-1)//batch_size
+    args = []
+    conn_batches = [conns[k*batch_size:(k+1)*batch_size] for k in range(num_batches)]
+    with mp.Pool(NUM_PROCS) as p:
+        copied = p.starmap(copy_graph_mp, tqdm([(graph, conn_batch) for conn_batch in conn_batches], "preparing args"))
+    copied = sum(copied, [])
+    # for conn in tqdm(conns, desc="preparing args"):
+    #     args.append((copy_graph(graph, conn), subgraph))
+    args = [(copy, subgraph) for copy in copied]
+    num_batches = (len(args)+batch_size-1)//batch_size
+    print(f"{num_batches} batches")                
+    args_batch_list = [(args[k*batch_size:(k+1)*batch_size],) for k in range(num_batches)]        
+    with mp.Pool(NUM_PROCS) as p:
+        ans = p.starmap(
+            subgraphs_isomorphism_mp,
+            tqdm(
+                args_batch_list,
+                desc="subgraph isomorphism mp",
+            ),
+        )
+        ans = sum(ans, [])    
+    return ans
+
+
 def fast_subgraph_isomorphism(graph, subgraph):
+    logger = logging.getLogger('global_logger')
     assert nx.is_connected(nx.Graph(subgraph))
     conns = list(nx.connected_components(nx.Graph(graph)))
     # if conn is not None:
@@ -438,31 +468,23 @@ def fast_subgraph_isomorphism(graph, subgraph):
         for conn in tqdm(conns, desc="preparing args"):
             args.append((copy_graph(graph, conn), subgraph))        
         ans = [subgraphs_isomorphism(*arg) for arg in tqdm(args, desc="subgraph isomorphism")]
+        ans = sum(ans, [])
     else:
-        # with mp.Manager() as manager:
-            # graph_proxy = manager.dict(graph=graph)
-        batch_size = 100
-        num_batches = (len(conns)+batch_size-1)//batch_size
-        args = []
-        conn_batches = [conns[k*batch_size:(k+1)*batch_size] for k in range(num_batches)]
-        with mp.Pool(NUM_PROCS) as p:
-            copied = p.starmap(copy_graph_mp, tqdm([(graph, conn_batch) for conn_batch in conn_batches], "preparing args"))
-        copied = sum(copied, [])
-        # for conn in tqdm(conns, desc="preparing args"):
-        #     args.append((copy_graph(graph, conn), subgraph))
-        batch_size = SUBG_ISO_BATCH_SIZE
-        args = [(copy, subgraph) for copy in copied]
-        num_batches = (len(args)+batch_size-1)//batch_size
-        print(f"{num_batches} batches")                
-        args_batch_list = [(args[k*batch_size:(k+1)*batch_size],) for k in range(num_batches)]                 
-        with mp.Pool(NUM_PROCS) as p:
-            ans = p.starmap(
-                subgraphs_isomorphism_mp,
-                tqdm(
-                    args_batch_list,
-                    desc="subgraph isomorphism mp",
-                ),
-            )
-            ans = sum(ans, [])
-    ans = sum(ans, [])
+        # t0 = time.time()
+        # ans = fast_subgraph_isomorphism_mp(graph, conns, subgraph)
+        # ans = sum(ans, [])
+        # dt = time.time()-t0
+        # logger.info(f"fast_subgraph_isomorphism_mp took {dt}")
+        t0 = time.time()
+        gm = DiGraphMatcher(
+            graph,
+            subgraph,
+            node_match=lambda d1, d2: d1.get("label", "#") == d2.get("label", "#"),
+            edge_match=lambda d1, d2: d1.get("label", "#") == d2.get("label", "#"),
+        )
+        dt = time.time()-t0
+        logger.info(f"digraphmatcher took {dt}")
+        ans = list(gm.subgraph_isomorphisms_iter())
+        # if sorted(ans, key=lambda dic: json.dumps(dic, sort_keys=True)) != sorted(isms, key=lambda dic: json.dumps(dic, sort_keys=True)):
+        #     breakpoint()
     return ans

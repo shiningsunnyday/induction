@@ -653,7 +653,7 @@ def add_edge_mp(pair_list, graph_proxy):
         outset_j = ism_graph.nodes[j]["out"]
         overlap = (inset_i | inset_j) & (outset_i | outset_j)
         res.append(not overlap)
-    print(f"{len(pair_list)} done")
+    # print(f"{len(pair_list)} done")
     return res
 
 
@@ -718,48 +718,61 @@ def retrieve_cache(graph, rule):
     return res
 
 
+def build_ism_graph_mp(graph, ism_graph, isms):
+    all_args = list(product(list(ism_graph), list(ism_graph)))
+    with mp.Manager() as manager:
+        graph_proxy = manager.dict(graph=graph, ism_graph=ism_graph, isms=isms)
+        batch_size = (len(ism_graph)**2+NUM_PROCS-1)//(NUM_PROCS)        
+        num_batches = (len(all_args)+batch_size-1)//batch_size
+        print(f"{num_batches} batches")
+        args_batch_list = [(all_args[k*batch_size:(k+1)*batch_size], graph_proxy) for k in range(num_batches)]        
+        with mp.Pool(NUM_PROCS) as p:
+            res = p.starmap(add_edge_mp, tqdm(args_batch_list, desc="looping over pairs"))
+    res = sum(res, [])    
+    return all_args, res
+
+
 def build_ism_graph(graph, ism_graph, isms):
+    logger = logging.getLogger('global_logger')
     if len(ism_graph) > LIMIT_FOR_DYNAMIC:
         """
         Instead of building the entire ism_graph
         Due to memory, output a should_add_edge function
         """
         return (ism_graph, (add_edge, graph, ism_graph, isms))
-    if LINEAR:
-        pre_dic = {}
-        for n in ism_graph:
-            pre = get_prefix(n)
-            if pre not in pre_dic:
-                pre_dic[pre] = []
-            pre_dic[pre].append(n)
-        all_args = []
-        for p1, p2 in product(pre_dic, pre_dic):
-            if p1 == p2:
-                continue
-            all_args += list(product(pre_dic[p1], pre_dic[p2]))
-    else:
-        all_args = list(product(list(ism_graph), list(ism_graph)))
-    res = tqdm(
-        [
-            add_edge(i, j, graph, ism_graph, isms)
-            for (i, j) in all_args
-        ],
-        desc="looping over pairs",
-    )        
+    # if LINEAR:
+    #     pre_dic = {}
+    #     for n in ism_graph:
+    #         pre = get_prefix(n)
+    #         if pre not in pre_dic:
+    #             pre_dic[pre] = []
+    #         pre_dic[pre].append(n)
+    #     all_args = []
+    #     for p1, p2 in product(pre_dic, pre_dic):
+    #         if p1 == p2:
+    #             continue
+    #         all_args += list(product(pre_dic[p1], pre_dic[p2]))
     # else:
-    #     with mp.Manager() as manager:
-    #         graph_proxy = manager.dict(graph=graph, ism_graph=ism_graph, isms=isms)
-    #         batch_size = 10000
-    #         all_args = list(product(list(ism_graph), list(ism_graph)))
-    #         num_batches = (len(all_args)+batch_size-1)//batch_size
-    #         print(f"{num_batches} batches")
-    #         args_batch_list = [(all_args[k*batch_size:(k+1)*batch_size], graph_proxy) for k in range(num_batches)]        
-    #         with mp.Pool(NUM_PROCS) as p:
-    #             res = p.starmap(add_edge_mp, tqdm(args_batch_list, desc="looping over pairs"))
-    #     res = sum(res, [])
-    for (i, j), should_add in tqdm(zip(all_args, res), "adding edges"):
-        if should_add:
-            ism_graph.add_edge(i, j)
+    if len(ism_graph) < 1000:
+        # t0 = time.time()
+        all_args = list(product(list(ism_graph), list(ism_graph)))
+        ans = tqdm(
+            [
+                add_edge(i, j, graph, ism_graph, isms)
+                for (i, j) in all_args
+            ],
+            desc="looping over pairs",
+        )        
+        # dt = time.time()-t0
+        # logger.info(f"build_ism_graph: looping over pairs took {dt}")
+    else:    
+        # t0 = time.time()
+        all_args, res = build_ism_graph_mp(graph, ism_graph, isms)
+        # dt = time.time()-t0    
+        # logger.info(f"build_ism_graph_mp: looping over pairs took {dt}")    
+        for (i, j), should_add in tqdm(zip(all_args, res), "adding edges"):
+            if should_add:
+                ism_graph.add_edge(i, j)         
     return ism_graph
 
 
