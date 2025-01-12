@@ -17,6 +17,7 @@ utils_dag = importlib.import_module('dagnn.src.utils_dag')
 DAGNN = dagnn.DAGNN
 # if error, go to induction/dagnn/ogbg-code/model/dagnn.py, change a line to "from dagnn.src.constants import *""
 import torch.nn.functional as F
+torch.multiprocessing.set_sharing_strategy('file_system')
 import pickle
 import hashlib
 from tqdm import tqdm
@@ -35,14 +36,14 @@ from sparse_gp import SparseGP
 
 # Grammar
 VOCAB_SIZE = 204  # Number of rules
-MAX_RULE_SIZE = 5 # Max size of rule's rhs graph
+# MAX_RULE_SIZE = 5 # Max size of rule's rhs graph
 SEQ_LEN = 13  # Max length of sequences
 NUM_SAMPLES = 3
 # NN
 EMBED_DIM = 12
 LATENT_DIM = 32
 # Training
-BATCH_SIZE = 256
+BATCH_SIZE = 64
 EPOCHS = 30
 CUDA = 'cuda:0'
 
@@ -114,7 +115,6 @@ def add_order_info_01(graph):
     ei2 = torch.LongTensor([list(graph.edge_index[1]), list(graph.edge_index[0])])
     l1 = top_sort(ei2, graph.num_nodes)
     ns = torch.LongTensor([i for i in range(graph.num_nodes)])
-
     graph.__setattr__("_bi_layer_idx0", l0)
     graph.__setattr__("_bi_layer_index0", ns)
     graph.__setattr__("_bi_layer_idx1", l1)
@@ -186,13 +186,13 @@ class TokenDataset(Dataset):
 
     def __getitem__(self, idx):
         seq = []
-        graph_seq = []
+        graph_seq = {}
         for i in range(len(self.data[idx])):
             r, g, ins = self.data[idx][i]
             g = add_ins(g, ins)
             seq.append(r)
             graph, _ = convert_graph_to_data(g)
-            graph_seq.append(graph)
+            graph_seq[i] = graph
         return torch.tensor(seq), graph_seq, idx
 
 
@@ -247,6 +247,7 @@ class TransformerVAE(nn.Module):
         else:
             g_list = batch_g_list
         embedded_tokens = []
+        g_list = [g_list[i] for i in range(len(g_list))]
         for token_id, graph_data in zip(token_ids, g_list):
             if graph_data is None:
                 embedded_token = torch.zeros((LATENT_DIM,), device=CUDA)
@@ -449,7 +450,8 @@ def collate_batch(batch):
         padded_batch[i, :len(seq)] = seq
         seq_len_list[i] = len(seq)  # Mask non-padded positions
         attention_mask[i, :len(seq)] = 1
-        batch_g_list.append(g_list+[None for _ in range(max_len-len(g_list))])    
+        g_list.update({i: None for i in range(len(g_list), max_len)})
+        batch_g_list.append(g_list)  
         idxes.append(idx)
     return padded_batch, attention_mask, seq_len_list, batch_g_list, idxes
 
@@ -482,9 +484,9 @@ def train(train_data, test_data):
     # Dummy dataset: Replace with actual sequence data
     # dataset = [torch.tensor(seq) for seq in data]
     train_dataset = TokenDataset(train_data)
-    train_dataloader = DataLoader(train_dataset, batch_size=BATCH_SIZE, shuffle=True, collate_fn=collate_batch)
+    train_dataloader = DataLoader(train_dataset, batch_size=BATCH_SIZE, shuffle=True, collate_fn=collate_batch, num_workers=8, timeout=1000, prefetch_factor=1)
     test_dataset = TokenDataset(test_data)
-    test_dataloader = DataLoader(test_dataset, batch_size=BATCH_SIZE, shuffle=False, collate_fn=collate_batch)    
+    test_dataloader = DataLoader(test_dataset, batch_size=BATCH_SIZE, shuffle=False, collate_fn=collate_batch, num_workers=8, timeout=1000, prefetch_factor=1)    
 
     # Training loop
     model.train()
@@ -501,7 +503,7 @@ def train(train_data, test_data):
         if loss < best_loss:
             best_loss = loss
             start_epoch = epoch + 1
-            best_ckpt_path = ckpt
+            best_ckpt_path = ckpt    
     if best_ckpt_path is not None:
         print(f"loaded {best_ckpt_path} loss {best_loss} start_epoch {start_epoch}")
         model.load_state_dict(torch.load(best_ckpt_path))
@@ -518,9 +520,10 @@ def train(train_data, test_data):
             recon_logits, mask, mu, logvar = model(x, attention_mask, seq_len_list, batch_g_list)            
             loss = vae_loss(recon_logits, mask, x, mu, logvar)
             loss.backward()            
-            train_loss += loss.item()
+            train_loss += loss.item()*len(batch_idxes)
             optimizer.step()
             train_latent[batch_idxes] = mu.detach().cpu().numpy()
+        train_loss /= len(train_dataset)
         model.eval()
         val_loss = 0.
         for batch in test_dataloader:
@@ -530,9 +533,10 @@ def train(train_data, test_data):
             recon_logits, mask, mu, logvar = model(x, attention_mask, seq_len_list, batch_g_list)            
             loss = vae_loss(recon_logits, mask, x, mu, logvar)            
             loss.backward()
-            val_loss += loss.item()
+            val_loss += loss.item()*len(batch_idxes)
             test_latent[batch_idxes] = mu.detach().cpu().numpy()
             optimizer.step()            
+        val_loss /= len(test_dataset)
         if val_loss < best_loss:
             best_loss = val_loss
             ckpt_path = f'ckpts/api_ckt_ednce/epoch={epoch}_loss={best_loss}.pth'
@@ -804,7 +808,8 @@ if __name__ == "__main__":
     version = get_next_version(cache_dir)-1    
     grammar, anno, g = pickle.load(open(os.path.join(cache_dir, f'{version}.pkl'),'rb'))    
     orig = load_ckt(args, load_all=True)
-    train_data, test_data, train_y, test_y, token2rule = load_data(anno, cache_dir, 100)        
+    train_data, test_data, train_y, test_y, token2rule = load_data(anno, cache_dir, 5000)        
+    breakpoint()
     model = train(train_data, test_data)
     # breakpoint()
     # bo(args, model, train_y, test_y)
