@@ -101,6 +101,8 @@ class EDNCEGrammar(NLCGrammar):
     def derive(self, seq, token2rule=None, return_applied=False, visualize=False):
         if visualize:                        
             fig, axes = plt.subplots(len(seq), figsize=(5, 5*(len(seq))))
+            if len(seq) == 1:
+                axes = [axes]
             for idx, j in enumerate(map(int, seq)):
                 r = self.rules[j]
                 draw_graph(r.subgraph, ax=axes[idx], scale=5, label_feats=True)
@@ -118,7 +120,7 @@ class EDNCEGrammar(NLCGrammar):
             all_node_maps.append({n:n for n in cur})
         assert not check_input_xor_output(cur)
         for idx in seq[1:]:
-            nt_nodes = self.search_nts(cur, NONTERMS)            
+            nt_nodes = self.search_nts(cur, NONTERMS)
             if len(nt_nodes) == 0:
                 break
             assert len(nt_nodes) == 1
@@ -127,7 +129,9 @@ class EDNCEGrammar(NLCGrammar):
             if return_applied:
                 cur, applied, node_map = rule(cur, node, return_applied=return_applied)
                 all_applied.append(applied)
-                all_node_maps.append(node_map)       
+                all_node_maps.append(node_map)    
+            else:
+                cur = rule(cur, node)                    
         if return_applied:
             return cur, all_applied, all_node_maps
         else:
@@ -461,9 +465,10 @@ class EDNCEModel(NLCModel):
             if not exist:
                 new_res.append(r_new)        
         os.makedirs(gen_dir, exist_ok=True)        
-        for i, g in enumerate(new_res):
-            save_path = os.path.join(gen_dir, f"{prefix}_{i}.png")
-            draw_graph(g, save_path, label_feats=True)
+        if VISUALIZE:
+            for i, g in enumerate(new_res):
+                save_path = os.path.join(gen_dir, f"{prefix}_{i}.png")
+                draw_graph(g, save_path, label_feats=True)
         return new_res
 
 

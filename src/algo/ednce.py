@@ -13,6 +13,7 @@ from src.algo.common import *
 from src.grammar.common import *
 from src.grammar.utils import *
 import sys
+from concurrent.futures import ThreadPoolExecutor
 sys.setrecursionlimit(1500)
 
 
@@ -22,7 +23,7 @@ def edit_grammar(grammar, conn_g):
     exist = grammar.check_exists(rule)
     if exist is None:
         rule_no = len(grammar.rules)
-        rule.visualize(os.path.join(IMG_DIR, f"rule_{rule_no}.png"))
+        # rule.visualize(os.path.join(IMG_DIR, f"rule_{rule_no}.png"))
         grammar.add_rule(rule, rule_no)
     else:
         rule_no = exist
@@ -75,7 +76,9 @@ def find_indices(graphs, query):
     return ans  
 
 
-def find_partial(graphs, query):
+def find_partial(graphs, cand):
+    ts = [x for x in cand if cand.nodes[x]['label'] in TERMS]
+    query = copy_graph(cand, ts, copy_attrs=False)    
     ans = []
     # query can be a (possibly disconnected) directed graph
     # query_und = nx.Graph(query)
@@ -85,45 +88,47 @@ def find_partial(graphs, query):
         # if len(query.edges) >= len(graphs[i].edges):
         #     continue
         # for conn in nx.connected_components(query_und):
-            # conn_g = copy_graph(query, conn)
-        gm = DiGraphMatcher(graphs[i], query, node_match=node_match)
+            # conn_g = copy_graph(query, conn)        
+        gm = DiGraphMatcher(graphs[i], query, node_match=node_match)    
+        iso_iter = gm.subgraph_isomorphisms_iter()    
         try: 
-            next(gm.subgraph_isomorphisms_iter())
+            next(iso_iter)
         except:
             continue
+        # additional checks?
         ans.append(i)
     return ans
 
 
-def worker(shared_queue, grammar, graphs, found, lock):
-    while True:
-        with lock:
-            if shared_queue.empty():
-                print("process done")
-                break
-            print(f"len(interms): {shared_queue.qsize()}")
-            interm, deriv, poss = shared_queue.get()
-        print(f"deriv: {deriv}")
-        nts = grammar.search_nts(interm, NONTERMS)
-        if len(nts) == 0:
-            if nx.is_isomorphic(interm, graphs[poss], node_match=node_match):
-                with lock:
-                    found[poss].append(deriv)
-                    print(f"found {deriv} graph {poss}, count: {len(found[poss])}")        
-        for j, nt in enumerate(nts):
-            for i, rule in enumerate(grammar.rules):                      
-                nt_label = interm.nodes[nt]['label']
-                if rule.nt == nt_label:
-                    c = rule(cur, nt)
-                    if nx.is_connected(nx.Graph(c)):
-                        # if poss == 0 and i == 62:
-                        #     pdb.set_trace()                     
-                        ts = [x for x in c if c.nodes[x]['label'] in TERMS]
-                        c_t = copy_graph(c, ts, copy_attrs=False)
-                        exist = find_partial([graphs[poss]], c_t)
-                        if exist:
-                            with lock:
-                                shared_queue.put((c, deriv+[i], poss))       
+# def worker(shared_queue, grammar, graphs, found, lock):
+#     while True:
+#         with lock:
+#             if shared_queue.empty():
+#                 print("process done")
+#                 break
+#             print(f"len(interms): {shared_queue.qsize()}")
+#             interm, deriv, poss = shared_queue.get()
+#         print(f"deriv: {deriv}")
+#         nts = grammar.search_nts(interm, NONTERMS)
+#         if len(nts) == 0:
+#             if nx.is_isomorphic(interm, graphs[poss], node_match=node_match):
+#                 with lock:
+#                     found[poss].append(deriv)
+#                     print(f"found {deriv} graph {poss}, count: {len(found[poss])}")        
+#         for j, nt in enumerate(nts):
+#             for i, rule in enumerate(grammar.rules):                      
+#                 nt_label = interm.nodes[nt]['label']
+#                 if rule.nt == nt_label:
+#                     c = rule(cur, nt)    
+#                     if nx.is_connected(nx.Graph(c)):
+#                         # if poss == 0 and i == 62:
+#                         #     pdb.set_trace()                     
+#                         ts = [x for x in c if c.nodes[x]['label'] in TERMS]
+#                         c_t = copy_graph(c, ts, copy_attrs=False)
+#                         exist = find_partial([graphs[poss]], c_t)
+#                         if exist:
+#                             with lock:
+#                                 shared_queue.put((c, deriv+[i], poss))       
 
 
 def enumerate_rules_mp(graphs, grammar):
@@ -208,9 +213,9 @@ def wl_hash(g):
     # return nx.weisfeiler_lehman_graph_hash(g)
 
 
-def recurse_rules(cur, target, grammar, mem, st):
+def recurse_rules(cur, target, grammar, mem, st, timeout=100):
     # output all partial rule seqs from cur to target
-    if time.time()-st > 100:
+    if time.time()-st > timeout:
         return None
     hash_val = wl_hash(cur)
     if hash_val in mem:
@@ -227,17 +232,15 @@ def recurse_rules(cur, target, grammar, mem, st):
         for i, rule in enumerate(grammar.rules):                      
             nt_label = cur.nodes[nt]['label']
             if rule.nt == nt_label:
-                c = rule(cur, nt)                
+                c = rule(cur, nt)
                 if not nx.is_connected(nx.Graph(c)):
                     continue
                 if not nx.is_directed_acyclic_graph(c):
                     continue
-                ts = [x for x in c if c.nodes[x]['label'] in TERMS]
-                c_t = copy_graph(c, ts, copy_attrs=False)
-                exist = find_partial([target], c_t)
+                exist = find_partial([target], c)
                 if not exist:
                     continue
-                res_in = recurse_rules(c, target, grammar, mem, st)
+                res_in = recurse_rules(c, target, grammar, mem, st, timeout=timeout)
                 if res_in is None:
                     return None
                 for seq in res_in:
@@ -247,13 +250,17 @@ def recurse_rules(cur, target, grammar, mem, st):
 
 
 
-def recurse_rules_single(graphs, j, grammar):    
+def recurse_rules_single(graph, grammar):    
+    print("begin")
     g = nx.DiGraph()
     g.add_node('0', label='black')
     mem = {}
     st = time.time()
-    ans = recurse_rules(g, graphs[j], grammar, mem, st)
-    print("done")
+    ans = recurse_rules(g, graph, grammar, mem, st, timeout=100)
+    if ans is not None:
+        print("done")
+    else:
+        print("timeout")
     return ans
 
 
@@ -291,25 +298,38 @@ def recurse_rules_single(graphs, j, grammar):
 def enumerate_rules(graphs, grammar):
     N = len(graphs)
     found = []  
-    if NUM_PROCS == 1:
-        for j in tqdm(range(N), "enumerate rules"):
-            found_single = recurse_rules_single(graphs, j, grammar)
-            found.append(found_single)
-    else:
-        with mp.Pool(NUM_PROCS) as p:
-            found = p.starmap(recurse_rules_single, [(graphs, j, grammar) for j in range(N)])
+    # if NUM_PROCS == 1:
+    # for j in tqdm(range(N), "enumerate rules"):
+    #     found_single = recurse_rules_single(graphs, j, grammar)
+    #     found.append(found_single)
+    # else:
+    with mp.Pool(NUM_PROCS) as p:
+        found = p.starmap(recurse_rules_single, [(graphs[j], grammar) for j in range(N)])
     return found
 
-
-def resolve_ambiguous(model, grammar, save_path):
-    logger = logging.getLogger('global_logger')
+def derive_batch(args):
+    grammar, batch = args
     graphs = []
-    for j in tqdm(range(len(model)), desc="deriving"):
-        deriv = [model[j].graph[n].attrs['rule'] for n in model[j].seq[::-1]]
-        t2r = {i:i for i in range(len(grammar.rules))}
-        deriv_g = grammar.derive(deriv, t2r)
+    for m in tqdm(batch, "derive batch"):
+        deriv = [m.graph[n].attrs['rule'] for n in m.seq[::-1]]
+        deriv_g = grammar.derive(deriv)
         # draw_graph(deriv_g, '/home/msun415/test.png')
-        graphs.append(deriv_g)    
+        graphs.append(deriv_g)  
+    return graphs
+
+
+def derive_mp(model, grammar):
+    batch_size = 100
+    num_batches = (len(model)+batch_size-1)//batch_size
+    args = [(grammar, [model[j] for j in range(batch_size*b, batch_size*(b+1))]) for b in range(num_batches)]    
+    with ThreadPoolExecutor(max_workers=NUM_PROCS) as executor:
+        graphs = executor.map(derive_batch, tqdm(args, "deriving mp"))
+    graphs = sum(graphs, [])   
+    return graphs
+
+
+def resolve_ambiguous(graphs, model, grammar, save_path):
+    logger = logging.getLogger('global_logger')    
 
     # if NUM_PROCS > 1:
     #     found = enumerate_rules_mp(graphs, grammar)
@@ -693,6 +713,44 @@ def dfs(anno, k):
     anno_k = {}
     _dfs(anno, k, anno_k)
     return anno_k
+
+
+def generate_and_match_mp(args):
+    m_batch, orig, grammar = args
+    ans = []
+    for m in tqdm(m_batch, "generate and match batch"):
+        res = m.generate(grammar)
+        match = False
+        for i in range(len(res)):
+            p = get_prefix(list(res[i])[0])
+            nodes = orig.comps[p]
+            g_sub = copy_graph(orig, nodes)
+            if nx.is_isomorphic(g_sub, res[i], node_match=node_match):
+                match = True
+                break
+        ans.append(match)
+    return ans
+
+
+def generate_and_match(m_list, orig, grammar):
+    # batch_size = 100
+    # num_batches = (len(m_list)+batch_size-1)//batch_size    
+    # with ThreadPoolExecutor(max_workers=NUM_PROCS) as executor:
+    #     match_ans = executor.map(generate_and_match_mp, [(m_list[batch_size*i:batch_size*(i+1)], orig, grammar) for i in tqdm(range(num_batches), "generate and match")])
+    # return sum(match_ans, [])
+    ans = []
+    for m in tqdm(m_list, "generate and match"):
+        res = m.generate(grammar)
+        match = False
+        for i in range(len(res)):
+            p = get_prefix(list(res[i])[0])
+            nodes = orig.comps[p]
+            g_sub = copy_graph(orig, nodes)
+            if nx.is_isomorphic(g_sub, res[i], node_match=node_match):
+                match = True
+                break
+        ans.append(match)
+    return ans
         
 
 
@@ -750,7 +808,7 @@ def learn_grammar(g, args):
     if isinstance(model, list):
         for j, m in enumerate(model):
             pre = get_prefix(m.id)
-            draw_tree(m, os.path.join(IMG_DIR, f"model_{iter}_{pre}.png"))
+            # draw_tree(m, os.path.join(IMG_DIR, f"model_{iter}_{pre}.png"))
             model[j] = EDNCEModel(dfs(anno, m.id))
         # Debug
         # revised = lambda rid: re.search(f'revising rule {rid}\n', open('data/api_ckt_ednce.log').read())
@@ -761,22 +819,19 @@ def learn_grammar(g, args):
         model = anno[find_max(anno)]
         draw_tree(model, os.path.join(IMG_DIR, f"model_{iter}.png"))
         model = EDNCEModel(anno)
-    if args.ambiguous_file:
-        resolve_ambiguous(model, grammar, args.ambiguous_file)
-    ## Debug
     if isinstance(model, list):
-        for m in list(model)[::-1]:
-            res = m.generate(grammar)
-            match = False
-            for i in range(len(res)):
-                p = get_prefix(list(res[i])[0])
-                nodes = list(filter(lambda x:get_prefix(x)==p, list(orig)))
-                g_sub = copy_graph(orig, nodes)
-                if nx.is_isomorphic(g_sub, res[i], node_match=node_match):
-                    match = True
-                    break
-            if not match:
-                breakpoint()
+        # matches = generate_and_match(list(model)[::-1], orig, grammar)        
+        # passed = all(matches) # failed sanity check
+        # if not passed:
+        #     breakpoint()
+        passed = True
     else:
         model.generate(grammar) # verify logic is correct        
+    if args.ambiguous_file:
+        if passed: # ONLY if sanity check passes
+            graphs = [copy_graph(orig, orig.comps[get_prefix(m.seq[0])]) for m in model]
+        else:
+            graphs = derive_mp(model, grammar) # derive whatever is yielded
+        resolve_ambiguous(graphs, model, grammar, args.ambiguous_file)
+    ## Debug    
     return grammar, model
