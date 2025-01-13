@@ -44,7 +44,7 @@ EMBED_DIM = 12
 LATENT_DIM = 32
 # Training
 BATCH_SIZE = 64
-EPOCHS = 30
+EPOCHS = 40
 CUDA = 'cuda:0'
 
 # Generate a random vocabulary of small graphs using NetworkX
@@ -475,7 +475,6 @@ def decode_from_latent_space(z, model, max_seq_len=10):
     return generated_sequences
     
 
-
 def train(train_data, test_data):
     # Initialize model and optimizer
     model = TransformerVAE(LATENT_DIM, LATENT_DIM, SEQ_LEN)
@@ -569,10 +568,10 @@ def bo(args, model, y_train, y_test):
             uncert = np.zeros_like(pred)
         else:
             # We fit the GP
-            M = 30
+            M = 50
             # other BO hyperparameters
             lr = 0.0005  # the learning rate to train the SGP model
-            max_iter = 1  # how many iterations to optimize the SGP each time
+            max_iter = 500  # how many iterations to optimize the SGP each time
             sgp = SparseGP(X_train, 0 * X_train, y_train, M)
             sgp.train_via_ADAM(X_train, 0 * X_train, y_train, X_test, X_test * 0,  \
                 y_test, minibatch_size = 2 * M, max_iterations = max_iter, learning_rate = lr)
@@ -725,7 +724,7 @@ def load_y(g, num_graphs):
     y = []
     for pre in range(num_graphs):        
         y.append(g.graph[f'{pre}:fom'])
-    return np.array(y)
+    return y
 
 
 
@@ -789,13 +788,18 @@ def load_data(anno, cache_dir, num_graphs):
 
     # split here
     indices = list(range(len(data)))
-    random.Random(0).shuffle(indices)
+    # random.Random(0).shuffle(indices)
     train_indices, test_indices = indices[:int(len(data)*0.9)], indices[int(len(data)*0.9):]
     train_data = [data[i] for i in train_indices]
     test_data = [data[i] for i in test_indices]
     y = load_y(orig, num_graphs)    
+    y = np.array(y)
     train_y = y[train_indices, None]
+    mean_train_y = np.mean(train_y)
+    std_train_y = np.std(train_y)    
     test_y = y[test_indices, None]
+    train_y = (train_y-mean_train_y)/std_train_y
+    test_y = (test_y-mean_train_y)/std_train_y
     return train_data, test_data, train_y, test_y, token2rule
 
     
@@ -806,11 +810,12 @@ if __name__ == "__main__":
     args = parser.parse_args()
     cache_dir = 'cache/api_ckt_ednce/'
     version = get_next_version(cache_dir)-1    
+    print(f"loading version {version}")
     grammar, anno, g = pickle.load(open(os.path.join(cache_dir, f'{version}.pkl'),'rb'))    
     orig = load_ckt(args, load_all=True)
-    train_data, test_data, train_y, test_y, token2rule = load_data(anno, cache_dir, 5000)        
+    train_data, test_data, train_y, test_y, token2rule = load_data(anno, cache_dir, 10000)        
     breakpoint()
     model = train(train_data, test_data)
     # breakpoint()
-    # bo(args, model, train_y, test_y)
+    bo(args, model, train_y, test_y)
     interactive_sample_sequences(model, grammar, token2rule, max_seq_len=MAX_SEQ_LEN, num_samples=NUM_SAMPLES)

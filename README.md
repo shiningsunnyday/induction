@@ -11,5 +11,5 @@ Grammar Induction
 Configure a new dataset
 
 1. Make a new yml in src/config/, in same format as the other examples.
-2. Add an elif block in def load_data() in main.py
+2. Add an elif block in load_data() in main.py
 3. Write a load_{your dataset} function in src/examples/test_graphs.py
