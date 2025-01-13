@@ -3,6 +3,7 @@ import torch.nn as nn
 import torch.optim as optim
 from torch.utils.data import DataLoader, TensorDataset
 from torch.utils.data import Dataset
+from sklearn.manifold import TSNE
 import networkx as nx
 import numpy as np
 from scipy.spatial.distance import pdist
@@ -40,11 +41,13 @@ VOCAB_SIZE = 204  # Number of rules
 SEQ_LEN = 13  # Max length of sequences
 NUM_SAMPLES = 3
 # NN
-EMBED_DIM = 12
-LATENT_DIM = 32
+LATENT_DIM = 256
+ENCODER_LAYERS = 4
+DECODER_LAYERS = 4
+GNN = False
 # Training
-BATCH_SIZE = 64
-EPOCHS = 40
+BATCH_SIZE = 256
+EPOCHS = 230
 CUDA = 'cuda:0'
 
 # Generate a random vocabulary of small graphs using NetworkX
@@ -179,21 +182,24 @@ vocabulary_terminate = None
 
 class TokenDataset(Dataset):
     def __init__(self, data):
+        self.dataset = []
         self.data = data
+        for idx in range(len(data)):
+            seq = []
+            graph_seq = {}
+            for i in range(len(self.data[idx])):
+                r, g, ins = self.data[idx][i]
+                g = add_ins(g, ins)
+                seq.append(r)
+                graph, _ = convert_graph_to_data(g)
+                graph_seq[i] = graph      
+            self.dataset.append((torch.tensor(seq), graph_seq, idx))
     
     def __len__(self):
         return len(self.data)
 
     def __getitem__(self, idx):
-        seq = []
-        graph_seq = {}
-        for i in range(len(self.data[idx])):
-            r, g, ins = self.data[idx][i]
-            g = add_ins(g, ins)
-            seq.append(r)
-            graph, _ = convert_graph_to_data(g)
-            graph_seq[i] = graph
-        return torch.tensor(seq), graph_seq, idx
+        return self.dataset[idx]
 
 
 # Define GNN-based Token Embedding
@@ -231,17 +237,35 @@ class TransformerVAE(nn.Module):
     def __init__(self, embed_dim, latent_dim, seq_len):
         super(TransformerVAE, self).__init__()        
         # self.token_gnn = TokenGNN(embed_dim)
-        self.gnn = DAGNN(None, None, 13, LATENT_DIM, None, w_edge_attr=False, bidirectional=False, num_class=LATENT_DIM)
-        self.transformer_encoder = TransformerEncoder(embed_dim)
+        if GNN:
+            self.gnn = DAGNN(None, None, 13, LATENT_DIM, None, w_edge_attr=False, bidirectional=False, num_class=LATENT_DIM)
+        else:
+            self.token_embedding = nn.Embedding(VOCAB_SIZE, embed_dim)
+        self.transformer_encoder = TransformerEncoder(embed_dim, num_layers=ENCODER_LAYERS)
         self.fc_mu = nn.Linear(embed_dim, latent_dim)
         self.fc_logvar = nn.Linear(embed_dim, latent_dim)
         
         self.fc_decode = nn.Linear(latent_dim, latent_dim)
-        self.transformer_decoder = TransformerEncoder(embed_dim + latent_dim)
+        self.transformer_decoder = TransformerEncoder(embed_dim + latent_dim, num_layers=DECODER_LAYERS)
         self.output_layer = nn.Linear(embed_dim + latent_dim, VOCAB_SIZE)
         self.start_token_embedding = nn.Parameter(torch.randn(1, 1, embed_dim))
 
-    def embed_tokens(self, token_ids, batch_g_list):        
+
+    def visualize_tokens(self):
+        tsne = TSNE(n_components=2, random_state=42)
+        embeddings_2d = tsne.fit_transform(self.token_embedding.weight.detach().cpu())
+        # Plot the 2D t-SNE
+        fig, ax = plt.subplots(figsize=(8, 8))
+        ax.scatter(embeddings_2d[:, 0], embeddings_2d[:, 1], alpha=0.7)
+        ax.set_title("2D t-SNE of nn.Embedding")
+        ax.set_xlabel("t-SNE Dim 1")
+        ax.set_ylabel("t-SNE Dim 2")
+        return fig
+
+
+    def embed_tokens(self, token_ids, batch_g_list):
+        if not GNN:
+            return self.token_embedding(token_ids)
         if token_ids.dim() == 2:
             return torch.stack([self.embed_tokens(token_id_seq, g_list) for (token_id_seq, g_list) in zip(token_ids, batch_g_list)], dim=0)
         else:
@@ -413,7 +437,10 @@ class TransformerVAE(nn.Module):
             # Update each active sequence with the newly generated token
             for i, idx in enumerate(active_indices):
                 generated_sequences[idx].append(next_tokens[i].item())  # Store generated token
-                next_token_embedding = self.gnn(graph_data_vocabulary[next_tokens[i].item()])
+                if GNN:
+                    next_token_embedding = self.gnn(graph_data_vocabulary[next_tokens[i].item()])
+                else:
+                    next_token_embedding = self.token_embedding(next_tokens[i])
                 # Append the new embedding to this sequence’s token embeddings
                 token_embeddings[idx] = torch.cat((token_embeddings[idx], next_token_embedding), dim=0)
         return generated_sequences
@@ -483,15 +510,16 @@ def train(train_data, test_data):
     # Dummy dataset: Replace with actual sequence data
     # dataset = [torch.tensor(seq) for seq in data]
     train_dataset = TokenDataset(train_data)
-    train_dataloader = DataLoader(train_dataset, batch_size=BATCH_SIZE, shuffle=True, collate_fn=collate_batch, num_workers=8, timeout=1000, prefetch_factor=1)
+    # train_dataloader = DataLoader(train_dataset, batch_size=BATCH_SIZE, shuffle=True, collate_fn=collate_batch, num_workers=8, timeout=1000, prefetch_factor=1)
     test_dataset = TokenDataset(test_data)
-    test_dataloader = DataLoader(test_dataset, batch_size=BATCH_SIZE, shuffle=False, collate_fn=collate_batch, num_workers=8, timeout=1000, prefetch_factor=1)    
+    # test_dataloader = DataLoader(test_dataset, batch_size=BATCH_SIZE, shuffle=False, collate_fn=collate_batch, num_workers=8, timeout=1000, prefetch_factor=1)    
 
     # Training loop
     model.train()
     model = model.to(CUDA)
-    for i, graph_data in enumerate(graph_data_vocabulary):
-        graph_data_vocabulary[i] = graph_data.to(CUDA)
+    if GNN:
+        for i, graph_data in enumerate(graph_data_vocabulary):
+            graph_data_vocabulary[i] = graph_data.to(CUDA)
     ckpts = glob.glob('ckpts/api_ckt_ednce/*.pth')
     start_epoch = 0
     best_loss = float("inf")
@@ -512,29 +540,38 @@ def train(train_data, test_data):
     for epoch in tqdm(range(start_epoch, EPOCHS+1)):
         model.train()
         train_loss = 0.
-        for batch in train_dataloader:
-            x, attention_mask, seq_len_list, batch_g_list, batch_idxes = batch
-            x, attention_mask = x.to(CUDA), attention_mask.to(CUDA)
-            optimizer.zero_grad()
-            recon_logits, mask, mu, logvar = model(x, attention_mask, seq_len_list, batch_g_list)            
-            loss = vae_loss(recon_logits, mask, x, mu, logvar)
-            loss.backward()            
-            train_loss += loss.item()*len(batch_idxes)
-            optimizer.step()
-            train_latent[batch_idxes] = mu.detach().cpu().numpy()
+        g_batch = []
+        for i in tqdm(range(len(train_dataset))):
+            g_batch.append(train_dataset[i])
+            if len(g_batch) == BATCH_SIZE or i == len(train_dataset)-1:
+                batch = collate_batch(g_batch)
+                x, attention_mask, seq_len_list, batch_g_list, batch_idxes = batch
+                x, attention_mask = x.to(CUDA), attention_mask.to(CUDA)
+                optimizer.zero_grad()
+                recon_logits, mask, mu, logvar = model(x, attention_mask, seq_len_list, batch_g_list)            
+                loss = vae_loss(recon_logits, mask, x, mu, logvar)
+                loss.backward()            
+                train_loss += loss.item()*len(batch_idxes)
+                optimizer.step()
+                train_latent[batch_idxes] = mu.detach().cpu().numpy()
+                g_batch = []
         train_loss /= len(train_dataset)
         model.eval()
         val_loss = 0.
-        for batch in test_dataloader:
-            x, attention_mask, seq_len_list, batch_g_list, batch_idxes = batch
-            x, attention_mask = x.to(CUDA), attention_mask.to(CUDA)
-            optimizer.zero_grad()
-            recon_logits, mask, mu, logvar = model(x, attention_mask, seq_len_list, batch_g_list)            
-            loss = vae_loss(recon_logits, mask, x, mu, logvar)            
-            loss.backward()
-            val_loss += loss.item()*len(batch_idxes)
-            test_latent[batch_idxes] = mu.detach().cpu().numpy()
-            optimizer.step()            
+        g_batch = []
+        for i in tqdm(range(len(test_dataset))):
+            g_batch.append(test_dataset[i])
+            if len(g_batch) == BATCH_SIZE or i == len(test_dataset)-1:
+                batch = collate_batch(g_batch)
+                x, attention_mask, seq_len_list, batch_g_list, batch_idxes = batch
+                x, attention_mask = x.to(CUDA), attention_mask.to(CUDA)
+                optimizer.zero_grad()
+                recon_logits, mask, mu, logvar = model(x, attention_mask, seq_len_list, batch_g_list)            
+                loss = vae_loss(recon_logits, mask, x, mu, logvar)            
+                loss.backward()
+                val_loss += loss.item()*len(batch_idxes)
+                test_latent[batch_idxes] = mu.detach().cpu().numpy()
+                optimizer.step()      
         val_loss /= len(test_dataset)
         if val_loss < best_loss:
             best_loss = val_loss
@@ -544,6 +581,10 @@ def train(train_data, test_data):
         print(f"Epoch {epoch}, Train Loss: {train_loss}, Val Loss: {val_loss}")
         np.save(f'ckpts/api_ckt_ednce/train_latent_{epoch}.npy', train_latent)
         np.save(f'ckpts/api_ckt_ednce/test_latent_{epoch}.npy', test_latent)
+        fig = model.visualize_tokens()
+        fig.savefig(f'ckpts/{epoch}.png')        
+        embedding = model.token_embedding.weight.detach().cpu().numpy()
+        np.save(f'ckpts/api_ckt_ednce/embedding_{epoch}.npy', embedding)
     return model
 
 
@@ -667,7 +708,7 @@ def sample_sequences(model, grammar, token2rule, num_samples=5, max_seq_len=10):
     visualize_sequences(sampled_sequences, grammar, token2rule)
 
 
-def interactive_mask_logits(grammar, generated_sequences, logits):
+def interactive_mask_logits(grammar, generated_sequences, logits, token2rule):
     batch_size = logits.shape[0]
     for i in range(batch_size):
         for j in range(logits.shape[1]):            
@@ -694,7 +735,7 @@ def interactive_sample_sequences(model, grammar, token2rule, num_samples=5, max_
                     if not active_indices:
                         break
                     logits = model._autoregressive_inference_predict_logits(temp_batch_embeddings, temp_z_context)
-                    interactive_mask_logits(grammar, generated_sequences, logits)
+                    interactive_mask_logits(grammar, generated_sequences, logits, token2rule)
                     next_tokens = torch.argmax(logits, dim=-1)
                     for i, idx in enumerate(active_indices):
                         generated_sequences[idx].append(next_tokens[i].item())  
@@ -727,9 +768,47 @@ def load_y(g, num_graphs):
     return y
 
 
+def derive(seq):        
+    all_applied = []
+    all_node_maps = []
+    # find the initial rule
+    start_rule = seq[0]
+    cur = deepcopy(start_rule.subgraph)
+    all_node_maps.append({n:n for n in cur})
+    assert not check_input_xor_output(cur)
+    for rule in seq[1:]:
+        nt_nodes = list(filter(lambda x: cur.nodes[x]["label"] in NONTERMS, cur))
+        if len(nt_nodes) == 0:
+            break
+        assert len(nt_nodes) == 1
+        node = nt_nodes[0]
+        cur, applied, node_map = rule(cur, node, return_applied=True)
+        all_applied.append(applied)
+        all_node_maps.append(node_map)                       
+    return cur, all_applied, all_node_maps  
 
-def load_data(anno, cache_dir, num_graphs):
+
+def process_single(g_orig, rules):
+    rule_ids = [r[0] for r in rules]
+    rules = [r[1] for r in rules]
+    g, all_applied, all_node_maps = derive(rules)
+    matcher = DiGraphMatcher(g, g_orig, node_match=node_match)
+    iso = next(matcher.isomorphisms_iter())
+    # use iso to embed feats and instructions        
+    for i, r in enumerate(rules):
+        sub = deepcopy(nx.DiGraph(r.subgraph))
+        # node feats
+        for n in sub:
+            key = all_node_maps[i][n]
+            if key in iso:
+                sub.nodes[n]['feat'] = g_orig.nodes[iso[key]]['feat']
+        rule_ids[i] = (rule_ids[i], sub, all_applied[i-1] if i else None)
+    return rule_ids
+
+
+def load_data(anno, grammar, orig, cache_dir, num_graphs):
     # for ckt only, duplicate and interleave anno
+    print("begin load_data")
     anno_copy = deepcopy(anno)
     anno = {}
     for n in anno_copy:
@@ -741,35 +820,31 @@ def load_data(anno, cache_dir, num_graphs):
     if exist:
         data, rule2token = pickle.load(open(os.path.join(cache_dir, 'data_and_rule2token.pkl'), 'rb'))
     else:
-        data = []
+        find_anno = {}        
+        for k in anno:
+            if get_prefix(k) not in find_anno:
+                find_anno[get_prefix(k)] = []
+            find_anno[get_prefix(k)].append(k)
         rule2token = {}
-        for pre in tqdm(range(num_graphs), "processing data"):
-            prefix = f"{pre}:"
-            seq = list(filter(lambda k: k[:len(prefix)]==f'{prefix}', anno))
+        pargs = []
+        for pre in tqdm(range(num_graphs), "gathering rule tokens"):
+            seq = find_anno[pre]
             seq = seq[::-1] # derivation          
             rule_ids = [anno[s].attrs['rule'] for s in seq]
             # orig_nodes = [list(anno[s].attrs['nodes']) for s in seq]
-            # orig_feats = [[orig.nodes[n]['feat'] if n in orig else 0.0 for n in nodes] for nodes in orig_nodes]        
+            # orig_feats = [[orig.nodes[n]['feat'] if n in orig else 0.0 for n in nodes] for nodes in orig_nodes]    
+            # g_orig = copy_graph(orig, orig.comps[pre])
+            g_orig = nx.induced_subgraph(orig, orig.comps[pre]).copy()
             for i, r in enumerate(rule_ids):
                 # from networkx.algorithms.isomorphism import DiGraphMatcher
                 rule2token[r] = grammar.rules[r].subgraph
                 # matcher = DiGraphMatcher(copy_graph(g, orig_nodes[i]), rule2token[r], node_match=node_match)
                 # breakpoint()
-                # assert any(all([iso[orig_nodes[i][j]] == list(rule2token[r])[j]]) for iso in matcher.isomorphisms_iter())        
-            g, all_applied, all_node_maps = grammar.derive(rule_ids, return_applied=True)
-            g_orig = copy_graph(orig, orig.comps[pre])
-            matcher = DiGraphMatcher(g, g_orig, node_match=node_match)
-            iso = next(matcher.isomorphisms_iter())
-            # use iso to embed feats and instructions        
-            for i, r in enumerate(rule_ids):
-                sub = deepcopy(nx.DiGraph(grammar.rules[r].subgraph))
-                # node feats
-                for n in sub:
-                    key = all_node_maps[i][n]
-                    if key in iso:
-                        sub.nodes[n]['feat'] = orig.nodes[iso[key]]['feat']
-                rule_ids[i] = (r, sub, all_applied[i-1] if i else None)
-            data.append(rule_ids)
+                # assert any(all([iso[orig_nodes[i][j]] == list(rule2token[r])[j]]) for iso in matcher.isomorphisms_iter())                
+            rules = [(r, grammar.rules[r]) for r in rule_ids]
+            pargs.append((g_orig, rules))
+        with mp.Pool(20) as p:
+            data = p.starmap(process_single, tqdm(pargs, "processing data mp"))
         pickle.dump((data, rule2token), open(os.path.join(cache_dir, 'data_and_rule2token.pkl'), 'wb+'))
     relabel = dict(zip(list(sorted(rule2token)), range(len(rule2token))))    
     data = [[(relabel[s[0]],)+s[1:] for s in seq] for seq in data]
@@ -802,20 +877,26 @@ def load_data(anno, cache_dir, num_graphs):
     test_y = (test_y-mean_train_y)/std_train_y
     return train_data, test_data, train_y, test_y, token2rule
 
-    
 
-if __name__ == "__main__":
-    from src.grammar.common import get_parser
-    parser = get_parser()
-    args = parser.parse_args()
+
+def main(args):
     cache_dir = 'cache/api_ckt_ednce/'
     version = get_next_version(cache_dir)-1    
     print(f"loading version {version}")
     grammar, anno, g = pickle.load(open(os.path.join(cache_dir, f'{version}.pkl'),'rb'))    
     orig = load_ckt(args, load_all=True)
-    train_data, test_data, train_y, test_y, token2rule = load_data(anno, cache_dir, 10000)        
+    train_data, test_data, train_y, test_y, token2rule = load_data(anno, grammar, orig, cache_dir, 10000)        
     breakpoint()
     model = train(train_data, test_data)
     # breakpoint()
     bo(args, model, train_y, test_y)
-    interactive_sample_sequences(model, grammar, token2rule, max_seq_len=MAX_SEQ_LEN, num_samples=NUM_SAMPLES)
+    interactive_sample_sequences(model, grammar, token2rule, max_seq_len=MAX_SEQ_LEN, num_samples=NUM_SAMPLES)    
+
+
+
+
+if __name__ == "__main__":
+    from src.grammar.common import get_parser
+    parser = get_parser()
+    args = parser.parse_args()
+    main(args)
