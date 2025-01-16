@@ -43,7 +43,7 @@ NUM_SAMPLES = 3
 EMBED_DIM = 12
 LATENT_DIM = 32
 # Training
-BATCH_SIZE = 64
+BATCH_SIZE = 256
 EPOCHS = 40
 CUDA = 'cuda:0'
 
@@ -475,7 +475,8 @@ def decode_from_latent_space(z, model, max_seq_len=10):
     return generated_sequences
     
 
-def train(train_data, test_data):
+def train(train_data, test_data, args):
+
     # Initialize model and optimizer
     model = TransformerVAE(LATENT_DIM, LATENT_DIM, SEQ_LEN)
     optimizer = optim.Adam(model.parameters(), lr=1e-4)
@@ -486,13 +487,13 @@ def train(train_data, test_data):
     train_dataloader = DataLoader(train_dataset, batch_size=BATCH_SIZE, shuffle=True, collate_fn=collate_batch, num_workers=8, timeout=1000, prefetch_factor=1)
     test_dataset = TokenDataset(test_data)
     test_dataloader = DataLoader(test_dataset, batch_size=BATCH_SIZE, shuffle=False, collate_fn=collate_batch, num_workers=8, timeout=1000, prefetch_factor=1)    
-
     # Training loop
     model.train()
     model = model.to(CUDA)
     for i, graph_data in enumerate(graph_data_vocabulary):
         graph_data_vocabulary[i] = graph_data.to(CUDA)
-    ckpts = glob.glob('ckpts/api_ckt_ednce/*.pth')
+    #ckpts = glob.glob('ckpts/api_ckt_ednce/*.pth')
+    ckpts = glob.glob('ckpts/api_ckt_ednce/run_dummy/*.pth') # hard-set the run directory to no checkpoint for now
     start_epoch = 0
     best_loss = float("inf")
     best_ckpt_path = None
@@ -507,6 +508,12 @@ def train(train_data, test_data):
         print(f"loaded {best_ckpt_path} loss {best_loss} start_epoch {start_epoch}")
         model.load_state_dict(torch.load(best_ckpt_path))
     
+    patience = 10
+    patience_counter = 0
+
+    directory_path = f"ckpts/api_ckt_ednce/vanilla_{BATCH_SIZE}_{EPOCHS}_{EMBED_DIM}_{LATENT_DIM}_{patience}/"
+
+
     train_latent = np.empty((len(train_data), LATENT_DIM))
     test_latent = np.empty((len(test_data), LATENT_DIM))
     for epoch in tqdm(range(start_epoch, EPOCHS+1)):
@@ -537,13 +544,19 @@ def train(train_data, test_data):
             optimizer.step()            
         val_loss /= len(test_dataset)
         if val_loss < best_loss:
+            patience = 0
             best_loss = val_loss
-            ckpt_path = f'ckpts/api_ckt_ednce/epoch={epoch}_loss={best_loss}.pth'
+            ckpt_path = f'{directory_path}/epoch={epoch}_loss={best_loss}.pth'
             torch.save(model.state_dict(), ckpt_path)
             print(ckpt_path)
+        else:
+            patience_counter += 1
         print(f"Epoch {epoch}, Train Loss: {train_loss}, Val Loss: {val_loss}")
-        np.save(f'ckpts/api_ckt_ednce/train_latent_{epoch}.npy', train_latent)
-        np.save(f'ckpts/api_ckt_ednce/test_latent_{epoch}.npy', test_latent)
+        np.save(f'{directory_path}/train_latent_{epoch}.npy', train_latent)
+        np.save(f'{directory_path}/test_latent_{epoch}.npy', test_latent)
+        if patience_counter > patience:
+            print(f"Early stopping triggered at epoch {epoch}. Best loss: {best_loss}")
+            break
     return model
 
 
@@ -814,8 +827,8 @@ if __name__ == "__main__":
     grammar, anno, g = pickle.load(open(os.path.join(cache_dir, f'{version}.pkl'),'rb'))    
     orig = load_ckt(args, load_all=True)
     train_data, test_data, train_y, test_y, token2rule = load_data(anno, cache_dir, 10000)        
-    breakpoint()
-    model = train(train_data, test_data)
+    #breakpoint()
+    model = train(train_data, test_data, args)
     # breakpoint()
     bo(args, model, train_y, test_y)
     interactive_sample_sequences(model, grammar, token2rule, max_seq_len=MAX_SEQ_LEN, num_samples=NUM_SAMPLES)

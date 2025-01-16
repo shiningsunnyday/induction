@@ -1,2 +1,5 @@
 **/__pycache__/
 notebooks/api_key.txt
+cache/*
+ckpts/*
+data/nx/*
