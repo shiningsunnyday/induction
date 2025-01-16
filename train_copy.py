@@ -605,6 +605,7 @@ def train(train_data, test_data):
 
     patience = 10
     patience_counter = 0
+
     directory_path = f"ckpts/api_ckt_ednce/{ENCODER}_{ENCODER_LAYERS}_{DECODER_LAYERS}_{BATCH_SIZE}_{EPOCHS}_{LATENT_DIM}_{patience}/"
     os.makedirs(directory_path, exist_ok=True) # make dir
     train_latent = np.empty((len(train_data), LATENT_DIM))
@@ -1001,6 +1002,73 @@ def load_data(anno, grammar, orig, cache_dir, num_graphs):
 
 
 
+def run_single_experiment(
+    latent_dim,
+    encoder_layers,
+    decoder_layers,
+    encoder,
+    batch_size,
+    epochs,
+    args
+):
+    # override global hyperparams
+    global LATENT_DIM, ENCODER_LAYERS, DECODER_LAYERS, ENCODER, BATCH_SIZE, EPOCHS
+    LATENT_DIM = latent_dim
+    ENCODER_LAYERS = encoder_layers
+    DECODER_LAYERS = decoder_layers
+    ENCODER = encoder
+    BATCH_SIZE = batch_size
+    EPOCHS = epochs
+    f"ckpts/api_ckt_ednce/{ENCODER}_{ENCODER_LAYERS}_{DECODER_LAYERS}_{BATCH_SIZE}_{EPOCHS}_{LATENT_DIM}_{patience}/"
+    print(f"ENCODER={ENCODER}, ENCODER_LAYERS={ENCODER_LAYERS}, DECODER_LAYERS={DECODER_LAYERS}")
+    print(f"BATCH_SIZE={BATCH_SIZE}, EPOCHS={EPOCHS}, LATENT_DIM={LATENT_DIM}")
+
+    cache_dir = 'cache/api_ckt_ednce/'
+    num_graphs = 10000
+    version = get_next_version(cache_dir)-1
+    grammar, anno, g = pickle.load(open(os.path.join(cache_dir, f'{version}.pkl'),'rb'))
+    orig = load_ckt(args, load_all=True)
+    train_data, test_data, token2rule = load_data(anno, grammar, orig, cache_dir, num_graphs)
+    # prepare y
+    # TODO: remove this later
+    indices = list(range(num_graphs))
+    # random.Random(0).shuffle(indices)
+    train_indices, test_indices = indices[:int(num_graphs*0.9)], indices[int(num_graphs*0.9):]    
+    y = load_y(orig, num_graphs)    
+    y = np.array(y)
+    train_y = y[train_indices, None]
+    mean_train_y = np.mean(train_y)
+    std_train_y = np.std(train_y)    
+    test_y = y[test_indices, None]
+    train_y = (train_y-mean_train_y)/std_train_y
+    test_y = (test_y-mean_train_y)/std_train_y    
+    model = train(train_data, test_data)
+    # breakpoint()
+    # bo(args, None, train_y, test_y)
+    # interactive_sample_sequences(model, grammar, token2rule, max_seq_len=MAX_SEQ_LEN, num_samples=NUM_SAMPLES)    
+    return model
+
+def main_scan(args):
+    # LATENT_DIM = 256
+    # ENCODER_LAYERS = 4
+    # DECODER_LAYERS = 4
+    # ENCODER = "TOKEN" # one of [TOKEN_GNN, GNN, TOKEN] (TOKEN is the default, embedding only encoding)
+    # # Training
+    # BATCH_SIZE = 256
+    # EPOCHS = 230
+    hyperparam_configs = [
+        # (LATENT_DIM, ENCODER_LAYERS, DECODER_LAYERS, ENCODER, BATCH_SIZE, EPOCHS)
+        (64, 4, 4, "TOKEN", 256, 230),
+        (128, 4, 4, "TOKEN", 256, 230),
+        (256, 4, 4, "TOKEN", 256, 230),
+        (512, 4, 4, "TOKEN", 256, 230),
+        (1024, 4, 4, "TOKEN", 256, 230),
+    ]
+
+    for (ld, el, dl, enc, bs, ep) in hyperparam_configs:
+        run_single_experiment(ld, el, dl, enc, bs, ep, args)
+
+
 def main(args):
     cache_dir = 'cache/api_ckt_ednce/'
     num_graphs = 10000
@@ -1034,4 +1102,4 @@ if __name__ == "__main__":
     from src.grammar.common import get_parser
     parser = get_parser()
     args = parser.parse_args()
-    main(args)
+    main_scan(args)
