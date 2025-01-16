@@ -11,7 +11,7 @@ import igraph
 import argparse
 import os
 
-from ogb.graphproppred import PygGraphPropPredDataset
+# from ogb.graphproppred import PygGraphPropPredDataset
 
 if "api" in METHOD:
     grammar = importlib.import_module(f"src.algo.{GRAMMAR}")

@@ -804,14 +804,14 @@ def find_iso(subgraph, graph, rule=None):
         # if subgraph is terminal-only
             # remove all subgraph instances in comps with nt
     if LINEAR:
+        term_only = True
+        for n in subgraph:
+            if subgraph.nodes[n]['label'] in NONTERMS:
+                term_only = False        
         start_time = time.time()
         logger.info(f"linear option activated, start checking isms")
         isms_copy = []
         for ism in isms:
-            term_only = True
-            for n in subgraph:
-                if subgraph.nodes[n]['label'] in NONTERMS:
-                    term_only = False
             if not term_only:
                 isms_copy.append(ism)
                 continue

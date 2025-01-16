@@ -3,11 +3,11 @@ import io
 import base64
 import uuid
 import os
-import openai
+# import openai
 from PIL import Image
 import numpy as np
 
-openai.api_key = os.getenv("api_key")
+# openai.api_key = os.getenv("api_key")
 
 
 def encode(img_array):
