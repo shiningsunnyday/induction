@@ -51,8 +51,8 @@ DECODER_LAYERS = 4
 ENCODER = "TOKEN" # one of [TOKEN_GNN, GNN, TOKEN] (TOKEN is the default, embedding only encoding)
 # Training
 BATCH_SIZE = 256
-EPOCHS = 230
-CUDA = 'cuda'
+EPOCHS = 500
+CUDA = 'cuda:0'
 
 # Generate a random vocabulary of small graphs using NetworkX
 def generate_random_graphs(vocab_size):
@@ -632,19 +632,18 @@ def train(train_data, test_data):
         model.eval()
         val_loss = 0.
         g_batch = []
-        for i in tqdm(range(len(test_dataset))):
-            g_batch.append(test_dataset[i])
-            if len(g_batch) == BATCH_SIZE or i == len(test_dataset)-1:
-                batch = collate_batch(g_batch)                
-                x, attention_mask, seq_len_list, batch_g_list, batch_idxes = batch
-                x, attention_mask = x.to(CUDA), attention_mask.to(CUDA)
-                optimizer.zero_grad()
-                recon_logits, mask, mu, logvar = model(x, attention_mask, seq_len_list, batch_g_list)            
-                loss = vae_loss(recon_logits, mask, x, mu, logvar)            
-                loss.backward()
-                val_loss += loss.item()*len(batch_idxes)
-                test_latent[batch_idxes] = mu.detach().cpu().numpy()
-                optimizer.step()      
+        with torch.no_grad():
+            for i in tqdm(range(len(test_dataset))):
+                g_batch.append(test_dataset[i])
+                if len(g_batch) == BATCH_SIZE or i == len(test_dataset)-1:
+                    batch = collate_batch(g_batch)                
+                    x, attention_mask, seq_len_list, batch_g_list, batch_idxes = batch
+                    x, attention_mask = x.to(CUDA), attention_mask.to(CUDA)
+                    recon_logits, mask, mu, logvar = model(x, attention_mask, seq_len_list, batch_g_list)                                
+                    loss = vae_loss(recon_logits, mask, x, mu, logvar)            
+                    val_loss += loss.item()*len(batch_idxes)
+                    test_latent[batch_idxes] = mu.detach().cpu().numpy()
+                    g_batch = []   
         val_loss /= len(test_dataset)
         if val_loss < best_loss:
             patience_counter = 0
@@ -1019,7 +1018,6 @@ def run_single_experiment(
     ENCODER = encoder
     BATCH_SIZE = batch_size
     EPOCHS = epochs
-    f"ckpts/api_ckt_ednce/{ENCODER}_{ENCODER_LAYERS}_{DECODER_LAYERS}_{BATCH_SIZE}_{EPOCHS}_{LATENT_DIM}_{patience}/"
     print(f"ENCODER={ENCODER}, ENCODER_LAYERS={ENCODER_LAYERS}, DECODER_LAYERS={DECODER_LAYERS}")
     print(f"BATCH_SIZE={BATCH_SIZE}, EPOCHS={EPOCHS}, LATENT_DIM={LATENT_DIM}")
 
@@ -1057,13 +1055,12 @@ def main_scan(args):
     # BATCH_SIZE = 256
     # EPOCHS = 230
     hyperparam_configs = [
-        # (LATENT_DIM, ENCODER_LAYERS, DECODER_LAYERS, ENCODER, BATCH_SIZE, EPOCHS)
-        (64, 4, 4, "TOKEN", 256, 230),
-        (128, 4, 4, "TOKEN", 256, 230),
-        (256, 4, 4, "TOKEN", 256, 230),
-        (512, 4, 4, "TOKEN", 256, 230),
-        (1024, 4, 4, "TOKEN", 256, 230),
-    ]
+
+    # (LATENT_DIM, ENCODER_LAYERS, DECODER_LAYERS, ENCODER, BATCH_SIZE, EPOCHS)
+
+    (1024, 4, 4, "TOKEN", 128, 230),
+
+]
 
     for (ld, el, dl, enc, bs, ep) in hyperparam_configs:
         run_single_experiment(ld, el, dl, enc, bs, ep, args)
