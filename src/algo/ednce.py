@@ -13,6 +13,7 @@ from src.algo.common import *
 from src.grammar.common import *
 from src.grammar.utils import *
 import sys
+import heapq
 from concurrent.futures import ThreadPoolExecutor
 sys.setrecursionlimit(1500)
 
@@ -100,35 +101,35 @@ def find_partial(graphs, cand):
     return ans
 
 
-# def worker(shared_queue, grammar, graphs, found, lock):
-#     while True:
-#         with lock:
-#             if shared_queue.empty():
-#                 print("process done")
-#                 break
-#             print(f"len(interms): {shared_queue.qsize()}")
-#             interm, deriv, poss = shared_queue.get()
-#         print(f"deriv: {deriv}")
-#         nts = grammar.search_nts(interm, NONTERMS)
-#         if len(nts) == 0:
-#             if nx.is_isomorphic(interm, graphs[poss], node_match=node_match):
-#                 with lock:
-#                     found[poss].append(deriv)
-#                     print(f"found {deriv} graph {poss}, count: {len(found[poss])}")        
-#         for j, nt in enumerate(nts):
-#             for i, rule in enumerate(grammar.rules):                      
-#                 nt_label = interm.nodes[nt]['label']
-#                 if rule.nt == nt_label:
-#                     c = rule(cur, nt)    
-#                     if nx.is_connected(nx.Graph(c)):
-#                         # if poss == 0 and i == 62:
-#                         #     pdb.set_trace()                     
-#                         ts = [x for x in c if c.nodes[x]['label'] in TERMS]
-#                         c_t = copy_graph(c, ts, copy_attrs=False)
-#                         exist = find_partial([graphs[poss]], c_t)
-#                         if exist:
-#                             with lock:
-#                                 shared_queue.put((c, deriv+[i], poss))       
+def worker(shared_queue, grammar, graphs, found, lock):
+    while True:
+        with lock:
+            if shared_queue.empty():
+                print("process done")
+                break
+            print(f"len(interms): {shared_queue.qsize()}")
+            interm, deriv, poss = shared_queue.get()
+        print(f"deriv: {deriv}")
+        nts = grammar.search_nts(interm, NONTERMS)
+        if len(nts) == 0:
+            if nx.is_isomorphic(interm, graphs[poss], node_match=node_match):
+                with lock:
+                    found[poss].append(deriv)
+                    print(f"found {deriv} graph {poss}, count: {len(found[poss])}")        
+        for j, nt in enumerate(nts):
+            for i, rule in enumerate(grammar.rules):                      
+                nt_label = interm.nodes[nt]['label']
+                if rule.nt == nt_label:
+                    c = rule(cur, nt)    
+                    if nx.is_connected(nx.Graph(c)):
+                        # if poss == 0 and i == 62:
+                        #     pdb.set_trace()                     
+                        ts = [x for x in c if c.nodes[x]['label'] in TERMS]
+                        c_t = copy_graph(c, ts, copy_attrs=False)
+                        exist = find_partial([graphs[poss]], c_t)
+                        if exist:
+                            with lock:
+                                shared_queue.put((c, deriv+[i], poss))       
 
 
 def enumerate_rules_mp(graphs, grammar):
@@ -151,6 +152,90 @@ def enumerate_rules_mp(graphs, grammar):
     for p in processes:
         p.join()    
     return found
+
+
+def worker_single(stack, grammar, graph, init_hash, mem, lock):
+    while True:
+        with lock:
+            if len(stack) == 0:            
+                if init_hash in mem and mem[init_hash] != 0:
+                    print("process done")
+                    break
+                else:
+                    time.sleep(0.1)
+                    continue
+            else:
+                print(len(stack))
+                cur, val = stack.pop(-1)
+            if val in mem:
+                if mem[val] != 0:
+                    continue
+            else:
+                mem[val] = 0
+        nts = grammar.search_nts(cur, NONTERMS)
+        if len(nts) == 0:
+            if nx.is_isomorphic(cur, graph, node_match=node_match):
+                with lock: 
+                    mem[val] = [[]]
+            else:
+                with lock:
+                    mem[val] = []
+            continue # done        
+        done = True
+        res = []
+        for j, nt in enumerate(nts):
+            for i, rule in enumerate(grammar.rules):                      
+                if rule is None:
+                    continue
+                nt_label = cur.nodes[nt]['label']
+                if rule.nt == nt_label:
+                    c = rule(cur, nt)
+                    if not nx.is_connected(nx.Graph(c)):
+                        continue
+                    if not nx.is_directed_acyclic_graph(c):
+                        continue
+                    exist = find_partial([graph], c)
+                    if not exist:
+                        continue
+                    hash_val = wl_hash(c)
+                    with lock:
+                        if hash_val not in mem:
+                            if done:
+                                stack.append((cur, val))
+                                done = False
+                            stack.append((c, hash_val))                            
+                        else:
+                            if mem[hash_val] == 0:
+                                if done:                                
+                                    stack.append((cur, val))                            
+                                    done = False
+                            else:
+                                for seq in mem[hash_val]: # res
+                                    res.append([i]+deepcopy(seq))
+        with lock:
+            if done:        
+                mem[val] = res    
+
+
+def enumerate_rules_single_mp(graph, grammar):
+    manager = mp.Manager()
+    stack = manager.list()
+    found = manager.list()
+    mem = manager.dict()
+    lock = manager.Lock()
+    g = nx.DiGraph()
+    g.add_node('0', label='black')    
+    stack.append((deepcopy(g), wl_hash(g)))
+    processes = []
+    for _ in range(NUM_PROCS):
+        p = mp.Process(target=worker_single, args=(stack, grammar, graph, found, mem, lock))
+        p.start()
+        processes.append(p)
+
+    for p in processes:
+        p.join()    
+    return found
+
 
 
 def top_sort(edge_index, graph_size):
@@ -298,13 +383,13 @@ def recurse_rules_single(graph, grammar):
 def enumerate_rules(graphs, grammar):
     N = len(graphs)
     found = []  
-    # if NUM_PROCS == 1:
-    # for j in tqdm(range(N), "enumerate rules"):
-    #     found_single = recurse_rules_single(graphs, j, grammar)
-    #     found.append(found_single)
-    # else:
-    with mp.Pool(NUM_PROCS) as p:
-        found = p.starmap(recurse_rules_single, [(graphs[j], grammar) for j in range(N)])
+    if NUM_PROCS == 1:
+        for j in tqdm(range(N), "enumerate rules"):
+            found_single = recurse_rules_single(graphs, j, grammar)
+            found.append(found_single)
+    else:
+        with mp.Pool(NUM_PROCS) as p:
+            found = p.starmap(recurse_rules_single, [(graphs[j], grammar) for j in range(N)])
     return found
 
 def derive_batch(args):
@@ -327,77 +412,179 @@ def derive_mp(model, grammar):
     graphs = sum(graphs, [])   
     return graphs
 
+# def old_hitting_set():
+#     sets_of_sets = []
+#     for derivs in all_derivs: # for each graph
+#         sets = []
+#         for i in range(len(derivs)): # for each deriv
+#             # choose to keep this deriv
+#             for j in range(len(derivs)):
+#                 if j == i:
+#                     continue
+#                 sets.append(set(derivs[j])-set(derivs[i])) # the rules that will be eliminated
+#         sets_of_sets.append(sets)
+
+#     poss_elims = []
+#     args = [sets for sets in sets_of_sets if sets]  
+#     if len(args) == 0:
+#         logger.info("no ambiguity, done")
+#         return
+#     num_prod = reduce(lambda x,y:x*y, [len(l) for l in args])
+#     beam_width = 100
+#     if num_prod > beam_width: # too big, so let's beam search
+#         poss_elims = [set()]        
+#         for options in tqdm(args, "beam search"):
+#             poss_elims_copy = []
+#             for e, o in product(poss_elims, options):
+#                 poss_elims_copy.append(e.union(o))
+#             poss_elims_copy = sorted(poss_elims_copy, key=len)
+#             poss_elims = poss_elims_copy[:beam_width]
+
+#     else:
+#         for chosen in product(*args):
+#             elim = set.union(*chosen) # eliminate these rules
+#             exist = False
+#             for p in poss_elims:
+#                 if p == elim:
+#                     exist = True
+#                     break
+#             if not exist:
+#                 poss_elims.append(elim)
+#         poss_elims = sorted(poss_elims, key=len)
+
+#     for i in range(len(poss_elims)): # start from minimal set of rules
+#         if poss_elims[i] is None:
+#             continue
+#         for j in range(i+1, len(poss_elims)): # remove redundant
+#             if poss_elims[j] is None:
+#                 continue
+#             if not (poss_elims[i]-poss_elims[j]):
+#                 poss_elims[j] = None
+
+#     min_poss_elims = list(filter(lambda x: x is not None, poss_elims)) # all minimal rule sets
+#     best_e = None
+#     best_counter = None
+#     for e in min_poss_elims: # for each minimal rule set
+#         counter = []
+#         for i, derivs in enumerate(all_derivs):
+#             inters = [bool(set(derivs[j]) & e) for j in range(len(derivs))]
+#             if np.all(inters): # all derivs for this graph requires a rule from e
+#                 counter.append(i) # graph is no longer in language
+#         if best_counter is None or len(counter) < len(best_counter):
+#             best_counter = counter
+#             best_e = list(sorted(e))
+
+
+def set_to_key(S):
+    return tuple(sorted(list(S)))
+
+def hitting(elim_sets, beam_width=100):
+    H = []
+    heapq.heappush(H, (0, set())) # priority=-len
+    for S in elim_sets: # beam search
+        # priority queue
+        H_copy = list(H)
+        H = []
+        for _, h in H_copy: # copy
+            for s in S:
+                if len(H) < beam_width:
+                    h_ = h|set([s])
+                    heapq.heappush(H, (-len(h_), h_))
+                else:
+                    val_, h_ = heapq.heappop(H)
+                    h__ = h|set([s])
+                    if -val_ <= len(h_):
+                        heapq.heappush(H, (val_, h_))
+                    else:
+                        heapq.heappush(H, (-len(h__), h__))
+    while len(H)>1:
+        heapq.heappop(H)
+    l, ans = heapq.heappop(H)
+    print(f"Input: {elim_sets}, Output: {ans}")
+    return ans
+
+
+def try_disambiguate(grammar, derivs):
+    counts = {}
+    for deriv in derivs:
+        key = set_to_key(deriv)
+        if key not in counts:
+            counts[key] = []
+        counts[key].append(deriv)
+    elim_rule_sets = set()
+    for key in counts:
+        if len(counts[key]) == 1:
+            keep_deriv = counts[key][0]
+            elim_sets = set()
+            for deriv in derivs:
+                if deriv == keep_deriv:
+                    continue
+                elim_sets.add(set_to_key(set(deriv)-set(keep_deriv)))
+            elim_rule_set = hitting(elim_sets)
+            elim_rule_sets.add(set_to_key(elim_rule_set))
+    # elim rule set
+    min_num_remove = len(grammar.rules)
+    min_remove = None
+    for rule_set in elim_rule_sets:
+        num_remove = 0
+        for r in rule_set:
+            if grammar.rules[r] is not None:
+                num_remove += 1
+        if num_remove < min_num_remove:
+            min_num_remove = num_remove
+            min_remove = rule_set
+    return min_remove
+
 
 def resolve_ambiguous(graphs, model, grammar, save_path):
     logger = logging.getLogger('global_logger')    
 
     # if NUM_PROCS > 1:
     #     found = enumerate_rules_mp(graphs, grammar)
-    # else:
-    found = enumerate_rules(graphs, grammar)    
-    all_derivs = list(map(list, found))
-    sets_of_sets = []
-    for derivs in all_derivs: # for each graph
-        sets = []
-        for i in range(len(derivs)): # for each deriv
-            # choose to keep this deriv
-            for j in range(len(derivs)):
-                if j == i:
-                    continue
-                sets.append(set(derivs[j])-set(derivs[i])) # the rules that will be eliminated
-        sets_of_sets.append(sets)
-
-    poss_elims = []
-    args = [sets for sets in sets_of_sets if sets]  
-    if len(args) == 0:
-        logger.info("no ambiguity, done")
-        return
-    num_prod = reduce(lambda x,y:x*y, [len(l) for l in args])
-    beam_width = 100
-    if num_prod > beam_width: # too big, so let's beam search
-        poss_elims = [set()]        
-        for options in tqdm(args, "beam search"):
-            poss_elims_copy = []
-            for e, o in product(poss_elims, options):
-                poss_elims_copy.append(e.union(o))
-            poss_elims_copy = sorted(poss_elims_copy, key=len)
-            poss_elims = poss_elims_copy[:beam_width]
-
-    else:
-        for chosen in product(*args):
-            elim = set.union(*chosen) # eliminate these rules
-            exist = False
-            for p in poss_elims:
-                if p == elim:
-                    exist = True
-                    break
-            if not exist:
-                poss_elims.append(elim)
-        poss_elims = sorted(poss_elims, key=len)
-
-    for i in range(len(poss_elims)): # start from minimal set of rules
-        if poss_elims[i] is None:
-            continue
-        for j in range(i+1, len(poss_elims)): # remove redundant
-            if poss_elims[j] is None:
-                continue
-            if not (poss_elims[i]-poss_elims[j]):
-                poss_elims[j] = None
-
-    min_poss_elims = list(filter(lambda x: x is not None, poss_elims)) # all minimal rule sets
-    best_e = None
-    best_counter = None
-    for e in min_poss_elims: # for each minimal rule set
-        counter = []
-        for i, derivs in enumerate(all_derivs):
-            inters = [bool(set(derivs[j]) & e) for j in range(len(derivs))]
-            if np.all(inters): # all derivs for this graph requires a rule from e
-                counter.append(i) # graph is no longer in language
-        if best_counter is None or len(counter) < len(best_counter):
-            best_counter = counter
-            best_e = list(sorted(e))
-
-    
+    # else:    
+    # found = enumerate_rules(graphs, grammar)    
+    manager = mp.Manager()
+    stack = manager.list()
+    mem = manager.dict()
+    lock = manager.Lock()
+    index_graphs = [(i, graph) for i, graph in enumerate(graphs)]
+    sorted_graphs = sorted(index_graphs, key=lambda x:len(x[1]))
+    all_derivs = {}
+    cache_path = save_path.replace(".json", "_derivs.json")
+    if os.path.exists(cache_path):
+        all_derivs = json.load(open(cache_path))
+    for (index, graph) in sorted_graphs:
+        if index in all_derivs:
+            logger.info(f"{index} enumerated")
+            derivs = all_derivs[index]
+        else:
+            g = nx.DiGraph()
+            g.add_node('0', label='black')    
+            init_hash = wl_hash(g)
+            stack.append((deepcopy(g), init_hash))
+            processes = []
+            for _ in range(NUM_PROCS):
+                p = mp.Process(target=worker_single, args=(stack, grammar, graph, init_hash, mem, lock))
+                p.start()
+                processes.append(p)
+            for p in processes:
+                p.join()    
+            derivs = mem[init_hash]
+            all_derivs[index] = derivs
+            json.dump(all_derivs, open(cache_path, 'w+'))
+        rule_set = try_disambiguate(grammar, derivs)
+        n = len(list(filter(None, grammar.rules)))
+        logger.info(f"removing rules {rule_set}: {n}->{n-len(rule_set)}")
+        for r in rule_set:        
+            grammar.rules[r] = None
+    best_e = [i for i in range(len(grammar.rules)) if grammar.rules[i] is None]
+    e = set(best_e)
+    best_counter = []
+    for i in range(len(graphs)):
+        derivs = all_derivs[i]
+        inters = [bool(set(derivs[j]) & e) for j in range(len(derivs))]
+        if np.all(inters): # all derivs for this graph requires a rule from e
+            best_counter.append(i) # graph is no longer in language
     data = {'rules': best_e,
             'redo': best_counter}
     json.dump(data, open(save_path, 'w+'))
