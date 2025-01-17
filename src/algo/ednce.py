@@ -533,6 +533,8 @@ def try_disambiguate(grammar, derivs):
         if num_remove < min_num_remove:
             min_num_remove = num_remove
             min_remove = rule_set
+    if min_remove is None:
+        min_remove = hitting(counts.keys())            
     return min_remove
 
 
@@ -543,10 +545,6 @@ def resolve_ambiguous(graphs, model, grammar, save_path):
     #     found = enumerate_rules_mp(graphs, grammar)
     # else:    
     # found = enumerate_rules(graphs, grammar)    
-    manager = mp.Manager()
-    stack = manager.list()
-    mem = manager.dict()
-    lock = manager.Lock()
     index_graphs = [(i, graph) for i, graph in enumerate(graphs)]
     sorted_graphs = sorted(index_graphs, key=lambda x:len(x[1]))
     all_derivs = {}
@@ -554,6 +552,10 @@ def resolve_ambiguous(graphs, model, grammar, save_path):
     if os.path.exists(cache_path):
         all_derivs = json.load(open(cache_path))
     for (index, graph) in sorted_graphs:
+        manager = mp.Manager()
+        stack = manager.list()
+        mem = manager.dict()
+        lock = manager.Lock()        
         if index in all_derivs:
             logger.info(f"{index} enumerated")
             derivs = all_derivs[index]
