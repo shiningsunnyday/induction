@@ -584,6 +584,9 @@ def train(args, train_data, test_data):
     if best_ckpt_path is not None:
         logger.info(f"loaded {best_ckpt_path} loss {best_loss} start_epoch {start_epoch}")
         model.load_state_dict(torch.load(best_ckpt_path))
+
+    patience = 25
+    patience_counter = 0
     
     train_latent = np.empty((len(train_data), args.latent_dim))
     test_latent = np.empty((len(test_data), args.latent_dim))
@@ -639,10 +642,14 @@ def train(args, train_data, test_data):
         val_loss /= len(test_dataset)
         valid_rec_acc_mean = rec_acc_sum / len(test_dataset)
         if val_loss < best_loss:
+            patience = 0 # reset counter
             best_loss = val_loss
             ckpt_path = f'ckpts/api_ckt_ednce/{args.folder}/epoch={epoch}_loss={best_loss}.pth'
             torch.save(model.state_dict(), ckpt_path)
             logger.info(ckpt_path)
+        else:
+            patience += 1
+            logger.info(f"No improvement from best loss, patience: {patience_counter}/{patience}")
         logger.info(f"Epoch {epoch}, Train Loss: {train_loss}, Val Loss: {val_loss}, Train Rec: {train_rec_acc_mean}, Val Rec: {valid_rec_acc_mean}")
         np.save(f'ckpts/api_ckt_ednce/{args.folder}/train_latent_{epoch}.npy', train_latent)
         np.save(f'ckpts/api_ckt_ednce/{args.folder}/test_latent_{epoch}.npy', test_latent)
@@ -650,6 +657,9 @@ def train(args, train_data, test_data):
         fig.savefig(f'ckpts/api_ckt_ednce/{args.folder}/{epoch}.png')        
         embedding = model.token_embedding.weight.detach().cpu().numpy()
         np.save(f'ckpts/api_ckt_ednce/{args.folder}/embedding_{epoch}.npy', embedding)
+        if patience > patience_counter:
+            logger.info(f"Early stopping triggered at epoch {epoch}. Best loss: {best_loss}")
+            break
     return model
 
 
