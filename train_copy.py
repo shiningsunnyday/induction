@@ -52,7 +52,7 @@ ENCODER = "TOKEN" # one of [TOKEN_GNN, GNN, TOKEN] (TOKEN is the default, embedd
 # Training
 BATCH_SIZE = 256
 EPOCHS = 500
-CUDA = 'cuda:0'
+CUDA = 'cuda'
 
 # Generate a random vocabulary of small graphs using NetworkX
 def generate_random_graphs(vocab_size):
@@ -285,6 +285,7 @@ class TransformerVAE(nn.Module):
         ax.set_title("2D t-SNE of nn.Embedding")
         ax.set_xlabel("t-SNE Dim 1")
         ax.set_ylabel("t-SNE Dim 2")
+        plt.close(fig)
         return fig
 
 
@@ -603,7 +604,7 @@ def train(train_data, test_data):
         print(f"loaded {best_ckpt_path} loss {best_loss} start_epoch {start_epoch}")
         model.load_state_dict(torch.load(best_ckpt_path))
 
-    patience = 10
+    patience = 25
     patience_counter = 0
 
     directory_path = f"ckpts/api_ckt_ednce/{ENCODER}_{ENCODER_LAYERS}_{DECODER_LAYERS}_{BATCH_SIZE}_{EPOCHS}_{LATENT_DIM}_{patience}/"
@@ -1058,7 +1059,19 @@ def main_scan(args):
 
     # (LATENT_DIM, ENCODER_LAYERS, DECODER_LAYERS, ENCODER, BATCH_SIZE, EPOCHS)
 
-    (1024, 4, 4, "TOKEN", 128, 230),
+    (512, 4, 4, "TOKEN", 128, 500),
+
+    (64, 4, 4, "TOKEN", 128, 500),
+
+    (128, 4, 4, "TOKEN", 128, 500),
+
+    (1024, 4, 4, "TOKEN", 128, 500),
+
+    (256, 4, 4, "TOKEN", 64, 500),
+    
+    (256, 4, 4, "TOKEN", 256, 500),
+
+    (256, 4, 4, "TOKEN", 512, 500),
 
 ]
 

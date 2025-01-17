@@ -280,6 +280,7 @@ class TransformerVAE(nn.Module):
         ax.set_title("2D t-SNE of nn.Embedding")
         ax.set_xlabel("t-SNE Dim 1")
         ax.set_ylabel("t-SNE Dim 2")
+        plt.close(fig)
         return fig
 
 
@@ -914,51 +915,56 @@ def process_single(g_orig, rules):
 
 
 def load_data(args, anno, grammar, orig, cache_dir, num_graphs, cache_path='data_and_rule2token.pkl'):
-    # for ckt only, duplicate and interleave anno
-    logger.info(f"begin load_data")
-    anno_copy = deepcopy(anno)
-    anno = {}
-    for n in anno_copy:
-        p = get_prefix(n)
-        s = get_suffix(n)
-        anno[f"{2*p}:{s}"] = anno_copy[n]
-        anno[f"{2*p+1}:{s}"] = deepcopy(anno_copy[n])
-    exist = os.path.exists(os.path.join(cache_dir, cache_path))
-    if exist:
-        logger.info(f"load data from {cache_path}")
+    if args.datapkl: # specified to load data from args.datapkl path
+        cache_path = f'{args.encoder}_data_and_rule2token.pkl'
+        logger.info(f"load data from {os.path.join(cache_dir, cache_path)}")
         data, rule2token = pickle.load(open(os.path.join(cache_dir, cache_path), 'rb'))
     else:
-        find_anno = {}        
-        for k in anno:
-            if get_prefix(k) not in find_anno:
-                find_anno[get_prefix(k)] = []
-            find_anno[get_prefix(k)].append(k)
-        rule2token = {}
-        pargs = []
-        data = []
-        for pre in tqdm(range(num_graphs), "gathering rule tokens"):
-            seq = find_anno[pre]
-            seq = seq[::-1] # derivation
-            rule_ids = [anno[s].attrs['rule'] for s in seq]
-            # orig_nodes = [list(anno[s].attrs['nodes']) for s in seq]
-            # orig_feats = [[orig.nodes[n]['feat'] if n in orig else 0.0 for n in nodes] for nodes in orig_nodes]    
-            # g_orig = copy_graph(orig, orig.comps[pre])
-            g_orig = nx.induced_subgraph(orig, orig.comps[pre]).copy()                
-            for i, r in enumerate(rule_ids):
-                # from networkx.algorithms.isomorphism import DiGraphMatcher
-                rule2token[r] = grammar.rules[r].subgraph
-                # matcher = DiGraphMatcher(copy_graph(g, orig_nodes[i]), rule2token[r], node_match=node_match)
-                # breakpoint()
-                # assert any(all([iso[orig_nodes[i][j]] == list(rule2token[r])[j]]) for iso in matcher.isomorphisms_iter())                
-            if args.encoder == "GNN":
-                data.append((rule_ids, g_orig))                
-            else:                    
-                rules = [(r, grammar.rules[r]) for r in rule_ids]
-                pargs.append((g_orig, rules))
-        if args.encoder != "GNN":
-            with mp.Pool(20) as p:
-                data = p.starmap(process_single, tqdm(pargs, "processing data mp"))
-        pickle.dump((data, rule2token), open(os.path.join(cache_dir, cache_path), 'wb+'))
+        # for ckt only, duplicate and interleave anno
+        logger.info(f"begin load_data")
+        anno_copy = deepcopy(anno)
+        anno = {}
+        for n in anno_copy:
+            p = get_prefix(n)
+            s = get_suffix(n)
+            anno[f"{2*p}:{s}"] = anno_copy[n]
+            anno[f"{2*p+1}:{s}"] = deepcopy(anno_copy[n])
+        exist = os.path.exists(os.path.join(cache_dir, cache_path))
+        if exist:
+            logger.info(f"load data from {cache_path}")
+            data, rule2token = pickle.load(open(os.path.join(cache_dir, cache_path), 'rb'))
+        else:
+            find_anno = {}        
+            for k in anno:
+                if get_prefix(k) not in find_anno:
+                    find_anno[get_prefix(k)] = []
+                find_anno[get_prefix(k)].append(k)
+            rule2token = {}
+            pargs = []
+            data = []
+            for pre in tqdm(range(num_graphs), "gathering rule tokens"):
+                seq = find_anno[pre]
+                seq = seq[::-1] # derivation
+                rule_ids = [anno[s].attrs['rule'] for s in seq]
+                # orig_nodes = [list(anno[s].attrs['nodes']) for s in seq]
+                # orig_feats = [[orig.nodes[n]['feat'] if n in orig else 0.0 for n in nodes] for nodes in orig_nodes]    
+                # g_orig = copy_graph(orig, orig.comps[pre])
+                g_orig = nx.induced_subgraph(orig, orig.comps[pre]).copy()                
+                for i, r in enumerate(rule_ids):
+                    # from networkx.algorithms.isomorphism import DiGraphMatcher
+                    rule2token[r] = grammar.rules[r].subgraph
+                    # matcher = DiGraphMatcher(copy_graph(g, orig_nodes[i]), rule2token[r], node_match=node_match)
+                    # breakpoint()
+                    # assert any(all([iso[orig_nodes[i][j]] == list(rule2token[r])[j]]) for iso in matcher.isomorphisms_iter())                
+                if args.encoder == "GNN":
+                    data.append((rule_ids, g_orig))                
+                else:                    
+                    rules = [(r, grammar.rules[r]) for r in rule_ids]
+                    pargs.append((g_orig, rules))
+            if args.encoder != "GNN":
+                with mp.Pool(20) as p:
+                    data = p.starmap(process_single, tqdm(pargs, "processing data mp"))
+            pickle.dump((data, rule2token), open(os.path.join(cache_dir, cache_path), 'wb+'))
     relabel = dict(zip(list(sorted(rule2token)), range(len(rule2token))))    
     token2rule = dict(zip(relabel.values(), relabel.keys()))
     if args.encoder == "GNN":
@@ -992,7 +998,14 @@ def hash_args(args):
 def main(args):
     folder = hash_args(args)
     setattr(args, "folder", folder)
-    os.makedirs(f'cache/api_ckt_ednce/{folder}', exist_ok=True)
+    run_dir = f'ckpts/api_ckt_ednce/{folder}'
+    os.makedirs(run_dir, exist_ok=True)
+    #json.dumps(args.__dict__, folder)
+    args_path = os.path.join(run_dir, "args.txt")
+    with open(args_path, "w") as f:
+        for arg_name, arg_value in sorted(args.__dict__.items()):
+            f.write(f"{arg_name}: {arg_value}\n")
+
     cache_dir = 'cache/api_ckt_ednce/'
     num_graphs = 10000
     version = get_next_version(cache_dir)-1    
@@ -1000,6 +1013,7 @@ def main(args):
     grammar, anno, g = pickle.load(open(os.path.join(cache_dir, f'{version}.pkl'),'rb'))    
     orig = load_ckt(args, load_all=True)
     train_data, test_data, token2rule = load_data(args, anno, grammar, orig, cache_dir, num_graphs, cache_path=os.path.join(folder, 'data.pkl'))
+    print(f'The folder being written to is: {folder}')
     # prepare y
     # TODO: remove this later
     indices = list(range(num_graphs))
@@ -1035,5 +1049,6 @@ if __name__ == "__main__":
     parser.add_argument("--batch-size", type=int, default=256)
     parser.add_argument("--epochs", type=int, default=500)
     parser.add_argument("--cuda", default='cpu')
+    parser.add_argument("--datapkl", type=bool, default=False)
     args = parser.parse_args()        
     main(args)
