@@ -9,6 +9,7 @@ import numpy as np
 from scipy.spatial.distance import pdist
 import scipy.stats as sps
 from scipy.stats import pearsonr
+import hashlib
 # import gpflow
 # from gpflow.models import SVGP
 # from gpflow.optimizers import NaturalGradient
@@ -39,20 +40,8 @@ import sys
 sys.path.append('dagnn/dvae/bayesian_optimization')
 from sparse_gp import SparseGP
 
-# Grammar
-VOCAB_SIZE = 204  # Number of rules
-# MAX_RULE_SIZE = 5 # Max size of rule's rhs graph
-SEQ_LEN = 13  # Max length of sequences
-NUM_SAMPLES = 3
-# NN
-LATENT_DIM = 256
-ENCODER_LAYERS = 4
-DECODER_LAYERS = 4
-ENCODER = "GNN" # one of [TOKEN_GNN, GNN] or default to token
-# Training
-BATCH_SIZE = 256
-EPOCHS = 500
-CUDA = 'cpu'
+# Logging
+logger = create_logger("train", "cache/api_ckt_ednce/train.log")
 
 # Generate a random vocabulary of small graphs using NetworkX
 def generate_random_graphs(vocab_size):
@@ -254,23 +243,29 @@ class TransformerEncoder(nn.Module):
 
 # Define VAE
 class TransformerVAE(nn.Module):
-    def __init__(self, embed_dim, latent_dim, seq_len):
+    def __init__(self, encoder, encoder_layers, decoder_layers, embed_dim, latent_dim, seq_len):
         super(TransformerVAE, self).__init__()        
         # self.token_gnn = TokenGNN(embed_dim)
-        if ENCODER == "TOKEN_GNN":
-            self.gnn = DAGNN(None, None, 13, LATENT_DIM, None, w_edge_attr=False, bidirectional=False, num_class=LATENT_DIM)        
-            self.transformer_encoder = TransformerEncoder(embed_dim, num_layers=ENCODER_LAYERS)            
-        elif ENCODER == "GNN":
+        self.encoder = encoder
+        self.encoder_layers = encoder_layers
+        self.decoder_layers = decoder_layers
+        self.embed_dim = embed_dim
+        self.latent_dim = latent_dim
+        self.seq_len = seq_len
+        if encoder == "TOKEN_GNN":
+            self.gnn = DAGNN(None, None, 13, latent_dim, None, w_edge_attr=False, bidirectional=False, num_class=latent_dim)        
+            self.transformer_encoder = TransformerEncoder(embed_dim, num_layers=encoder_layers)            
+        elif encoder == "GNN":
             self.token_embedding = nn.Embedding(VOCAB_SIZE, embed_dim)
-            self.gnn = DAGNN(None, None, 13, LATENT_DIM, None, w_edge_attr=False, bidirectional=False, num_class=LATENT_DIM)
+            self.gnn = DAGNN(None, None, 13, latent_dim, None, w_edge_attr=False, bidirectional=False, num_class=latent_dim)
         else:
             self.token_embedding = nn.Embedding(VOCAB_SIZE, embed_dim)
-            self.transformer_encoder = TransformerEncoder(embed_dim, num_layers=ENCODER_LAYERS)
+            self.transformer_encoder = TransformerEncoder(embed_dim, num_layers=encoder_layers)
         self.fc_mu = nn.Linear(embed_dim, latent_dim)
         self.fc_logvar = nn.Linear(embed_dim, latent_dim)
         
         self.fc_decode = nn.Linear(latent_dim, latent_dim)
-        self.transformer_decoder = TransformerEncoder(embed_dim + latent_dim, num_layers=DECODER_LAYERS)
+        self.transformer_decoder = TransformerEncoder(embed_dim + latent_dim, num_layers=decoder_layers)
         self.output_layer = nn.Linear(embed_dim + latent_dim, VOCAB_SIZE)
         self.start_token_embedding = nn.Parameter(torch.randn(1, 1, embed_dim))
 
@@ -292,24 +287,24 @@ class TransformerVAE(nn.Module):
         if token_ids.dim() == 2:
             return torch.stack([self.embed_tokens(token_id_seq, g_list) for (token_id_seq, g_list) in zip(token_ids, batch_g_list)], dim=0)
         else:
-            if ENCODER != "TOKEN_GNN":
+            if self.encoder != "TOKEN_GNN":
                 return self.token_embedding(token_ids)
             g_list = batch_g_list
         embedded_tokens = []
         g_list = [g_list[i] for i in range(len(g_list))]
         for token_id, graph_data in zip(token_ids, g_list):
             if graph_data is None:
-                embedded_token = torch.zeros((LATENT_DIM,), device=CUDA)
+                embedded_token = torch.zeros((args.latent_dim,), device=args.cuda)
             else:
-                graph_data.to(CUDA)
+                graph_data.to(args.cuda)
                 embedded_token = self.gnn(graph_data).flatten()
             embedded_tokens.append(embedded_token)
         return torch.stack(embedded_tokens, dim=0)
         # return torch.cat(embedded_tokens, dim=0)
 
     def encode(self, x, attention_mask=None):        
-        if ENCODER == "GNN":            
-            pooled = torch.stack([self.gnn(g.to(CUDA)).flatten() for g in x], dim=0)
+        if self.encoder == "GNN":            
+            pooled = torch.stack([self.gnn(g.to(args.cuda)).flatten() for g in x], dim=0)
         else:
             assert attention_mask is not None
             encoded_seq = self.transformer_encoder(x.permute(1, 0, 2), src_key_padding_mask=~attention_mask).permute(1, 0, 2)
@@ -476,7 +471,7 @@ class TransformerVAE(nn.Module):
 
     def forward(self, x, attention_mask, seq_len_list, batch_g_list):
         embedded_tokens = self.embed_tokens(x, batch_g_list)  # Embeds each token (graph) using GNN or learnable embedding        
-        if ENCODER == "GNN":
+        if self.encoder == "GNN":
             mu, logvar = self.encode(batch_g_list, attention_mask)
         else:
             mu, logvar = self.encode(embedded_tokens, attention_mask)
@@ -504,22 +499,33 @@ def collate_batch(batch):
     attention_mask = torch.zeros((len(batch), max_len), dtype=torch.bool)
     graphs = []
     idxes = []
-    if ENCODER != "GNN":
-        batch_g_list = []            
+    batch_g_list = []            
     for i, (seq, graph, idx) in enumerate(batch):
         padded_batch[i, :len(seq)] = seq
         seq_len_list[i] = len(seq)       
         idxes.append(idx)
         attention_mask[i, :len(seq)] = 1
-        if ENCODER == "GNN":
-            graphs.append(graph)         
-        else:
-            g_list.update({i: None for i in range(len(g_list), max_len)})
-            batch_g_list.append(g_list)  
-    if ENCODER == "GNN":
-        return padded_batch, attention_mask, seq_len_list, graphs, idxes   
-    else:
-        return padded_batch, attention_mask, seq_len_list, batch_g_list, idxes 
+        g_list.update({i: None for i in range(len(g_list), max_len)})
+        batch_g_list.append(g_list)  
+    return padded_batch, attention_mask, seq_len_list, batch_g_list, idxes 
+    
+
+def collate_batch_gnn(batch):
+    lengths = [len(seq) for seq, _, _ in batch]
+    max_len = max(lengths)
+    padded_batch = torch.zeros(len(batch), max_len, dtype=torch.long)    
+    seq_len_list = torch.zeros(len(batch), dtype=torch.long)
+    attention_mask = torch.zeros((len(batch), max_len), dtype=torch.bool)
+    graphs = []
+    idxes = []          
+    for i, (seq, graph, idx) in enumerate(batch):
+        padded_batch[i, :len(seq)] = seq
+        seq_len_list[i] = len(seq)       
+        idxes.append(idx)
+        attention_mask[i, :len(seq)] = 1
+        graphs.append(graph)         
+    return padded_batch, attention_mask, seq_len_list, graphs, idxes   
+
 
 
 # Sampling new sequences
@@ -528,8 +534,8 @@ def sample(model, num_samples=5, max_seq_len=10):
     uniq_sequences = set()
     with torch.no_grad():
         while len(uniq_sequences) < num_samples:
-            z = torch.randn(num_samples, LATENT_DIM)  # Sample from the prior
-            z = z.to(CUDA)
+            z = torch.randn(num_samples, args.latent_dim)  # Sample from the prior
+            z = z.to(args.cuda)
             generated_sequences = model.autoregressive_inference(z, max_seq_len)  # Decode from latent space            
             uniq_sequences = uniq_sequences | set(map(tuple, generated_sequences))
     uniq_sequences = [list(l) for l in uniq_sequences]
@@ -541,12 +547,12 @@ def decode_from_latent_space(z, model, max_seq_len=10):
     return generated_sequences
     
 
-def train(train_data, test_data):
+def train(args, train_data, test_data):
     # Initialize model and optimizer
-    model = TransformerVAE(LATENT_DIM, LATENT_DIM, SEQ_LEN)
+    model = TransformerVAE(args.encoder, args.encoder_layers, args.decoder_layers, args.latent_dim, args.latent_dim, MAX_SEQ_LEN)
     optimizer = optim.Adam(model.parameters(), lr=1e-4)
     
-    if ENCODER == "GNN":
+    if args.encoder == "GNN":
         train_dataset = GraphDataset(train_data)
         test_dataset = GraphDataset(test_data) 
     else:       
@@ -559,11 +565,11 @@ def train(train_data, test_data):
 
     # Training loop
     model.train()
-    model = model.to(CUDA)
-    if ENCODER == "TOKEN_GNN":
+    model = model.to(args.cuda)
+    if args.encoder == "TOKEN_GNN":
         for i, graph_data in enumerate(graph_data_vocabulary):
-            graph_data_vocabulary[i] = graph_data.to(CUDA)
-    ckpts = glob.glob('ckpts/api_ckt_ednce/*.pth')
+            graph_data_vocabulary[i] = graph_data.to(args.cuda)
+    ckpts = glob.glob(f'ckpts/api_ckt_ednce/{args.folder}*.pth')
     start_epoch = 0
     best_loss = float("inf")
     best_ckpt_path = None
@@ -575,58 +581,74 @@ def train(train_data, test_data):
             start_epoch = epoch + 1
             best_ckpt_path = ckpt    
     if best_ckpt_path is not None:
-        print(f"loaded {best_ckpt_path} loss {best_loss} start_epoch {start_epoch}")
+        logger.info(f"loaded {best_ckpt_path} loss {best_loss} start_epoch {start_epoch}")
         model.load_state_dict(torch.load(best_ckpt_path))
     
-    train_latent = np.empty((len(train_data), LATENT_DIM))
-    test_latent = np.empty((len(test_data), LATENT_DIM))
-    for epoch in tqdm(range(start_epoch, EPOCHS+1)):
+    train_latent = np.empty((len(train_data), args.latent_dim))
+    test_latent = np.empty((len(test_data), args.latent_dim))
+    for epoch in tqdm(range(start_epoch, args.epochs+1)):
         model.train()
         train_loss = 0.
+        rec_acc_sum = 0.
         g_batch = []
         for i in tqdm(range(len(train_dataset))):
             g_batch.append(train_dataset[i])
-            if len(g_batch) == BATCH_SIZE or i == len(train_dataset)-1:
-                batch = collate_batch(g_batch)
+            if len(g_batch) == args.batch_size or i == len(train_dataset)-1:
+                if args.encoder == "GNN":
+                    batch = collate_batch_gnn(g_batch)
+                else:
+                    batch = collate_batch(g_batch)
                 x, attention_mask, seq_len_list, batch_g_list, batch_idxes = batch
-                x, attention_mask = x.to(CUDA), attention_mask.to(CUDA)
+                x, attention_mask = x.to(args.cuda), attention_mask.to(args.cuda)
                 optimizer.zero_grad()
-                recon_logits, mask, mu, logvar = model(x, attention_mask, seq_len_list, batch_g_list)            
+                recon_logits, mask, mu, logvar = model(x, attention_mask, seq_len_list, batch_g_list)                           
                 loss = vae_loss(recon_logits, mask, x, mu, logvar)
                 loss.backward()            
                 train_loss += loss.item()*len(batch_idxes)
+                rll = recon_logits.argmax(axis=-1).reshape(x.shape)
+                rec_acc = (rll == x).all(axis=-1)
+                rec_acc_sum += rec_acc.sum()
                 optimizer.step()
                 train_latent[batch_idxes] = mu.detach().cpu().numpy()
                 g_batch = []
         train_loss /= len(train_dataset)
+        train_rec_acc_mean = rec_acc_sum / len(train_dataset)
         model.eval()
         val_loss = 0.
+        rec_acc_sum = 0.
         g_batch = []
         with torch.no_grad():
             for i in tqdm(range(len(test_dataset))):
                 g_batch.append(test_dataset[i])
-                if len(g_batch) == BATCH_SIZE or i == len(test_dataset)-1:
-                    batch = collate_batch(g_batch)                
+                if len(g_batch) == args.batch_size or i == len(test_dataset)-1:
+                    if args.encoder == "GNN":
+                        batch = collate_batch_gnn(g_batch)
+                    else:
+                        batch = collate_batch(g_batch)               
                     x, attention_mask, seq_len_list, batch_g_list, batch_idxes = batch
-                    x, attention_mask = x.to(CUDA), attention_mask.to(CUDA)
-                    recon_logits, mask, mu, logvar = model(x, attention_mask, seq_len_list, batch_g_list)                                
+                    x, attention_mask = x.to(args.cuda), attention_mask.to(args.cuda)
+                    recon_logits, mask, mu, logvar = model(x, attention_mask, seq_len_list, batch_g_list)
                     loss = vae_loss(recon_logits, mask, x, mu, logvar)            
                     val_loss += loss.item()*len(batch_idxes)
+                    rll = recon_logits.argmax(axis=-1).reshape(x.shape)
+                    rec_acc = (rll == x).all(axis=-1)
+                    rec_acc_sum += rec_acc.sum()
                     test_latent[batch_idxes] = mu.detach().cpu().numpy()
                     g_batch = []   
         val_loss /= len(test_dataset)
+        valid_rec_acc_mean = rec_acc_sum / len(test_dataset)
         if val_loss < best_loss:
             best_loss = val_loss
-            ckpt_path = f'ckpts/api_ckt_ednce/epoch={epoch}_loss={best_loss}.pth'
+            ckpt_path = f'ckpts/api_ckt_ednce/{args.folder}/epoch={epoch}_loss={best_loss}.pth'
             torch.save(model.state_dict(), ckpt_path)
-            print(ckpt_path)
-        print(f"Epoch {epoch}, Train Loss: {train_loss}, Val Loss: {val_loss}")
-        np.save(f'ckpts/api_ckt_ednce/train_latent_{epoch}.npy', train_latent)
-        np.save(f'ckpts/api_ckt_ednce/test_latent_{epoch}.npy', test_latent)
+            logger.info(ckpt_path)
+        logger.info(f"Epoch {epoch}, Train Loss: {train_loss}, Val Loss: {val_loss}, Train Rec: {train_rec_acc_mean}, Val Rec: {valid_rec_acc_mean}")
+        np.save(f'ckpts/api_ckt_ednce/{args.folder}/train_latent_{epoch}.npy', train_latent)
+        np.save(f'ckpts/api_ckt_ednce/{args.folder}/test_latent_{epoch}.npy', test_latent)
         fig = model.visualize_tokens()
-        fig.savefig(f'ckpts/{epoch}.png')        
+        fig.savefig(f'ckpts/api_ckt_ednce/{args.folder}/{epoch}.png')        
         embedding = model.token_embedding.weight.detach().cpu().numpy()
-        np.save(f'ckpts/api_ckt_ednce/embedding_{epoch}.npy', embedding)
+        np.save(f'ckpts/api_ckt_ednce/{args.folder}/embedding_{epoch}.npy', embedding)
     return model
 
 
@@ -652,7 +674,7 @@ def train_sgp(sgp, input_means, training_targets, batch_size=1000, lr=1e-4, max_
         for step, batch in enumerate(train_dataset):
             loss = train_step(sgp, adam_optimizer, batch)
             loss_total += loss.numpy()
-        print(f"Epoch {i}: Loss = {loss_total}")
+        logger.info(f"Epoch {i}: Loss = {loss_total}")
         sgp.predict(X_test)
 
 
@@ -669,12 +691,12 @@ def bo(args, model, y_train, y_test):
     best_arc = None
     best_random_score = 1e15
     best_random_arc = None
-    print("Average pairwise distance between train points = {}".format(np.mean(pdist(X_train))))
-    print("Average pairwise distance between test points = {}".format(np.mean(pdist(X_test))))    
+    logger.info("Average pairwise distance between train points = {}".format(np.mean(pdist(X_train))))
+    logger.info("Average pairwise distance between test points = {}".format(np.mean(pdist(X_test))))    
     while iteration < args.BO_rounds:
-        print("Iteration", iteration)
+        logger.info("Iteration", iteration)
         if args.predictor:
-            pred = model.predictor(torch.FloatTensor(X_test).to(CUDA))
+            pred = model.predictor(torch.FloatTensor(X_test).to(args.cuda))
             pred = pred.detach().cpu().numpy()
             pred = (-pred - mean_y_train) / std_y_train
             uncert = np.zeros_like(pred)
@@ -703,21 +725,21 @@ def bo(args, model, y_train, y_test):
             # train_sgp(sgp, input_means, training_targets, batch_size=2*M)
             # pred, var = sgp.predict_y(X_test)
 
-        print("predictions: ", pred.reshape(-1))
-        print("real values: ", y_test.reshape(-1))
+        logger.info("predictions: ", pred.reshape(-1))
+        logger.info("real values: ", y_test.reshape(-1))
         error = np.sqrt(np.mean((pred - y_test)**2))
         testll = np.mean(sps.norm.logpdf(pred - y_test, scale = np.sqrt(uncert)))
-        print('Test RMSE: ', error)
-        print('Test ll: ', testll)
+        logger.info('Test RMSE: ', error)
+        logger.info('Test ll: ', testll)
         pearson = float(pearsonr(pred.flatten(), y_test.flatten())[0])
-        print('Pearson r: ', pearson)
+        logger.info('Pearson r: ', pearson)
         with open('results/' + 'Test_RMSE_ll.txt', 'a') as test_file:
             test_file.write('Test RMSE: {:.4f}, ll: {:.4f}, Pearson r: {:.4f}\n'.format(error, testll, pearson))
 
         error_if_predict_mean = np.sqrt(np.mean((np.mean(y_train, 0) - y_test)**2))
-        print('Test RMSE if predict mean: ', error_if_predict_mean)
+        logger.info('Test RMSE if predict mean: ', error_if_predict_mean)
         if args.predictor:
-            pred = model.predictor(torch.FloatTensor(X_train).to(CUDA))
+            pred = model.predictor(torch.FloatTensor(X_train).to(args.cuda))
             pred = pred.detach().cpu().numpy()
             pred = (-pred - mean_y_train) / std_y_train
             uncert = np.zeros_like(pred)
@@ -725,13 +747,13 @@ def bo(args, model, y_train, y_test):
             pred, uncert = sgp.predict(X_train, 0 * X_train)
         error = np.sqrt(np.mean((pred - y_train)**2))
         trainll = np.mean(sps.norm.logpdf(pred - y_train, scale = np.sqrt(uncert)))
-        print('Train RMSE: ', error)
-        print('Train ll: ', trainll)
+        logger.info('Train RMSE: ', error)
+        logger.info('Train ll: ', trainll)
         breakpoint()                   
         next_inputs = sgp.batched_greedy_ei(args.BO_batch_size, np.min(X_train, 0), np.max(X_train, 0), np.mean(X_train, 0), np.std(X_train, 0), sample=args.sample_dist)
-        valid_arcs_final = decode_from_latent_space(torch.FloatTensor(next_inputs).to(CUDA), model)
+        valid_arcs_final = decode_from_latent_space(torch.FloatTensor(next_inputs).to(args.cuda), model)
         new_features = next_inputs
-        print("Evaluating selected points")
+        logger.info("Evaluating selected points")
         scores = []
         for i in range(len(valid_arcs_final)):
             arc = valid_arcs_final[ i ]
@@ -744,9 +766,9 @@ def bo(args, model, y_train, y_test):
                 best_score = score
                 best_arc = arc
             scores.append(score)
-            # print(i, score)
-        # print("Iteration {}'s selected arcs' scores:".format(iteration))
-        # print(scores, np.mean(scores))
+            # logger.info(i, score)
+        # logger.info("Iteration {}'s selected arcs' scores:".format(iteration))
+        # logger.info(scores, np.mean(scores))
         save_object(scores, "{}scores{}.dat".format(save_dir, iteration))
         save_object(valid_arcs_final, "{}valid_arcs_final{}.dat".format(save_dir, iteration))
 
@@ -754,9 +776,9 @@ def bo(args, model, y_train, y_test):
             X_train = np.concatenate([ X_train, new_features ], 0)
             y_train = np.concatenate([ y_train, np.array(scores)[ :, None ] ], 0)
         #
-        # print("Current iteration {}'s best score: {}".format(iteration, - best_score * std_y_train - mean_y_train))
+        # logger.info("Current iteration {}'s best score: {}".format(iteration, - best_score * std_y_train - mean_y_train))
         if best_arc is not None: # and iteration == 10:
-            print("Best architecture: ", best_arc)
+            logger.info("Best architecture: ", best_arc)
             with open(save_dir + 'best_arc_scores.txt', 'a') as score_file:
                 score_file.write(best_arc + ', {:.4f}\n'.format(-best_score * std_y_train - mean_y_train))
             if data_type == 'ENAS':
@@ -771,9 +793,9 @@ def bo(args, model, y_train, y_test):
 
 
 def visualize_sequences(sampled_sequences, grammar, token2rule):
-    print("===SAMPLED SEQUENCES===")
+    logger.info("===SAMPLED SEQUENCES===")
     for i, seq in enumerate(sampled_sequences):
-        print('->'.join(map(str, seq)))
+        logger.info('->'.join(map(str, seq)))
         # Visualize new sequence
         path = f'data/api_ckt_ednce/generate/{i}.png'
         img_path = f'data/api_ckt_ednce/generate/{i}_g.png'
@@ -782,13 +804,13 @@ def visualize_sequences(sampled_sequences, grammar, token2rule):
             r = grammar.rules[j]
             draw_graph(r.subgraph, ax=axes[idx], scale=5)
         fig.savefig(path)
-        print(os.path.abspath(path))
+        logger.info(os.path.abspath(path))
         g = grammar.derive(seq, token2rule)        
         draw_graph(g, path=img_path)    
 
 
 def sample_sequences(model, grammar, token2rule, num_samples=5, max_seq_len=10):
-    # Generate and print new sequences
+    # Generate and logger.info new sequences
     sampled_sequences = sample(model, num_samples, max_seq_len)
     visualize_sequences(sampled_sequences, grammar, token2rule)
 
@@ -809,8 +831,8 @@ def interactive_sample_sequences(model, grammar, token2rule, num_samples=5, max_
     with torch.no_grad():
         with tqdm(total=num_samples) as pbar:
             while len(uniq_sequences) < num_samples:
-                z = torch.randn(num_samples, LATENT_DIM)  
-                z = z.to(CUDA)            
+                z = torch.randn(num_samples, args.latent_dim)  
+                z = z.to(args.cuda)            
                 batch_size = z.size(0)
                 z_context = model.fc_decode(z)              
                 token_embeddings = list(torch.unbind(model.start_token_embedding.expand(batch_size, -1, -1), dim=0))  
@@ -830,9 +852,9 @@ def interactive_sample_sequences(model, grammar, token2rule, num_samples=5, max_
                 pbar.update(len(uniq_sequences)-pbar.n)
     uniq_sequences = [list(l) for l in uniq_sequences]
     sampled_sequences = uniq_sequences[:num_samples]
-    print("===SAMPLED SEQUENCES===")
+    logger.info("===SAMPLED SEQUENCES===")
     for i, seq in enumerate(sampled_sequences):
-        print('->'.join(map(str, seq)))
+        logger.info('->'.join(map(str, seq)))
         # Visualize new sequence
         path = f'data/api_ckt_ednce/generate/{i}.png'
         img_path = f'data/api_ckt_ednce/generate/{i}_g.png'
@@ -841,7 +863,7 @@ def interactive_sample_sequences(model, grammar, token2rule, num_samples=5, max_
             r = grammar.rules[j]
             draw_graph(r.subgraph, ax=axes[idx], scale=5)
         fig.savefig(path)
-        print(os.path.abspath(path))
+        logger.info(os.path.abspath(path))
         g = grammar.derive(seq, token2rule)
         draw_graph(g, path=img_path)    
     
@@ -891,9 +913,9 @@ def process_single(g_orig, rules):
     return rule_ids
 
 
-def load_data(anno, grammar, orig, cache_dir, num_graphs):
+def load_data(args, anno, grammar, orig, cache_dir, num_graphs, cache_path='data_and_rule2token.pkl'):
     # for ckt only, duplicate and interleave anno
-    print("begin load_data")
+    logger.info(f"begin load_data")
     anno_copy = deepcopy(anno)
     anno = {}
     for n in anno_copy:
@@ -901,9 +923,10 @@ def load_data(anno, grammar, orig, cache_dir, num_graphs):
         s = get_suffix(n)
         anno[f"{2*p}:{s}"] = anno_copy[n]
         anno[f"{2*p+1}:{s}"] = deepcopy(anno_copy[n])
-    exist = os.path.exists(os.path.join(cache_dir, 'data_and_rule2token.pkl'))
+    exist = os.path.exists(os.path.join(cache_dir, cache_path))
     if exist:
-        data, rule2token = pickle.load(open(os.path.join(cache_dir, 'data_and_rule2token.pkl'), 'rb'))
+        logger.info(f"load data from {cache_path}")
+        data, rule2token = pickle.load(open(os.path.join(cache_dir, cache_path), 'rb'))
     else:
         find_anno = {}        
         for k in anno:
@@ -927,18 +950,18 @@ def load_data(anno, grammar, orig, cache_dir, num_graphs):
                 # matcher = DiGraphMatcher(copy_graph(g, orig_nodes[i]), rule2token[r], node_match=node_match)
                 # breakpoint()
                 # assert any(all([iso[orig_nodes[i][j]] == list(rule2token[r])[j]]) for iso in matcher.isomorphisms_iter())                
-            if ENCODER == "GNN":
+            if args.encoder == "GNN":
                 data.append((rule_ids, g_orig))                
             else:                    
                 rules = [(r, grammar.rules[r]) for r in rule_ids]
                 pargs.append((g_orig, rules))
-        if ENCODER != "GNN":
+        if args.encoder != "GNN":
             with mp.Pool(20) as p:
                 data = p.starmap(process_single, tqdm(pargs, "processing data mp"))
-        pickle.dump((data, rule2token), open(os.path.join(cache_dir, 'data_and_rule2token.pkl'), 'wb+'))
+        pickle.dump((data, rule2token), open(os.path.join(cache_dir, cache_path), 'wb+'))
     relabel = dict(zip(list(sorted(rule2token)), range(len(rule2token))))    
     token2rule = dict(zip(relabel.values(), relabel.keys()))
-    if ENCODER == "GNN":
+    if args.encoder == "GNN":
         data = [([relabel[s] for s in seq], g) for seq, g in data]    
     else:
         data = [[(relabel[s[0]],)+s[1:] for s in seq] for seq in data]    
@@ -962,15 +985,21 @@ def load_data(anno, grammar, orig, cache_dir, num_graphs):
     return train_data, test_data, token2rule
 
 
+def hash_args(args):
+    return hashlib.md5(json.dumps(args.__dict__, sort_keys=True).encode()).hexdigest()
+
 
 def main(args):
+    folder = hash_args(args)
+    setattr(args, "folder", folder)
+    os.makedirs(f'cache/api_ckt_ednce/{folder}', exist_ok=True)
     cache_dir = 'cache/api_ckt_ednce/'
     num_graphs = 10000
     version = get_next_version(cache_dir)-1    
-    print(f"loading version {version}")
+    logger.info(f"loading version {version}")
     grammar, anno, g = pickle.load(open(os.path.join(cache_dir, f'{version}.pkl'),'rb'))    
     orig = load_ckt(args, load_all=True)
-    train_data, test_data, token2rule = load_data(anno, grammar, orig, cache_dir, num_graphs)        
+    train_data, test_data, token2rule = load_data(args, anno, grammar, orig, cache_dir, num_graphs, cache_path=os.path.join(folder, 'data.pkl'))
     # prepare y
     # TODO: remove this later
     indices = list(range(num_graphs))
@@ -984,7 +1013,7 @@ def main(args):
     test_y = y[test_indices, None]
     train_y = (train_y-mean_train_y)/std_train_y
     test_y = (test_y-mean_train_y)/std_train_y    
-    model = train(train_data, test_data)
+    model = train(args, train_data, test_data)
     # breakpoint()
     # bo(args, None, train_y, test_y)
     # interactive_sample_sequences(model, grammar, token2rule, max_seq_len=MAX_SEQ_LEN, num_samples=NUM_SAMPLES)    
@@ -995,5 +1024,16 @@ def main(args):
 if __name__ == "__main__":
     from src.grammar.common import get_parser
     parser = get_parser()
-    args = parser.parse_args()
+    # data hparams
+    parser.add_argument("--num-samples", type=int, default=3) 
+    # nn hparams
+    parser.add_argument("--latent-dim", type=int, default=256)
+    parser.add_argument("--encoder-layers", type=int, default=4)
+    parser.add_argument("--decoder-layers", type=int, default=4)
+    parser.add_argument("--encoder", choices=["TOKEN_GNN", "GNN", "TOKEN"], default="GNN")
+    # training
+    parser.add_argument("--batch-size", type=int, default=256)
+    parser.add_argument("--epochs", type=int, default=500)
+    parser.add_argument("--cuda", default='cpu')
+    args = parser.parse_args()        
     main(args)
