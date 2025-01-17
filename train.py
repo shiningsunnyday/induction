@@ -51,7 +51,7 @@ DECODER_LAYERS = 4
 ENCODER = "GNN" # one of [TOKEN_GNN, GNN] or default to token
 # Training
 BATCH_SIZE = 256
-EPOCHS = 230
+EPOCHS = 500
 CUDA = 'cpu'
 
 # Generate a random vocabulary of small graphs using NetworkX
@@ -602,19 +602,18 @@ def train(train_data, test_data):
         model.eval()
         val_loss = 0.
         g_batch = []
-        for i in tqdm(range(len(test_dataset))):
-            g_batch.append(test_dataset[i])
-            if len(g_batch) == BATCH_SIZE or i == len(test_dataset)-1:
-                batch = collate_batch(g_batch)                
-                x, attention_mask, seq_len_list, batch_g_list, batch_idxes = batch
-                x, attention_mask = x.to(CUDA), attention_mask.to(CUDA)
-                optimizer.zero_grad()
-                recon_logits, mask, mu, logvar = model(x, attention_mask, seq_len_list, batch_g_list)            
-                loss = vae_loss(recon_logits, mask, x, mu, logvar)            
-                loss.backward()
-                val_loss += loss.item()*len(batch_idxes)
-                test_latent[batch_idxes] = mu.detach().cpu().numpy()
-                optimizer.step()      
+        with torch.no_grad():
+            for i in tqdm(range(len(test_dataset))):
+                g_batch.append(test_dataset[i])
+                if len(g_batch) == BATCH_SIZE or i == len(test_dataset)-1:
+                    batch = collate_batch(g_batch)                
+                    x, attention_mask, seq_len_list, batch_g_list, batch_idxes = batch
+                    x, attention_mask = x.to(CUDA), attention_mask.to(CUDA)
+                    recon_logits, mask, mu, logvar = model(x, attention_mask, seq_len_list, batch_g_list)                                
+                    loss = vae_loss(recon_logits, mask, x, mu, logvar)            
+                    val_loss += loss.item()*len(batch_idxes)
+                    test_latent[batch_idxes] = mu.detach().cpu().numpy()
+                    g_batch = []   
         val_loss /= len(test_dataset)
         if val_loss < best_loss:
             best_loss = val_loss
