@@ -16,3 +16,6 @@
 [submodule "dagnn"]
 	path = dagnn
 	url = https://github.com/vthost/DAGNN.git
+[submodule "CktGNN"]
+	path = CktGNN
+	url = https://github.com/zehao-dong/CktGNN.git
