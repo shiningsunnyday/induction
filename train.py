@@ -506,7 +506,8 @@ def collate_batch(batch):
         seq_len_list[i] = len(seq)       
         idxes.append(idx)
         attention_mask[i, :len(seq)] = 1
-        g_list.update({i: None for i in range(len(g_list), max_len)})
+        g_list = [None] * max_len # pad to max_len
+        # g_list.update({i: None for i in range(len(g_list), max_len)})
         batch_g_list.append(g_list)  
     return padded_batch, attention_mask, seq_len_list, batch_g_list, idxes 
     
@@ -642,13 +643,13 @@ def train(args, train_data, test_data):
         val_loss /= len(test_dataset)
         valid_rec_acc_mean = rec_acc_sum / len(test_dataset)
         if val_loss < best_loss:
-            patience = 0 # reset counter
+            patience_counter = 0 # reset counter
             best_loss = val_loss
             ckpt_path = f'ckpts/api_ckt_ednce/{args.folder}/epoch={epoch}_loss={best_loss}.pth'
             torch.save(model.state_dict(), ckpt_path)
             logger.info(ckpt_path)
         else:
-            patience += 1
+            patience_counter += 1
             logger.info(f"No improvement from best loss, patience: {patience_counter}/{patience}")
         logger.info(f"Epoch {epoch}, Train Loss: {train_loss}, Val Loss: {val_loss}, Train Rec: {train_rec_acc_mean}, Val Rec: {valid_rec_acc_mean}")
         np.save(f'ckpts/api_ckt_ednce/{args.folder}/train_latent_{epoch}.npy', train_latent)
@@ -657,7 +658,7 @@ def train(args, train_data, test_data):
         fig.savefig(f'ckpts/api_ckt_ednce/{args.folder}/{epoch}.png')        
         embedding = model.token_embedding.weight.detach().cpu().numpy()
         np.save(f'ckpts/api_ckt_ednce/{args.folder}/embedding_{epoch}.npy', embedding)
-        if patience > patience_counter:
+        if patience_counter > patience:
             logger.info(f"Early stopping triggered at epoch {epoch}. Best loss: {best_loss}")
             break
     return model
