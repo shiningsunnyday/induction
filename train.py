@@ -939,12 +939,19 @@ def process_single(g_orig, rules):
     return rule_ids
 
 
-def load_data(args, anno, grammar, orig, cache_dir, num_graphs, cache_path='data_and_rule2token.pkl'):
-    if args.datapkl: # specified to load data from args.datapkl path
-        cache_path = f'{args.encoder}_data_and_rule2token.pkl'
-        logger.info(f"load data from {os.path.join(cache_dir, cache_path)}")
-        data, rule2token = pickle.load(open(os.path.join(cache_dir, cache_path), 'rb'))
-    else:
+def load_data(args, anno, grammar, orig, cache_dir, num_graphs):
+    loaded = False
+    if args.datapkl:
+        save_path = os.path.join(cache_dir, args.datapkl, 'data.pkl')
+        if os.path.exists(args.datapkl): # specified to load data from args.datapkl path
+            logger.info(f"load data from {save_path}")
+            data, rule2token = pickle.load(open(save_path, 'rb'))
+            loaded = True
+    if not loaded:        
+        if args.datapkl:
+            save_path = os.path.join(cache_dir, args.datapkl, 'data.pkl')
+        else:
+            save_path = os.path.join(cache_dir, args.folder, 'data.pkl')
         # for ckt only, duplicate and interleave anno
         logger.info(f"begin load_data")
         anno_copy = deepcopy(anno)
@@ -954,10 +961,10 @@ def load_data(args, anno, grammar, orig, cache_dir, num_graphs, cache_path='data
             s = get_suffix(n)
             anno[f"{2*p}:{s}"] = anno_copy[n]
             anno[f"{2*p+1}:{s}"] = deepcopy(anno_copy[n])
-        exist = os.path.exists(os.path.join(cache_dir, cache_path))
+        exist = os.path.exists(save_path)
         if exist:
-            logger.info(f"load data from {cache_path}")
-            data, rule2token = pickle.load(open(os.path.join(cache_dir, cache_path), 'rb'))
+            logger.info(f"load data from {save_path}")
+            data, rule2token = pickle.load(open(save_path, 'rb'))
         else:
             find_anno = {}        
             for k in anno:
@@ -989,7 +996,7 @@ def load_data(args, anno, grammar, orig, cache_dir, num_graphs, cache_path='data
             if args.encoder != "GNN":
                 with mp.Pool(20) as p:
                     data = p.starmap(process_single, tqdm(pargs, "processing data mp"))
-            pickle.dump((data, rule2token), open(os.path.join(cache_dir, cache_path), 'wb+'))
+            pickle.dump((data, rule2token), open(save_path, 'wb+'))
     relabel = dict(zip(list(sorted(rule2token)), range(len(rule2token))))    
     token2rule = dict(zip(relabel.values(), relabel.keys()))
     if args.encoder == "GNN":
@@ -1016,43 +1023,42 @@ def load_data(args, anno, grammar, orig, cache_dir, num_graphs, cache_path='data
     return train_data, test_data, token2rule
 
 
-def hash_args(args):
-    return hashlib.md5(json.dumps(args.__dict__, sort_keys=True).encode()).hexdigest()
+def hash_args(args, ignore_keys=['datapkl', 'checkpoint']):
+    arg_dict = {k: v for k, v in args.__dict__.items() if k not in ignore_keys}
+    return hashlib.md5(json.dumps(arg_dict, sort_keys=True).encode()).hexdigest()
 
 
 def main(args):
     cache_dir = 'cache/api_ckt_ednce/'
     folder = hash_args(args)
     setattr(args, "folder", folder)
-    run_dir = f'ckpts/api_ckt_ednce/{folder}'
-    os.makedirs(run_dir, exist_ok=True)
+    os.makedirs(f'ckpts/api_ckt_ednce/{folder}', exist_ok=True)
+    os.makedirs(f'cache/api_ckt_ednce/{folder}', exist_ok=True)
     #json.dumps(args.__dict__, folder)
-    args_path = os.path.join(run_dir, "args.txt")
+    args_path = os.path.join(f'ckpts/api_ckt_ednce/{folder}', "args.txt")
     with open(args_path, "w") as f:
         for arg_name, arg_value in sorted(args.__dict__.items()):
             f.write(f"{arg_name}: {arg_value}\n")
-
-    cache_dir = 'cache/api_ckt_ednce/'
     num_graphs = 10000
     version = get_next_version(cache_dir)-1    
     logger.info(f"loading version {version}")
     grammar, anno, g = pickle.load(open(os.path.join(cache_dir, f'{version}.pkl'),'rb'))    
     orig = load_ckt(args, load_all=True)
-    train_data, test_data, token2rule = load_data(args, anno, grammar, orig, cache_dir, num_graphs, cache_path=os.path.join(folder, 'data.pkl'))
+    train_data, test_data, token2rule = load_data(args, anno, grammar, orig, cache_dir, num_graphs)
     print(f'The folder being written to is: {folder}')
     # prepare y
     # TODO: remove this later
-    # indices = list(range(num_graphs))
-    # # random.Random(0).shuffle(indices)
-    # train_indices, test_indices = indices[:int(num_graphs*0.9)], indices[int(num_graphs*0.9):]    
-    # y = load_y(orig, num_graphs)    
-    # y = np.array(y)
-    # train_y = y[train_indices, None]
-    # mean_train_y = np.mean(train_y)
-    # std_train_y = np.std(train_y)    
-    # test_y = y[test_indices, None]
-    # train_y = (train_y-mean_train_y)/std_train_y
-    # test_y = (test_y-mean_train_y)/std_train_y    
+    indices = list(range(num_graphs))
+    # random.Random(0).shuffle(indices)
+    train_indices, test_indices = indices[:int(num_graphs*0.9)], indices[int(num_graphs*0.9):]    
+    y = load_y(orig, num_graphs)    
+    y = np.array(y)
+    train_y = y[train_indices, None]
+    mean_train_y = np.mean(train_y)
+    std_train_y = np.std(train_y)    
+    test_y = y[test_indices, None]
+    train_y = (train_y-mean_train_y)/std_train_y
+    test_y = (test_y-mean_train_y)/std_train_y    
     # model = train(args, train_data, test_data)
     # breakpoint()
     bo(args, None, train_y, test_y)
@@ -1075,8 +1081,7 @@ if __name__ == "__main__":
     parser.add_argument("--batch-size", type=int, default=256)
     parser.add_argument("--epochs", type=int, default=500)
     parser.add_argument("--cuda", default='cpu')
-    parser.add_argument("--datapkl", type=bool, default=False)
+    parser.add_argument("--datapkl", help="path to folder")
     # eval
-    parser.add_argument("--checkpoint", type=int)
     args = parser.parse_args()        
     main(args)
