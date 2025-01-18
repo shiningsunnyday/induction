@@ -6,6 +6,7 @@ from torch.utils.data import Dataset
 from sklearn.manifold import TSNE
 import networkx as nx
 import numpy as np
+from random import shuffle
 from scipy.spatial.distance import pdist
 import scipy.stats as sps
 from scipy.stats import pearsonr
@@ -187,12 +188,18 @@ class TokenDataset(Dataset):
                 graph, _ = convert_graph_to_data(g)
                 graph_seq[i] = graph                  
             self.dataset.append((torch.tensor(seq), graph_seq, idx))
+        self.perm = np.arange(len(data))
     
     def __len__(self):
         return len(self.data)
+    
+
+    def shuffle(self):
+        self.perm = np.random.permutation(self.perm)
+
 
     def __getitem__(self, idx):
-        return self.dataset[idx]
+        return self.dataset[self.perm[idx]]
 
 
 class GraphDataset(Dataset):
@@ -203,12 +210,16 @@ class GraphDataset(Dataset):
             seq, graph = self.data[idx]
             graph, _ = convert_graph_to_data(graph)
             self.dataset.append((torch.tensor(seq), graph, idx))
+        self.perm = np.arange(len(data))
     
     def __len__(self):
         return len(self.data)
 
+    def shuffle(self):
+        self.perm = np.random.permutation(self.perm)        
+
     def __getitem__(self, idx):
-        return self.dataset[idx]
+        return self.dataset[self.perm[idx]]
 
 
 # Define GNN-based Token Embedding
@@ -596,6 +607,7 @@ def train(args, train_data, test_data):
         model.train()
         train_loss = 0.
         rec_acc_sum = 0.
+        train_dataset.shuffle()
         g_batch = []
         for i in tqdm(range(len(train_dataset))):
             g_batch.append(train_dataset[i])
@@ -1009,6 +1021,7 @@ def hash_args(args):
 
 
 def main(args):
+    cache_dir = 'cache/api_ckt_ednce/'
     folder = hash_args(args)
     setattr(args, "folder", folder)
     run_dir = f'ckpts/api_ckt_ednce/{folder}'
@@ -1029,20 +1042,20 @@ def main(args):
     print(f'The folder being written to is: {folder}')
     # prepare y
     # TODO: remove this later
-    indices = list(range(num_graphs))
-    # random.Random(0).shuffle(indices)
-    train_indices, test_indices = indices[:int(num_graphs*0.9)], indices[int(num_graphs*0.9):]    
-    y = load_y(orig, num_graphs)    
-    y = np.array(y)
-    train_y = y[train_indices, None]
-    mean_train_y = np.mean(train_y)
-    std_train_y = np.std(train_y)    
-    test_y = y[test_indices, None]
-    train_y = (train_y-mean_train_y)/std_train_y
-    test_y = (test_y-mean_train_y)/std_train_y    
-    model = train(args, train_data, test_data)
+    # indices = list(range(num_graphs))
+    # # random.Random(0).shuffle(indices)
+    # train_indices, test_indices = indices[:int(num_graphs*0.9)], indices[int(num_graphs*0.9):]    
+    # y = load_y(orig, num_graphs)    
+    # y = np.array(y)
+    # train_y = y[train_indices, None]
+    # mean_train_y = np.mean(train_y)
+    # std_train_y = np.std(train_y)    
+    # test_y = y[test_indices, None]
+    # train_y = (train_y-mean_train_y)/std_train_y
+    # test_y = (test_y-mean_train_y)/std_train_y    
+    # model = train(args, train_data, test_data)
     # breakpoint()
-    # bo(args, None, train_y, test_y)
+    bo(args, None, train_y, test_y)
     # interactive_sample_sequences(model, grammar, token2rule, max_seq_len=MAX_SEQ_LEN, num_samples=NUM_SAMPLES)    
 
 
@@ -1063,5 +1076,7 @@ if __name__ == "__main__":
     parser.add_argument("--epochs", type=int, default=500)
     parser.add_argument("--cuda", default='cpu')
     parser.add_argument("--datapkl", type=bool, default=False)
+    # eval
+    parser.add_argument("--checkpoint", type=int)
     args = parser.parse_args()        
     main(args)
