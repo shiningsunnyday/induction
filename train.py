@@ -571,7 +571,7 @@ def train(args, train_data, test_data):
     if args.encoder == "TOKEN_GNN":
         for i, graph_data in enumerate(graph_data_vocabulary):
             graph_data_vocabulary[i] = graph_data.to(args.cuda)
-    ckpts = glob.glob(f'ckpts/api_ckt_ednce/{args.folder}*.pth')
+    ckpts = glob.glob(f'ckpts/api_ckt_ednce/{args.folder}/*.pth')
     start_epoch = 0
     best_loss = float("inf")
     best_ckpt_path = None
@@ -581,7 +581,8 @@ def train(args, train_data, test_data):
         if loss < best_loss:
             best_loss = loss
             start_epoch = epoch + 1
-            best_ckpt_path = ckpt    
+            best_ckpt_path = ckpt
+    logger.info(best_ckpt_path)    
     if best_ckpt_path is not None:
         logger.info(f"loaded {best_ckpt_path} loss {best_loss} start_epoch {start_epoch}")
         model.load_state_dict(torch.load(best_ckpt_path))
@@ -650,7 +651,8 @@ def train(args, train_data, test_data):
             logger.info(ckpt_path)
         else:
             patience_counter += 1
-            logger.info(f"No improvement from best loss, patience: {patience_counter}/{patience}")
+            logger.info(f"No improvement from best loss: {best_loss}, patience: {patience_counter}/{patience}")
+        logger.info(f"Run: encoder: {args.encoder}, latent dim: {args.latent_dim}, enc layers: {args.encoder_layers}, dec layers: {args.decoder_layers}, batch size: {args.batch_size}")
         logger.info(f"Epoch {epoch}, Train Loss: {train_loss}, Val Loss: {val_loss}, Train Rec: {train_rec_acc_mean}, Val Rec: {valid_rec_acc_mean}")
         np.save(f'ckpts/api_ckt_ednce/{args.folder}/train_latent_{epoch}.npy', train_latent)
         np.save(f'ckpts/api_ckt_ednce/{args.folder}/test_latent_{epoch}.npy', test_latent)
