@@ -6,7 +6,7 @@ LATENT_DIM_VALUES=256
 
 NUM_SAMPLES=3
 
-ENCODER_LAYERS=(3 5 7)
+ENCODER_LAYERS=8
 
 DECODER_LAYERS=4
 
@@ -20,19 +20,22 @@ EPOCHS=500
 
 CUDA="cuda"
 
+KL_DIV=(0.1 0.2 0.3 0.4 0.5 0.6 0.7 0.8 0.9)
 
-for EL in "${ENCODER_LAYERS[@]}"
+
+for KL in "${KL_DIV[@]}"
 do
-    echo "Running training with encoder layers=$EL"
+    echo "Running training with KL div coefficient=$KL"
     python train.py \
         --num-samples $NUM_SAMPLES \
-        --encoder-layers $EL \
+        --encoder-layers $ENCODER_LAYERS \
         --decoder-layers $DECODER_LAYERS \
         --encoder $ENCODER \
         --batch-size $BATCH_SIZE \
         --epochs $EPOCHS \
         --cuda $CUDA \
         --latent-dim $LATENT_DIM_VALUES \
-        --datapkl $DATAPKL
+        --datapkl $DATAPKL \
+        --klcoeff $KL
 done
 echo "All runs finished!!!"

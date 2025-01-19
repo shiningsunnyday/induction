@@ -664,7 +664,13 @@ def train(args, train_data, test_data):
         else:
             patience_counter += 1
             logger.info(f"No improvement from best loss: {best_loss}, patience: {patience_counter}/{patience}")
-        logger.info(f"Run: encoder: {args.encoder}, latent dim: {args.latent_dim}, enc layers: {args.encoder_layers}, dec layers: {args.decoder_layers}, batch size: {args.batch_size}")
+        logger.info(f"Run Details:\n"
+            f"  - Encoder: {args.encoder}\n"
+            f"  - Latent Dimension: {args.latent_dim}\n"
+            f"  - Encoder Layers: {args.encoder_layers}\n"
+            f"  - Decoder Layers: {args.decoder_layers}\n"
+            f"  - Batch Size: {args.batch_size}\n"
+            f"  - KL Divergence Coefficient: {args.klcoeff}")
         logger.info(f"Epoch {epoch}, Train Loss: {train_loss}, Val Loss: {val_loss}, Train Rec: {train_rec_acc_mean}, Val Rec: {valid_rec_acc_mean}")
         np.save(f'ckpts/api_ckt_ednce/{args.folder}/train_latent_{epoch}.npy', train_latent)
         np.save(f'ckpts/api_ckt_ednce/{args.folder}/test_latent_{epoch}.npy', test_latent)
@@ -1082,7 +1088,7 @@ if __name__ == "__main__":
     parser.add_argument("--epochs", type=int, default=500)
     parser.add_argument("--cuda", default='cpu')
     parser.add_argument("--datapkl", help="path to folder")
-    parser.add_argument("--klcoeff", type=int, default=0.5, help="coefficient to KL div term in VAE loss")
+    parser.add_argument("--klcoeff", type=float, default=0.5, help="coefficient to KL div term in VAE loss")
     # eval
     args = parser.parse_args()        
     main(args)
