@@ -6,11 +6,13 @@ LATENT_DIM_VALUES=256
 
 NUM_SAMPLES=3
 
-ENCODER_LAYERS=4
+ENCODER_LAYERS=(3 5 7)
 
-DECODER_LAYERS=(1 2 3 4 5 6 7 8)
+DECODER_LAYERS=4
 
 ENCODER="TOKEN"
+
+DATAPKL="TOKEN"
 
 BATCH_SIZE=256
 
@@ -18,15 +20,14 @@ EPOCHS=500
 
 CUDA="cuda"
 
-DATAPKL=true
 
-for DL in "${DECODER_LAYERS[@]}"
+for EL in "${ENCODER_LAYERS[@]}"
 do
-    echo "Running training with decoder layers=$DL"
+    echo "Running training with encoder layers=$EL"
     python train.py \
         --num-samples $NUM_SAMPLES \
-        --encoder-layers $ENCODER_LAYERS \
-        --decoder-layers $DL \
+        --encoder-layers $EL \
+        --decoder-layers $DECODER_LAYERS \
         --encoder $ENCODER \
         --batch-size $BATCH_SIZE \
         --epochs $EPOCHS \

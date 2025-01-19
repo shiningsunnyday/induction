@@ -493,12 +493,12 @@ class TransformerVAE(nn.Module):
 
 
 # Loss function
-def vae_loss(recon_logits, mask, x, mu, logvar):    
+def vae_loss(args, recon_logits, mask, x, mu, logvar):    
     x_flat = x.view(-1)
     recon_loss = F.cross_entropy(recon_logits, x_flat, reduction="none")
     recon_loss = recon_loss.view(x.size(0), -1)
     recon_loss = (recon_loss * mask).sum() / mask.sum()
-    kl_divergence = -0.5 * torch.sum(1 + logvar - mu.pow(2) - logvar.exp())
+    kl_divergence = -args.klcoeff * torch.sum(1 + logvar - mu.pow(2) - logvar.exp())
     return recon_loss + kl_divergence / x.size(0)
 
 
@@ -620,7 +620,7 @@ def train(args, train_data, test_data):
                 x, attention_mask = x.to(args.cuda), attention_mask.to(args.cuda)
                 optimizer.zero_grad()
                 recon_logits, mask, mu, logvar = model(x, attention_mask, seq_len_list, batch_g_list)                           
-                loss = vae_loss(recon_logits, mask, x, mu, logvar)
+                loss = vae_loss(args, recon_logits, mask, x, mu, logvar)
                 loss.backward()            
                 train_loss += loss.item()*len(batch_idxes)
                 rll = recon_logits.argmax(axis=-1).reshape(x.shape)
@@ -646,7 +646,7 @@ def train(args, train_data, test_data):
                     x, attention_mask, seq_len_list, batch_g_list, batch_idxes = batch
                     x, attention_mask = x.to(args.cuda), attention_mask.to(args.cuda)
                     recon_logits, mask, mu, logvar = model(x, attention_mask, seq_len_list, batch_g_list)
-                    loss = vae_loss(recon_logits, mask, x, mu, logvar)            
+                    loss = vae_loss(args, recon_logits, mask, x, mu, logvar)            
                     val_loss += loss.item()*len(batch_idxes)
                     rll = recon_logits.argmax(axis=-1).reshape(x.shape)
                     rec_acc = (rll == x).all(axis=-1)
@@ -1059,9 +1059,9 @@ def main(args):
     test_y = y[test_indices, None]
     train_y = (train_y-mean_train_y)/std_train_y
     test_y = (test_y-mean_train_y)/std_train_y    
-    # model = train(args, train_data, test_data)
+    model = train(args, train_data, test_data)
     # breakpoint()
-    bo(args, None, train_y, test_y)
+    #bo(args, None, train_y, test_y)
     # interactive_sample_sequences(model, grammar, token2rule, max_seq_len=MAX_SEQ_LEN, num_samples=NUM_SAMPLES)    
 
 
@@ -1082,6 +1082,7 @@ if __name__ == "__main__":
     parser.add_argument("--epochs", type=int, default=500)
     parser.add_argument("--cuda", default='cpu')
     parser.add_argument("--datapkl", help="path to folder")
+    parser.add_argument("--klcoeff", type=int, default=0.5, help="coefficient to KL div term in VAE loss")
     # eval
     args = parser.parse_args()        
     main(args)
