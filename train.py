@@ -562,7 +562,7 @@ def decode_from_latent_space(z, model, max_seq_len=10):
 
 def train(args, train_data, test_data):
     # Initialize model and optimizer
-    model = TransformerVAE(args.encoder, args.encoder_layers, args.decoder_layers, args.latent_dim, args.latent_dim, MAX_SEQ_LEN)
+    model = TransformerVAE(args.encoder, args.encoder_layers, args.decoder_layers, args.embed_dim, args.latent_dim, MAX_SEQ_LEN)
     optimizer = optim.Adam(model.parameters(), lr=1e-4)
     
     if args.encoder == "GNN":
@@ -665,11 +665,12 @@ def train(args, train_data, test_data):
             patience_counter += 1
             logger.info(f"No improvement from best loss: {best_loss}, patience: {patience_counter}/{patience}")
         logger.info(f"Run Details:\n"
-            f"  - Encoder: {args.encoder}\n"
-            f"  - Latent Dimension: {args.latent_dim}\n"
-            f"  - Encoder Layers: {args.encoder_layers}\n"
-            f"  - Decoder Layers: {args.decoder_layers}\n"
-            f"  - Batch Size: {args.batch_size}\n"
+            f"  - Encoder: {args.encoder}"
+            f"  - Embedding Dimension: {args.embed_dim}"
+            f"  - Latent Dimension: {args.latent_dim}"
+            f"  - Encoder Layers: {args.encoder_layers}"
+            f"  - Decoder Layers: {args.decoder_layers}"
+            f"  - Batch Size: {args.batch_size}"
             f"  - KL Divergence Coefficient: {args.klcoeff}")
         logger.info(f"Epoch {epoch}, Train Loss: {train_loss}, Val Loss: {val_loss}, Train Rec: {train_rec_acc_mean}, Val Rec: {valid_rec_acc_mean}")
         np.save(f'ckpts/api_ckt_ednce/{args.folder}/train_latent_{epoch}.npy', train_latent)
@@ -1080,6 +1081,7 @@ if __name__ == "__main__":
     parser.add_argument("--num-samples", type=int, default=3) 
     # nn hparams
     parser.add_argument("--latent-dim", type=int, default=256)
+    parser.add_argument("--embed-dim", type=int, default=256)
     parser.add_argument("--encoder-layers", type=int, default=4)
     parser.add_argument("--decoder-layers", type=int, default=4)
     parser.add_argument("--encoder", choices=["TOKEN_GNN", "GNN", "TOKEN"], default="GNN")
