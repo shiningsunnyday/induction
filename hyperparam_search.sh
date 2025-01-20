@@ -21,9 +21,11 @@ BATCH_SIZE=256
 
 EPOCHS=500
 
-CUDA="cuda"
+CUDA="cuda:1"
 
-KL_DIV=(0.4 0.5 0.6 0.7)
+KL_DIV=(0.3 0.4 0.5 0.6 0.7 0.8 0.9 1.0 1.1 1.2 1.3 1.4 1.5)
+
+SEED=1234
 
 
 for KL in "${KL_DIV[@]}"
@@ -40,6 +42,8 @@ do
         --latent-dim $LATENT_DIM_VALUES \
         --embed-dim $EMBED_DIM_VALUES \
         --datapkl $DATAPKL \
-        --klcoeff $KL
+        --klcoeff $KL \
+        --seed $SEED
+
 done
 echo "All runs finished!!!"
