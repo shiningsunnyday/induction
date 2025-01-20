@@ -575,6 +575,7 @@ def decode_from_latent_space(z, model, max_seq_len=10):
 
 def train(args, train_data, test_data):
     folder = args.datapkl if args.datapkl else args.folder
+    print(args.folder)
     # Initialize model and optimizer
     model = TransformerVAE(args.encoder, args.encoder_layers, args.decoder_layers, args.embed_dim, args.latent_dim, MAX_SEQ_LEN)
     optimizer = optim.Adam(model.parameters(), lr=1e-4)
@@ -596,7 +597,8 @@ def train(args, train_data, test_data):
     if args.encoder == "TOKEN_GNN":
         for i, graph_data in enumerate(graph_data_vocabulary):
             graph_data_vocabulary[i] = graph_data.to(args.cuda)
-    ckpts = glob.glob(f'ckpts/api_ckt_ednce/{folder}/*.pth')
+    ckpts = glob.glob(f'ckpts/api_ckt_ednce/{args.folder}/*.pth')
+    logger.info(f'ckpts/api_ckt_ednce/{args.folder}/*.pth')
     start_epoch = 0
     best_loss = float("inf")
     best_ckpt_path = None
@@ -612,7 +614,7 @@ def train(args, train_data, test_data):
         logger.info(f"loaded {best_ckpt_path} loss {best_loss} start_epoch {start_epoch}")
         model.load_state_dict(torch.load(best_ckpt_path))
 
-    patience = 25
+    patience = 10
     patience_counter = 0
     train_latent = np.empty((len(train_data), args.latent_dim))
     test_latent = np.empty((len(test_data), args.latent_dim))
@@ -1164,7 +1166,7 @@ def main(args):
     model = train(args, train_data, test_data)
     # breakpoint()
     # bo(args, None, train_y, test_y)
-    interactive_sample_sequences(args, model, grammar, token2rule, max_seq_len=MAX_SEQ_LEN)    
+    #interactive_sample_sequences(args, model, grammar, token2rule, max_seq_len=MAX_SEQ_LEN)    
 
 
 
