@@ -32,6 +32,7 @@ import matplotlib.pyplot as plt
 from src.config import *
 from src.grammar.utils import get_next_version
 from src.grammar.ednce import *
+from src.grammar.common import *
 from src.examples.test_graphs import *
 from src.draw.graph import draw_graph
 import glob
@@ -39,7 +40,8 @@ import re
 
 import sys
 sys.path.append('dagnn/dvae/bayesian_optimization')
-from sparse_gp import SparseGP
+sys.path.append('CktGNN')
+from utils import is_valid_DAG, is_valid_Circuit
 
 # Logging
 logger = create_logger("train", "cache/api_ckt_ednce/train.log")
@@ -279,6 +281,12 @@ class TransformerVAE(nn.Module):
         self.transformer_decoder = TransformerEncoder(embed_dim + latent_dim, num_layers=decoder_layers)
         self.output_layer = nn.Linear(embed_dim + latent_dim, VOCAB_SIZE)
         self.start_token_embedding = nn.Parameter(torch.randn(1, 1, embed_dim))
+        self.terminate_mask = torch.zeros((len(vocabulary_terminate),)).bool()
+        for i in range(len(vocabulary_terminate)):
+            self.terminate_mask[i] = vocabulary_terminate[i]
+        self.init_mask = torch.zeros((len(vocabulary_init),)).bool()
+        for i in range(len(vocabulary_init)):
+            self.init_mask[i] = vocabulary_init[i]
 
 
     def visualize_tokens(self):
@@ -448,6 +456,11 @@ class TransformerVAE(nn.Module):
 
         # Predict logits for the next token and sample from the distribution
         logits = self.output_layer(output[:, -1, :])  # Only the last token's output
+        # Mask out logits for start and terminate rules
+        if seq_len == self.seq_len:
+            logits[:,~self.terminate_mask] = float("-inf")
+        elif seq_len == 1:
+            logits[:,~self.init_mask] = float("-inf")
         return logits
 
 
@@ -561,6 +574,7 @@ def decode_from_latent_space(z, model, max_seq_len=10):
     
 
 def train(args, train_data, test_data):
+    folder = args.datapkl if args.datapkl else args.folder
     # Initialize model and optimizer
     model = TransformerVAE(args.encoder, args.encoder_layers, args.decoder_layers, args.embed_dim, args.latent_dim, MAX_SEQ_LEN)
     optimizer = optim.Adam(model.parameters(), lr=1e-4)
@@ -582,7 +596,7 @@ def train(args, train_data, test_data):
     if args.encoder == "TOKEN_GNN":
         for i, graph_data in enumerate(graph_data_vocabulary):
             graph_data_vocabulary[i] = graph_data.to(args.cuda)
-    ckpts = glob.glob(f'ckpts/api_ckt_ednce/{args.folder}/*.pth')
+    ckpts = glob.glob(f'ckpts/api_ckt_ednce/{folder}/*.pth')
     start_epoch = 0
     best_loss = float("inf")
     best_ckpt_path = None
@@ -600,7 +614,6 @@ def train(args, train_data, test_data):
 
     patience = 25
     patience_counter = 0
-    
     train_latent = np.empty((len(train_data), args.latent_dim))
     test_latent = np.empty((len(test_data), args.latent_dim))
     for epoch in tqdm(range(start_epoch, args.epochs+1)):
@@ -711,120 +724,6 @@ def train_sgp(sgp, input_means, training_targets, batch_size=1000, lr=1e-4, max_
         sgp.predict(X_test)
 
 
-def bo(args, model, y_train, y_test):
-    ckpt_dir = 'ckpts/api_ckt_ednce/'    
-    X_train = np.load(os.path.join(ckpt_dir, f"train_latent_{args.checkpoint}.npy"))    
-    X_test = np.load(os.path.join(ckpt_dir, f"test_latent_{args.checkpoint}.npy"))    
-    X_train_mean = X_train.mean(axis=0)
-    X_train_std = X_train.std(axis=0)
-    X_train = (X_train-X_train_mean)/X_train_std
-    X_test = (X_test-X_train_mean)/X_train_std    
-    iteration = 0
-    best_score = 1e15
-    best_arc = None
-    best_random_score = 1e15
-    best_random_arc = None
-    logger.info("Average pairwise distance between train points = {}".format(np.mean(pdist(X_train))))
-    logger.info("Average pairwise distance between test points = {}".format(np.mean(pdist(X_test))))    
-    while iteration < args.BO_rounds:
-        logger.info("Iteration", iteration)
-        if args.predictor:
-            pred = model.predictor(torch.FloatTensor(X_test).to(args.cuda))
-            pred = pred.detach().cpu().numpy()
-            pred = (-pred - mean_y_train) / std_y_train
-            uncert = np.zeros_like(pred)
-        else:
-            # We fit the GP
-            M = 500
-            # other BO hyperparameters
-            lr = 0.005  # the learning rate to train the SGP model
-            max_iter = 500  # how many iterations to optimize the SGP each time
-            sgp = SparseGP(X_train, 0 * X_train, y_train, M)
-            sgp.train_via_ADAM(X_train, 0 * X_train, y_train, X_test, X_test * 0, y_test, minibatch_size = 2 * M, max_iterations = max_iter, learning_rate = lr)
-            pred, uncert = sgp.predict(X_test, 0 * X_test)
-            # input_means = X_train
-            # input_vars = np.zeros_like(X_train)  # Variances initialized to 0
-            # training_targets = y_train
-            # n_inducing_points = M
-            # # Define kernel
-            # kernel = gpflow.kernels.RBF()
-            # # Initialize inducing points (e.g., random subset of training data)
-            # inducing_points = input_means[:n_inducing_points, :]
-            # # Create sparse variational GP model
-            # sgp = SVGP(kernel=kernel,
-            #         likelihood=gpflow.likelihoods.Gaussian(),
-            #         inducing_variable=inducing_points,
-            #         num_latent_gps=1)
-            # train_sgp(sgp, input_means, training_targets, batch_size=2*M)
-            # pred, var = sgp.predict_y(X_test)
-
-        logger.info("predictions: ", pred.reshape(-1))
-        logger.info("real values: ", y_test.reshape(-1))
-        error = np.sqrt(np.mean((pred - y_test)**2))
-        testll = np.mean(sps.norm.logpdf(pred - y_test, scale = np.sqrt(uncert)))
-        logger.info('Test RMSE: ', error)
-        logger.info('Test ll: ', testll)
-        pearson = float(pearsonr(pred.flatten(), y_test.flatten())[0])
-        logger.info('Pearson r: ', pearson)
-        with open('results/' + 'Test_RMSE_ll.txt', 'a') as test_file:
-            test_file.write('Test RMSE: {:.4f}, ll: {:.4f}, Pearson r: {:.4f}\n'.format(error, testll, pearson))
-
-        error_if_predict_mean = np.sqrt(np.mean((np.mean(y_train, 0) - y_test)**2))
-        logger.info('Test RMSE if predict mean: ', error_if_predict_mean)
-        if args.predictor:
-            pred = model.predictor(torch.FloatTensor(X_train).to(args.cuda))
-            pred = pred.detach().cpu().numpy()
-            pred = (-pred - mean_y_train) / std_y_train
-            uncert = np.zeros_like(pred)
-        else:
-            pred, uncert = sgp.predict(X_train, 0 * X_train)
-        error = np.sqrt(np.mean((pred - y_train)**2))
-        trainll = np.mean(sps.norm.logpdf(pred - y_train, scale = np.sqrt(uncert)))
-        logger.info('Train RMSE: ', error)
-        logger.info('Train ll: ', trainll)
-        breakpoint()                   
-        next_inputs = sgp.batched_greedy_ei(args.BO_batch_size, np.min(X_train, 0), np.max(X_train, 0), np.mean(X_train, 0), np.std(X_train, 0), sample=args.sample_dist)
-        valid_arcs_final = decode_from_latent_space(torch.FloatTensor(next_inputs).to(args.cuda), model)
-        new_features = next_inputs
-        logger.info("Evaluating selected points")
-        scores = []
-        for i in range(len(valid_arcs_final)):
-            arc = valid_arcs_final[ i ]
-            if arc is not None:
-                score = -eva.eval(arc)
-                score = (score - mean_y_train) / std_y_train
-            else:
-                score = max(y_train)[ 0 ]
-            if score < best_score:
-                best_score = score
-                best_arc = arc
-            scores.append(score)
-            # logger.info(i, score)
-        # logger.info("Iteration {}'s selected arcs' scores:".format(iteration))
-        # logger.info(scores, np.mean(scores))
-        save_object(scores, "{}scores{}.dat".format(save_dir, iteration))
-        save_object(valid_arcs_final, "{}valid_arcs_final{}.dat".format(save_dir, iteration))
-
-        if len(new_features) > 0:
-            X_train = np.concatenate([ X_train, new_features ], 0)
-            y_train = np.concatenate([ y_train, np.array(scores)[ :, None ] ], 0)
-        #
-        # logger.info("Current iteration {}'s best score: {}".format(iteration, - best_score * std_y_train - mean_y_train))
-        if best_arc is not None: # and iteration == 10:
-            logger.info("Best architecture: ", best_arc)
-            with open(save_dir + 'best_arc_scores.txt', 'a') as score_file:
-                score_file.write(best_arc + ', {:.4f}\n'.format(-best_score * std_y_train - mean_y_train))
-            if data_type == 'ENAS':
-                row = [int(x) for x in best_arc.split()]
-                g_best, _ = decode_ENAS_to_igraph(flat_ENAS_to_nested(row, max_n-2))
-            elif data_type == 'BN':
-                row = adjstr_to_BN(best_arc)
-                g_best, _ = decode_BN_to_igraph(row)
-            plot_DAG(g_best, save_dir, 'best_arc_iter_{}'.format(iteration), data_type=data_type, pdf=True)
-        #
-        iteration += 1
-
-
 def visualize_sequences(sampled_sequences, grammar, token2rule):
     logger.info("===SAMPLED SEQUENCES===")
     for i, seq in enumerate(sampled_sequences):
@@ -848,39 +747,226 @@ def sample_sequences(model, grammar, token2rule, num_samples=5, max_seq_len=10):
     visualize_sequences(sampled_sequences, grammar, token2rule)
 
 
-def interactive_mask_logits(grammar, generated_sequences, logits, token2rule):
+def check_connections(grammar, g, rule):
+    I = rule.embedding
+    nt = grammar.search_nts(g, NONTERMS)[0]
+    conn = []
+    for d in ["in", "out"]:
+        for nei in neis(g, [nt], direction=[d]):
+            mu = g.nodes[nei]['label']
+            for i in range(len(rule.subgraph)):
+                if (mu, "black", "black", i, d, "in") in I:
+                    conn.append([nei, i])
+                if (mu, "black", "black", i, d, "out") in I:
+                    conn.append([i, nei])
+    return conn   
+
+
+def check_op_amp(grammar, conn, g, rule):
+    nodes = grammar.search_nts(rule.subgraph, ["deepskyblue", "dodgerblue"])
+    for n in nodes:
+        i = list(rule.subgraph).index(n)
+        preds = list(map(lambda a: a[0], filter(lambda a: a[1]==i, conn)))
+        succs = list(map(lambda a: a[1], filter(lambda a: a[0]==i, conn)))
+        new_succs = [list(rule.subgraph).index(j) for j in rule.subgraph.successors(n)]
+        safe = False
+        for a in preds:
+            succs = g.successors(a)                    
+            for s in filter(lambda x: g.nodes[x]['label'] in ['yellow', 'lawngreen'], succs):
+                succ_inter = bool(set(g.successors(s)) & (set(succs)))
+                # s connects to one of new_succ                        
+                new_succ_inter = any([(s, j) in conn for j in new_succs])
+                if succ_inter | new_succ_inter:
+                    breakpoint()
+                    safe = True
+        if not safe:
+            return False
+    return True
+
+
+def interactive_mask_logits(grammar, generated_graphs, generated_orders, logits, token2rule):
     batch_size = logits.shape[0]
-    for i in range(batch_size):
-        for j in range(logits.shape[1]):            
-            g = grammar.derive(generated_sequences[i]+[j], token2rule)
-            # sanity checks
-            if not nx.is_connected(nx.Graph(g)):
+    for i in tqdm(range(batch_size), desc="masking logits batch"):
+        if generated_graphs[i] is None:
+            continue
+        g = generated_graphs[i]
+        inmi = {}
+        for n in g:
+            if g.nodes[n]['label'] not in NONTERMS:
+                inmi[n] = len(inmi) # inv node map index
+        o = generated_orders[i]    
+        for j in tqdm(range(logits.shape[1]), desc="masking logits single"):
+            if logits[i, j] == float("-inf"):
+                continue # init, terminating logic already in _autoregressive_inference_predict_logits
+            # g = deepcopy(generated_graphs[i])
+            if vocabulary_init[j]:
+                continue
+            rule = grammar.rules[token2rule[j]]
+            o_j = order_init(rule.subgraph, ignore_nt=False)
+            ### sanity checks
+            ## stays connected
+            # g_, applied, node_map = grammar.one_step_derive(g, token2rule[j], token2rule, return_applied=True)
+            # inv_node_map_index = dict(zip(node_map.values(), map(lambda k: list(rule.subgraph).index(k), node_map.keys())))
+            # stays_connected = nx.is_connected(nx.Graph(g_))            
+            ## stays connected
+            # new_edges = set(g_.edges)-set(g.edges)-set(product(inv_node_map_index, inv_node_map_index))
+            conn = check_connections(grammar, g, rule)
+            ## check acyclic
+            # cycle can only form from ((a, x), (y, b)) in product(conn, conn) satisfying:
+            # 1. a and b from g
+            # 2. x and y from range(len(rule.subgraph))
+            # 3. o_j[x,y]
+            # 4. o[b,a]
+            out_pairs = filter(lambda a: isinstance(a[1], int), conn)
+            in_pairs = filter(lambda a: isinstance(a[0], int), conn)
+            acyclic = True
+            for (a, x), (y, b) in product(out_pairs, in_pairs):
+                if o_j[x, y] and o[inmi[b], inmi[a]]:
+                    acyclic = False
+            # if len(conn) != len(new_edges):
+            #     breakpoint()
+            # for u, v in new_edges:
+            #     if u in inv_node_map_index:
+            #         u = inv_node_map_index[u]
+            #     if v in inv_node_map_index:
+            #         v = inv_node_map_index[v]
+            #     if [u, v] not in conn:
+            #         breakpoint()
+
+            # stays_connected <=> len(conn)
+            # assert bool(len(conn)) == stays_connected
+            ## op-amp circuit constraints            
+            
+            # if nx.is_directed_acyclic_graph(g_):
+            #     if vocabulary_terminate[j]:
+            #         ig_ = nx_to_igraph(g_)
+            #         assert is_valid_Circuit(ig_, subg=False)
+            if not (acyclic and len(conn)):
                 logits[i, j] = float("-inf")
+            else:
+                amp_valid = check_op_amp(grammar, conn, g, rule)
+                if not amp_valid:
+                    logits[i, j] = float("-inf")
 
 
-def interactive_sample_sequences(model, grammar, token2rule, num_samples=5, max_seq_len=10):
+
+def order_init(g, ignore_nt=True):
+    is_term = lambda n: g.nodes[n]['label'] not in NONTERMS
+    if ignore_nt:
+        nodes = [n for n in g if is_term(n)]
+        g_ = copy_graph(g, nodes)
+    else:
+        nodes = list(g)
+        g_ = g
+    paths = nx.all_pairs_shortest_path(g_)
+    o = np.zeros((len(nodes), len(nodes)), dtype=int)
+    for s, l in paths:
+        for t in l:
+            if ignore_nt and all([is_term(n) for n in l[t]]) or not ignore_nt:
+                i = nodes.index(s)
+                j = nodes.index(t)
+                o[i, j] = 1
+    return o
+
+
+def get_inmi(g, ignore_nt=True):
+    inmi = {}
+    for n in g:
+        if g.nodes[n]['label'] not in NONTERMS:
+            inmi[n] = len(inmi) # inv node map index    
+    return inmi
+
+
+def update_order(g, o, grammar, j, token2rule):
+    rule = grammar.rules[token2rule[j]]
+    inmi = get_inmi(g, ignore_nt=True)
+    rhs = rule.subgraph
+    inmi_rhs = get_inmi(rhs, ignore_nt=True)
+    n = len(o)
+    m = len(inmi_rhs)
+    r_adj = order_init(rhs)
+    o_ = np.zeros((n+m, n+m))
+    o_[:n, :n] = o
+    o_[n:, n:] = r_adj
+    conn = check_connections(grammar, g, rule)
+    # get all (a, x) pairs
+    out_pairs = filter(lambda a: isinstance(a[1], int), conn)
+    for (a, x) in out_pairs:
+        # get all y reachable from x
+        if list(rhs)[x] not in inmi_rhs:
+            continue
+        for y in np.argwhere(r_adj[inmi_rhs[list(rhs)[x]]]).flatten():
+            # get all b that reaches a
+            for b in np.argwhere(o[:, inmi[a]]).flatten():
+                o_[b, y+n] = 1
+    in_pairs = filter(lambda a: isinstance(a[0], int), conn)
+    for (y, b) in in_pairs:
+        # get all x that reaches y
+        if list(rhs)[y] not in inmi_rhs:
+            continue
+        for x in np.argwhere(r_adj[:, inmi_rhs[list(rhs)[y]]]).flatten():
+            # get all a reachable from b
+            for a in np.argwhere(o[inmi[b]]).flatten():
+                o_[x+n, a] = 1
+    # all paths going through y
+    for y in inmi_rhs.values():
+        for a in np.argwhere(o_[:n, y+n]).flatten():
+            for b in np.argwhere(o_[y+n, :n]).flatten():
+                o_[a, b] = 1
+    # all paths going from x
+    return o_
+
+
+def interactive_sample_sequences(args, model, grammar, token2rule, num_samples=5, max_seq_len=10):
+    num_samples = args.num_samples
+    sample_batch_size = args.sample_batch_size
     model.eval()
     uniq_sequences = set()
     with torch.no_grad():
         with tqdm(total=num_samples) as pbar:
             while len(uniq_sequences) < num_samples:
-                z = torch.randn(num_samples, args.latent_dim)  
+                z = torch.randn(sample_batch_size, args.latent_dim)  
                 z = z.to(args.cuda)            
                 batch_size = z.size(0)
                 z_context = model.fc_decode(z)              
                 token_embeddings = list(torch.unbind(model.start_token_embedding.expand(batch_size, -1, -1), dim=0))  
-                generated_sequences = [[] for _ in range(batch_size)]  
+                generated_sequences = [[] for _ in range(batch_size)]                  
+                generated_graphs = [None for _ in range(batch_size)]
+                generated_orders = [np.zeros((0, 0)) for _ in range(batch_size)]
                 for t in range(max_seq_len):
                     temp_batch_embeddings, temp_z_context, active_indices = model._autoregressive_inference_active_indices(z_context, generated_sequences, token_embeddings, max_seq_len)                
                     if not active_indices:
                         break
                     logits = model._autoregressive_inference_predict_logits(temp_batch_embeddings, temp_z_context)
-                    interactive_mask_logits(grammar, generated_sequences, logits, token2rule)
+                    interactive_mask_logits(grammar, [generated_graphs[i] for i in active_indices], [generated_orders[i] for i in active_indices], logits, token2rule)
                     next_tokens = torch.argmax(logits, dim=-1)
                     for i, idx in enumerate(active_indices):
-                        generated_sequences[idx].append(next_tokens[i].item())  
-                        next_token_embedding = model.gnn(graph_data_vocabulary[next_tokens[i].item()])
-                        token_embeddings[idx] = torch.cat((token_embeddings[idx], next_token_embedding), dim=0)
+                        generated_sequences[idx].append(next_tokens[i].item())
+                        if generated_graphs[idx] is None:                            
+                            generated_graphs[idx] = grammar.derive([next_tokens[i].item()], token2rule)
+                            # init acyclic order
+                            generated_orders[idx] = order_init(generated_graphs[idx])
+                        else:
+                            order_copy = deepcopy(generated_orders[idx])
+                            generated_orders[idx] = update_order(generated_graphs[idx], generated_orders[idx], grammar, next_tokens[i].item(), token2rule)
+                            # update acyclic order
+                            g_copy = deepcopy(generated_graphs[idx])
+                            generated_graphs[idx] = grammar.one_step_derive(generated_graphs[idx], next_tokens[i].item(), token2rule)
+                            # debug
+                            g_ = copy_graph(generated_graphs[idx], [n for n in generated_graphs[idx] if generated_graphs[idx].nodes[n]['label'] not in NONTERMS])
+                            for i_ in range(len(g_)):
+                                for j_ in range(len(g_)):
+                                    if bool(nx.has_path(g_, list(g_)[i_], list(g_)[j_])) != bool(generated_orders[idx][i_, j_]):
+                                        breakpoint()
+                                        update_order(g_copy, order_copy, grammar, next_tokens[i].item(), token2rule)
+                        if not nx.is_directed_acyclic_graph(generated_graphs[idx]):
+                            breakpoint()
+                            update_order(g_copy, order_copy, grammar, next_tokens[i].item(), token2rule)
+                        if model.encoder == "TOKEN_GNN":
+                            next_token_embedding = model.gnn(graph_data_vocabulary[next_tokens[i].item()])
+                        else: # default to learnable embedding
+                            next_token_embedding = model.token_embedding(next_tokens[i]).unsqueeze(0)
+                        token_embeddings[idx] = torch.cat((token_embeddings[idx], next_token_embedding), dim=0)       
                 uniq_sequences = uniq_sequences | set(map(tuple, generated_sequences))                
                 pbar.update(len(uniq_sequences)-pbar.n)
     uniq_sequences = [list(l) for l in uniq_sequences]
@@ -899,6 +985,7 @@ def interactive_sample_sequences(model, grammar, token2rule, num_samples=5, max_
         logger.info(os.path.abspath(path))
         g = grammar.derive(seq, token2rule)
         draw_graph(g, path=img_path)    
+    breakpoint()
     
 
 def load_y(g, num_graphs):
@@ -1011,15 +1098,20 @@ def load_data(args, anno, grammar, orig, cache_dir, num_graphs):
     else:
         data = [[(relabel[s[0]],)+s[1:] for s in seq] for seq in data]    
     globals()['graph_vocabulary'] = list(rule2token.values())
-    terminate = {}    
+    terminate, init = {}, {}
     vocab = []
     for key, graph in rule2token.items():
         graph_data, term = convert_graph_to_data(graph)
         terminate[relabel[key]] = term
+        init[relabel[key]] = grammar.rules[key].nt == 'black'
         vocab.append(graph_data)
-    globals()['MAX_SEQ_LEN'] = max([len(seq) for seq in data])
+    if args.encoder == "GNN":
+        globals()['MAX_SEQ_LEN'] = max([len(seq) for seq, _ in data])
+    else:
+        globals()['MAX_SEQ_LEN'] = max([len(seq) for seq in data])
     globals()['graph_data_vocabulary'] = vocab
     globals()['vocabulary_terminate'] = terminate
+    globals()['vocabulary_init'] = init
     globals()['VOCAB_SIZE'] = len(rule2token)
     # split here
     indices = list(range(num_graphs))
@@ -1052,24 +1144,27 @@ def main(args):
     grammar, anno, g = pickle.load(open(os.path.join(cache_dir, f'{version}.pkl'),'rb'))    
     orig = load_ckt(args, load_all=True)
     train_data, test_data, token2rule = load_data(args, anno, grammar, orig, cache_dir, num_graphs)
-    print(f'The folder being written to is: {folder}')
+    if args.datapkl:
+        print(f'The folder being written to is: {args.datapkl}')
+    else:
+        print(f'The folder being written to is: {folder}')        
     # prepare y
     # TODO: remove this later
-    indices = list(range(num_graphs))
-    # random.Random(0).shuffle(indices)
-    train_indices, test_indices = indices[:int(num_graphs*0.9)], indices[int(num_graphs*0.9):]    
-    y = load_y(orig, num_graphs)    
-    y = np.array(y)
-    train_y = y[train_indices, None]
-    mean_train_y = np.mean(train_y)
-    std_train_y = np.std(train_y)    
-    test_y = y[test_indices, None]
-    train_y = (train_y-mean_train_y)/std_train_y
-    test_y = (test_y-mean_train_y)/std_train_y    
+    # indices = list(range(num_graphs))
+    # # random.Random(0).shuffle(indices)
+    # train_indices, test_indices = indices[:int(num_graphs*0.9)], indices[int(num_graphs*0.9):]    
+    # y = load_y(orig, num_graphs)    
+    # y = np.array(y)
+    # train_y = y[train_indices, None]
+    # mean_train_y = np.mean(train_y)
+    # std_train_y = np.std(train_y)    
+    # test_y = y[test_indices, None]
+    # train_y = (train_y-mean_train_y)/std_train_y
+    # test_y = (test_y-mean_train_y)/std_train_y    
     model = train(args, train_data, test_data)
     # breakpoint()
-    #bo(args, None, train_y, test_y)
-    # interactive_sample_sequences(model, grammar, token2rule, max_seq_len=MAX_SEQ_LEN, num_samples=NUM_SAMPLES)    
+    # bo(args, None, train_y, test_y)
+    interactive_sample_sequences(args, model, grammar, token2rule, max_seq_len=MAX_SEQ_LEN)    
 
 
 
@@ -1078,7 +1173,8 @@ if __name__ == "__main__":
     from src.grammar.common import get_parser
     parser = get_parser()
     # data hparams
-    parser.add_argument("--num-samples", type=int, default=3) 
+    parser.add_argument("--num-samples", type=int, default=100)
+    parser.add_argument("--sample-batch-size", type=int, default=10)
     # nn hparams
     parser.add_argument("--latent-dim", type=int, default=256)
     parser.add_argument("--embed-dim", type=int, default=256)
@@ -1093,4 +1189,5 @@ if __name__ == "__main__":
     parser.add_argument("--klcoeff", type=float, default=0.5, help="coefficient to KL div term in VAE loss")
     # eval
     args = parser.parse_args()        
+    breakpoint()
     main(args)

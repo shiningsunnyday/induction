@@ -136,6 +136,20 @@ class EDNCEGrammar(NLCGrammar):
             return cur, all_applied, all_node_maps
         else:
             return cur
+    
+
+    def one_step_derive(self, cur, idx, token2rule, return_applied=False):
+        nt_nodes = self.search_nts(cur, NONTERMS)
+        if len(nt_nodes) != 1:
+            raise ValueError("should contain 1 nt")
+        node = nt_nodes[0]
+        rule = self.rules[idx]        
+        if return_applied:
+            cur, applied, node_map = rule(cur, node, return_applied=return_applied)
+            return cur, applied, node_map
+        else:
+            cur = rule(cur, node)
+            return cur
 
 
     def induce_recurse(self, node, model, g):

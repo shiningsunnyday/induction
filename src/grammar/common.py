@@ -39,7 +39,6 @@ def get_parser():
         "--num-data-samples", type=int
     )
     parser.add_argument("--ambiguous-file", help='if given and exists, load data from this file to learn grammar; if given and not exist, save ambiguous data to this file after learn grammar')
-    parser.add_argument("--num_samples", default=10000, type=int, help='how much to generate')
     # bo args
     parser.add_argument("--checkpoint", help="which ckpt to load", type=int)
     parser.add_argument('--BO-rounds', type=int, default=10, help="how many rounds of BO to perform")    
