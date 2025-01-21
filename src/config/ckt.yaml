@@ -110,3 +110,73 @@ INVERSE_LOOKUP:
   lightgrey: sudo_out
   orchid: input
   pink: output
+
+
+NODE_TYPE:
+  R: 0
+  C: 1
+  +gm+: 2
+  -gm+: 3
+  +gm-: 4
+  -gm-: 5
+  sudo_in: 6
+  sudo_out: 7
+  In: 8
+  Out: 9
+
+# needed for subg-based conversion
+SUBG_NODE:
+  0: ['In']
+  1: ['Out']
+  2: ['R']
+  3: ['C']
+  4: ['R', 'C']
+  5: ['R', 'C']
+  6: ['+gm+']
+  7: ['-gm+']
+  8: ['+gm-']
+  9: ['-gm-']
+  10: ['C', '+gm+']
+  11: ['C', '-gm+']
+  12: ['C', '+gm-']
+  13: ['C', '-gm-']
+  14: ['R', '+gm+']
+  15: ['R', '-gm+']
+  16: ['R', '+gm-']
+  17: ['R', '-gm-']
+  18: ['C', 'R', '+gm+']
+  19: ['C', 'R', '-gm+']
+  20: ['C', 'R', '+gm-']
+  21: ['C', 'R', '-gm-']
+  22: ['C', 'R', '+gm+']
+  23: ['C', 'R', '-gm+']
+  24: ['C', 'R', '+gm-']
+  25: ['C', 'R', '-gm-']
+
+SUBG_CON:
+  0: null
+  1: null
+  2: null
+  3: null
+  4: "series"
+  5: "parral"
+  6: null
+  7: null
+  8: null
+  9: null
+  10: "parral"
+  11: "parral"
+  12: "parral"
+  13: "parral"
+  14: "parral"
+  15: "parral"
+  16: "parral"
+  17: "parral"
+  18: "parral"
+  19: "parral"
+  20: "parral"
+  21: "parral"
+  22: "series"
+  23: "series"
+  24: "series"
+  25: "series"

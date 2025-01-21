@@ -8,7 +8,6 @@ from argparse import ArgumentParser
 import pickle
 from src.grammar.common import get_args
 from src.grammar.utils import *
-from src.model import graph_regression, transformer_regression
 
 
 def load_data(args):
