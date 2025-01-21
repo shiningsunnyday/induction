@@ -32,7 +32,7 @@ import re
 
 import sys
 sys.path.append('dagnn/dvae/bayesian_optimization')
-from sparse_gp import SparseGP
+# from sparse_gp import SparseGP
 sys.path.append('CktGNN')
 from utils import is_valid_DAG, is_valid_Circuit
 
@@ -300,11 +300,29 @@ def sample(model, num_samples=5, max_seq_len=10):
 
 def decode_from_latent_space(z, grammar, model, token2rule, max_seq_len):
     # generated_sequences = model.autoregressive_interactive_inference(z, max_seq_len)
-    generated_sequences = model.autoregressive_interactive_inference(z, grammar, token2rule, max_seq_len)
-    generated_dags = []
-    for deriv in generated_sequences:
-        g = grammar.derive(deriv, token2rule)
-        generated_dags.append(g)
+    dags = [None for _ in range(z.shape[0])]
+    idxes = list(range(z.shape[0]))
+    with tqdm(total=z.shape[0], desc="decoding") as pbar:
+        while idxes:
+            generated_sequences = model.autoregressive_interactive_inference(z, grammar, token2rule, max_seq_len, decode='softmax')
+            generated_dags = [None for _ in range(z.shape[0])]
+            new_idxes = []
+            mask = []
+            for idx, deriv in zip(idxes, generated_sequences):
+                g = grammar.derive(deriv, token2rule)
+                for n in g:
+                    g.nodes[n]['type'] = INVERSE_LOOKUP[g.nodes[n]['label']]
+                generated_dags.append(g)
+                try: # not our fault, but due to the converter assuming 2 or 3-stage op-amps, we'll keep sampling until we satisfy that restriction
+                    normalize_format(g)
+                    generated_dags[idx] = g
+                    mask.append(False)
+                except ValueError:
+                    new_idxes.append(idx)
+                    mask.append(True)        
+            idxes = new_idxes
+            z = z[mask]
+            pbar.update(len(idxes)-pbar.n)
     return generated_dags
     
 
@@ -332,8 +350,8 @@ def train(args, train_data, test_data):
     if args.encoder == "TOKEN_GNN":
         for i, graph_data in enumerate(graph_data_vocabulary):
             graph_data_vocabulary[i] = graph_data.to(args.cuda)
-    ckpts = glob.glob(f'ckpts/api_ckt_ednce/{args.folder}/*.pth')
-    logger.info(f'ckpts/api_ckt_ednce/{args.folder}/*.pth')
+    ckpts = glob.glob(f'ckpts/api_ckt_ednce/{folder}/*.pth')
+    logger.info(f'ckpts/api_ckt_ednce/{folder}/*.pth')
     start_epoch = 0
     best_loss = float("inf")
     best_ckpt_path = None
@@ -542,7 +560,7 @@ def bo(args, grammar, model, token2rule, y_train, y_test):
         logger.info(f'Train ll: {trainll}')        
         next_inputs = sgp.batched_greedy_ei(args.BO_batch_size, np.min(X_train, 0), np.max(X_train, 0), np.mean(X_train, 0), np.std(X_train, 0), sample=args.sample_dist, max_iter=args.max_ei_iter)
         breakpoint()
-        valid_arcs_final = decode_from_latent_space(torch.FloatTensor(next_inputs).to(args.cuda), grammar, model, token2rule, MAX_SEQ_LEN)        
+        valid_arcs_final = decode_from_latent_space(torch.FloatTensor(next_inputs).to(args.cuda), grammar, model, token2rule, MAX_SEQ_LEN)
         new_features = next_inputs
         logger.info("Evaluating selected points")
         scores = []        
@@ -707,15 +725,16 @@ def load_data(args, anno, grammar, orig, cache_dir, num_graphs):
             save_path = os.path.join(cache_dir, args.datapkl, 'data.pkl')
         else:
             save_path = os.path.join(cache_dir, args.folder, 'data.pkl')
-        # for ckt only, duplicate and interleave anno
-        logger.info(f"begin load_data")
-        anno_copy = deepcopy(anno)
-        anno = {}
-        for n in anno_copy:
-            p = get_prefix(n)
-            s = get_suffix(n)
-            anno[f"{2*p}:{s}"] = anno_copy[n]
-            anno[f"{2*p+1}:{s}"] = deepcopy(anno_copy[n])
+        if args.dataset == "ckt":
+            # for ckt only, duplicate and interleave anno
+            logger.info(f"begin load_data")
+            anno_copy = deepcopy(anno)
+            anno = {}
+            for n in anno_copy:
+                p = get_prefix(n)
+                s = get_suffix(n)
+                anno[f"{2*p}:{s}"] = anno_copy[n]
+                anno[f"{2*p+1}:{s}"] = deepcopy(anno_copy[n])
         exist = os.path.exists(save_path)
         if exist:
             logger.info(f"load data from {save_path}")
@@ -744,7 +763,7 @@ def load_data(args, anno, grammar, orig, cache_dir, num_graphs):
                     # breakpoint()
                     # assert any(all([iso[orig_nodes[i][j]] == list(rule2token[r])[j]]) for iso in matcher.isomorphisms_iter())                
                 if args.encoder == "GNN":
-                    data.append((rule_ids, g_orig))                
+                    data.append((rule_ids, g_orig))
                 else:                    
                     rules = [(r, grammar.rules[r]) for r in rule_ids]
                     pargs.append((g_orig, rules))
@@ -822,7 +841,7 @@ def evaluate(orig_graphs, graphs):
             breakpoint()
         is_valid_ckt = is_valid_circuit(g)
         ckt_valid.append(is_valid_ckt)
-        dag_valid.append(nx.is_directed_acyclic_graph(g))
+        dag_valid.append(is_valid_DAG(nx_to_igraph(g, subg=False)))
         novel.append(is_novel(g, orig_graphs))
     return {"valid_dag": np.mean(dag_valid), "valid_ckt": np.mean(ckt_valid), "novel": np.mean(novel), "n": len(graphs)}
 
@@ -834,12 +853,172 @@ def evaluate_nn(args, g):
     else:
         score = max(y_train)[ 0 ]    
 
+
+def normalize_format(g): 
+    # get longest path from input->output
+    s = next(filter(lambda n: g.nodes[n]['type'] == 'input', g))
+    t = next(filter(lambda n: g.nodes[n]['type'] == 'output', g))
+    num_stages = 0
+    main_path = [None] * (len(g)+1)
+    for path in nx.all_simple_paths(g, s, t):
+        count = sum(['gm' in g.nodes[n]['type'] for n in path])
+        if count > num_stages:
+            main_path = [None] * (len(g)+1)
+        if count >= num_stages:
+            num_stages = count
+            if len(path) < len(main_path):
+                main_path = path
+    if num_stages not in [2, 3]:
+        raise ValueError(f"op-amp has {num_stages} stages")
+    # relabel main path from 0,2,...len(main_path)-1,1
+    rename = {}
+    for i, n in enumerate(main_path):
+        if g.nodes[n]['type'] == 'input':
+            rename[n] = 0
+        elif g.nodes[n]['type'] == 'output':
+            rename[n] = 1
+        else:
+            rename[n] = 1+i
+    for n in g:
+        if n not in rename:
+            rename[n] = len(rename)
+    g = nx.relabel_nodes(g, rename)
+    return g, num_stages
+
+
+
 def convert_ckt(g, fname):
-    breakpoint()
+    g, num_stages = normalize_format(g)
     num_subg = len(g)
     num_nodes = len(g)
-    # get longest path from input->output
-    num_stages = pass
+    with open(fname, 'w+') as f:
+        f.write(f"{num_subg} {num_nodes} {num_stages}\n")
+        sub_inform = []
+        breakpoint()
+        for i in range(num_subg):
+            if i == 0:
+                sub_inform = [0, i, 0, 0, 0, 1, 8, 0, 1]
+                sub_feats = [-1,0, -1]
+            elif i == 1:
+                subg_t = subg_list[1]
+                pos_ = pos_subg_dict[1]
+                num_edge = num_edge_dict[1]
+                predecessive_ind = pre_subg_dict[1]
+                sub_inform = [subg_t, 1, pos_, num_edge] + predecessive_ind + [1, 9, 0, 1]
+                sub_feats = [-1,0,-1]
+                SUB_FEAT[1] = sub_feats
+            else:
+                subg_t = subg_list[i]
+                num_edge = num_edge_dict[i]
+                pos_ = pos_subg_dict[i]
+                predecessive_ind = pre_subg_dict[i]
+                if num_edge == 0 and len(predecessive_ind) == 0:
+                    predecessive_ind = [0]
+                sub_types, sub_feats = subg_feature_type(subg_list[i], subg_node, node_type, 
+                                                            min_val=0, max_val=1001, scale=10, size=5) # can be edited
+                assert(len(sub_types) == len(sub_feats))
+                #print(sub_types)
+                #print(sub_feats)
+                nodes_in_subg = len(sub_types)
+                #flatten_adj = subg_flaten_adj(len(subg_node[subg_list[i]]), con_type = sung_con[subg_list[i]])
+                flatten_adj = subg_flaten_adj(nodes_in_subg-2, con_type = sung_con[subg_list[i]])
+                sub_inform = [subg_t, i, pos_, num_edge] + predecessive_ind + [nodes_in_subg] + sub_types + sub_feats + flatten_adj
+                #print(sub_inform)
+            #SUB_INF[subg_list[i]] = sub_inform 
+            SUB_FEAT[i] = sub_feats
+            for val in sub_inform:
+                f.write(str(val))
+                f.write(' ')
+            f.write('\r\n')
+        all_predecessive_dict = {}
+        all_type_dict = {}
+        all_feat_dict = {}
+        
+        ind_order = []
+        if stage == 3:
+            main_path = [0,2,3,4,1]
+            for i in main_path:
+                if i == 0:
+                    ind_order.append(i)
+                else:
+                    for j in pre_subg_dict[i]:
+                        if j not in ind_order:
+                            ind_order.append(j)
+                    ind_order.append(i)
+        elif stage == 2:
+            main_path = [0,2,3,1]
+            for i in main_path:
+                if i == 0:
+                    ind_order.append(i)
+                else:
+                    for j in pre_subg_dict[i]:
+                        if j not in ind_order:
+                            ind_order.append(j)
+                    ind_order.append(i)
+        else:
+            raise MyException('Undefined number of stages')            
+        ind_dict = {}
+        node_count = 0
+        #print(ind_order)
+        for i in ind_order:
+            #print(i)
+            #print(pre_subg_dict[i])
+            num_nodes_subg = len(subg_node[subg_list[i]])
+            ind_dict[i] = [node_count, node_count + num_nodes_subg - 1]
+            insubg_id = 0
+            #print(ind_dict)
+            #print(pre_subg_dict)
+            for node_id in range(node_count, node_count + num_nodes_subg):
+                all_type_dict[node_id] = node_type[subg_node[subg_list[i]][insubg_id]]
+                all_feat_dict[node_id] = SUB_FEAT[i][insubg_id + 1]
+                if sung_con[subg_list[i]] == 'series':
+                    pre_nodes = []
+                    if insubg_id == 0:
+                        for j in pre_subg_dict[i]:
+                            if sung_con[subg_list[j]] == 'series':
+                                pre_nodes.append(ind_dict[j][1])
+                            elif sung_con[subg_list[j]] == 'parral':
+                                for h in range(ind_dict[j][0],ind_dict[j][1]+1):
+                                    pre_nodes.append(h)
+                            else:
+                                pre_nodes.append(ind_dict[j][0])
+                    else:
+                        pre_nodes.append(node_id-1)
+                    all_predecessive_dict[node_id] = pre_nodes
+                elif sung_con[subg_list[i]] == 'parral':
+                    pre_nodes = []
+                    for j in pre_subg_dict[i]:
+                        if sung_con[subg_list[j]] == 'series':
+                            pre_nodes.append(ind_dict[j][1])
+                        elif sung_con[subg_list[j]] == 'parral':
+                            for h in range(ind_dict[j][0],ind_dict[j][1]+1):
+                                pre_nodes.append(h)
+                        else:
+                            pre_nodes.append(ind_dict[j][0])
+                    all_predecessive_dict[node_id] = pre_nodes
+                else:
+                    pre_nodes = []
+                    for j in pre_subg_dict[i]:
+                        if sung_con[subg_list[j]] == 'series':
+                            pre_nodes.append(ind_dict[j][1])
+                        elif sung_con[subg_list[j]] == 'parral':
+                            for h in range(ind_dict[j][0],ind_dict[j][1]+1):
+                                pre_nodes.append(h)
+                        else:
+                            pre_nodes.append(ind_dict[j][0])
+                    all_predecessive_dict[node_id] = pre_nodes
+                insubg_id += 1
+            node_count += num_nodes_subg
+        ### [node type, node feat, previous node]    
+        for i in range(num_nodes):
+            type_ =  all_type_dict[i]
+            feat_ = all_feat_dict[i]
+            predecessors_ = all_predecessive_dict[i]
+            inform = [type_, feat_] + predecessors_
+            for val in inform:
+                f.write(str(val))
+                f.write(' ')
+            f.write('\r\n')            
 
 
 def evaluate_ckt(args, g):    
@@ -853,21 +1032,31 @@ def evaluate_ckt(args, g):
 
 
 def main(args):
-    cache_dir = 'cache/api_ckt_ednce/'
+    cache_dir = f'cache/api_{args.dataset}_ednce/'
     folder = hash_args(args)
     setattr(args, "folder", folder)
-    os.makedirs(f'ckpts/api_ckt_ednce/{folder}', exist_ok=True)
-    os.makedirs(f'cache/api_ckt_ednce/{folder}', exist_ok=True)
+    os.makedirs(f'ckpts/api_{args.dataset}_ednce/{folder}', exist_ok=True)
+    os.makedirs(f'cache/api_{args.dataset}_ednce/{folder}', exist_ok=True)
     #json.dumps(args.__dict__, folder)
-    args_path = os.path.join(f'ckpts/api_ckt_ednce/{folder}', "args.txt")
+    args_path = os.path.join(f'ckpts/api_{args.dataset}_ednce/{folder}', "args.txt")
     with open(args_path, "w") as f:
         for arg_name, arg_value in sorted(args.__dict__.items()):
             f.write(f"{arg_name}: {arg_value}\n")
-    num_graphs = 10000
     version = get_next_version(cache_dir)-1    
     logger.info(f"loading version {version}")
-    grammar, anno, g = pickle.load(open(os.path.join(cache_dir, f'{version}.pkl'),'rb'))    
-    orig = load_ckt(args, load_all=True)
+    grammar, anno, g = pickle.load(open(os.path.join(cache_dir, f'{version}.pkl'),'rb'))
+    if args.dataset == "ckt":
+        num_graphs = 10000
+        orig = load_ckt(args, load_all=True)
+    elif args.dataset == "bn":        
+        num_graphs = 200000
+        orig = load_bn(args)
+    elif args.dataset == "enas":
+        breakpoint()
+        num_graphs = None
+        orig = load_bn(args)
+    else:
+        raise NotImplementeredError        
     train_data, test_data, token2rule = load_data(args, anno, grammar, orig, cache_dir, num_graphs)
     if args.datapkl:
         print(f'The folder being written to is: {args.datapkl}')
@@ -886,8 +1075,7 @@ def main(args):
     test_y = y[test_indices, None]
     train_y = (train_y-mean_train_y)/std_train_y
     test_y = (test_y-mean_train_y)/std_train_y    
-    model = train(args, train_data, test_data)
-    breakpoint()
+    model = train(args, train_data, test_data)    
     bo(args, grammar, model, token2rule, train_y, test_y)
     graphs = interactive_sample_sequences(args, model, grammar, token2rule, max_seq_len=MAX_SEQ_LEN, unique=False, visualize=False)    
     orig_graphs = [nx.induced_subgraph(orig, orig.comps[i]) for i in range(num_graphs)]
@@ -901,6 +1089,7 @@ if __name__ == "__main__":
     from src.grammar.common import get_parser
     parser = get_parser()
     # data hparams
+    parser.add_argument("--dataset", choices=["ckt", "bn", "enas"], default="ckt")
     parser.add_argument("--num-samples", type=int, default=100)
     parser.add_argument("--sample-batch-size", type=int, default=10)
     # nn hparams
@@ -918,6 +1107,14 @@ if __name__ == "__main__":
     # eval
     parser.add_argument("--max-iter", type=int, default=500)
     parser.add_argument("--max-ei-iter", type=int, default=150)
+    parser.add_argument('--BO-rounds', type=int, default=10, help="how many rounds of BO to perform")    
+    # parser.add_argument('--bo',type=int, default=0, choices=[0, 1], help='whether to do BO')
+    parser.add_argument('--predictor', action='store_true', default=False, help='if True, use the performance predictor instead of SGP')    
+    parser.add_argument('--BO-batch-size', type=int, default=50, 
+                        help="how many data points to select in each BO round")    
+    parser.add_argument('--sample-dist', default='uniform', 
+                        help='from which distrbiution to sample random points in the latent \
+                        space as candidates to select; uniform or normal')       
     args = parser.parse_args()        
-    #breakpoint()
+    breakpoint()
     main(args)

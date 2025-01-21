@@ -40,15 +40,7 @@ def get_parser():
     )
     parser.add_argument("--ambiguous-file", help='if given and exists, load data from this file to learn grammar; if given and not exist, save ambiguous data to this file after learn grammar')
     # bo args
-    parser.add_argument("--checkpoint", help="which ckpt to load", type=int)
-    parser.add_argument('--BO-rounds', type=int, default=10, help="how many rounds of BO to perform")    
-    # parser.add_argument('--bo',type=int, default=0, choices=[0, 1], help='whether to do BO')
-    parser.add_argument('--predictor', action='store_true', default=False, help='if True, use the performance predictor instead of SGP')    
-    parser.add_argument('--BO-batch-size', type=int, default=50, 
-                        help="how many data points to select in each BO round")    
-    parser.add_argument('--sample-dist', default='uniform', 
-                        help='from which distrbiution to sample random points in the latent \
-                        space as candidates to select; uniform or normal')                        
+    parser.add_argument("--checkpoint", help="which ckpt to load", type=int)                     
     return parser    
 
 

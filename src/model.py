@@ -232,10 +232,12 @@ class TransformerVAE(nn.Module):
         # Predict logits for the next token and sample from the distribution
         logits = self.output_layer(output[:, -1, :])  # Only the last token's output
         # Mask out logits for start and terminate rules
-        if seq_len == self.seq_len:
-            logits[:,~self.terminate_mask] = float("-inf")
-        elif seq_len == 1:
+        if seq_len == 1:
             logits[:,~self.init_mask] = float("-inf")
+        else:
+            logits[:,self.init_mask] = float("-inf")
+        if seq_len == self.seq_len:
+            logits[:,~self.terminate_mask] = float("-inf")            
         return logits
 
 
@@ -346,7 +348,7 @@ class TransformerVAE(nn.Module):
         o_[n:, n:] = r_adj
         conn = TransformerVAE.check_connections(grammar, g, rule)
         # get all (a, x) pairs
-        out_pairs = filter(lambda a: isinstance(a[1], int), conn)
+        out_pairs = list(filter(lambda a: isinstance(a[1], int), conn))
         for (a, x) in out_pairs:
             # get all y reachable from x
             if list(rhs)[x] not in inmi_rhs:
@@ -355,7 +357,7 @@ class TransformerVAE(nn.Module):
                 # get all b that reaches a
                 for b in np.argwhere(o[:, inmi[a]]).flatten():
                     o_[b, y+n] = 1
-        in_pairs = filter(lambda a: isinstance(a[0], int), conn)
+        in_pairs = list(filter(lambda a: isinstance(a[0], int), conn))
         for (y, b) in in_pairs:
             # get all x that reaches y
             if list(rhs)[y] not in inmi_rhs:
@@ -373,6 +375,27 @@ class TransformerVAE(nn.Module):
         return o_        
     
     def interactive_mask_logits(self, grammar, generated_graphs, generated_orders, logits, token2rule):
+        def check_acyclic():
+            acyclic = True
+            for (a, x), (y, b) in product(out_pairs, in_pairs):
+                if o_j[x, y] and o[inmi[b], inmi[a]]:
+                    acyclic = False
+            return acyclic
+        def check_reachable():         
+            t = next(filter(lambda n: INVERSE_LOOKUP.get(g.nodes[n]['label'], '') == 'output', g))                
+            for s in g:
+                if s not in inmi: # can get rewired some other way
+                    continue
+                reachable = False
+                if o[inmi[s], inmi[t]]:
+                    reachable = True
+                    continue
+                for (a, x), (y, b) in product(out_pairs, in_pairs):
+                    if o_j[x, y] and o[inmi[s], inmi[a]] and o[inmi[b], inmi[t]]:
+                        reachable = True
+                if not reachable:
+                    return False
+            return True   
         batch_size = logits.shape[0]
         for i in tqdm(range(batch_size), desc="masking logits batch"):
             if generated_graphs[i] is None:
@@ -405,12 +428,9 @@ class TransformerVAE(nn.Module):
                 # 2. x and y from range(len(rule.subgraph))
                 # 3. o_j[x,y]
                 # 4. o[b,a]
-                out_pairs = filter(lambda a: isinstance(a[1], int), conn)
-                in_pairs = filter(lambda a: isinstance(a[0], int), conn)
-                acyclic = True
-                for (a, x), (y, b) in product(out_pairs, in_pairs):
-                    if o_j[x, y] and o[inmi[b], inmi[a]]:
-                        acyclic = False
+                              
+
+
                 # if len(conn) != len(new_edges):
                 #     breakpoint()
                 # for u, v in new_edges:
@@ -429,7 +449,9 @@ class TransformerVAE(nn.Module):
                 #     if vocabulary_terminate[j]:
                 #         ig_ = nx_to_igraph(g_)
                 #         assert is_valid_Circuit(ig_, subg=False)
-                if not (acyclic and len(conn)):
+                out_pairs = list(filter(lambda a: isinstance(a[1], int), conn))
+                in_pairs = list(filter(lambda a: isinstance(a[0], int), conn))
+                if not (len(conn) and check_reachable() and check_acyclic()):
                     logits[i, j] = float("-inf")
                 else:
                     amp_valid = TransformerVAE.check_op_amp(grammar, conn, g, rule)
@@ -437,7 +459,8 @@ class TransformerVAE(nn.Module):
                         logits[i, j] = float("-inf")        
 
 
-    def autoregressive_interactive_inference(self, z, grammar, token2rule, max_seq_len=10):
+    def autoregressive_interactive_inference(self, z, grammar, token2rule, max_seq_len=10, decode='greedy'):
+        # decode is greedy or softmax
         batch_size = z.size(0)
         z_context = self.fc_decode(z)              
         token_embeddings = list(torch.unbind(self.start_token_embedding.expand(batch_size, -1, -1), dim=0))  
@@ -450,7 +473,16 @@ class TransformerVAE(nn.Module):
                 break
             logits = self._autoregressive_inference_predict_logits(temp_batch_embeddings, temp_z_context)
             self.interactive_mask_logits(grammar, [generated_graphs[i] for i in active_indices], [generated_orders[i] for i in active_indices], logits, token2rule)
-            next_tokens = torch.argmax(logits, dim=-1)
+            if decode == 'greedy':
+                next_tokens = torch.argmax(logits, dim=-1) # greedy
+            else:                
+                probs = torch.softmax(logits, dim=-1) # sample
+                nan_idxes = (probs!=probs).any(axis=-1)
+                if nan_idxes.any():
+                    uniform = torch.ones_like(probs[nan_idxes, :])
+                    uniform[:,  ~self.terminate_mask] = 0.
+                    probs[nan_idxes, :] = uniform
+                next_tokens = torch.multinomial(probs, 1).squeeze(-1)
             for i, idx in enumerate(active_indices):
                 generated_sequences[idx].append(next_tokens[i].item())
                 if generated_graphs[idx] is None:                            
