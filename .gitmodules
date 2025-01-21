@@ -16,6 +16,6 @@
 [submodule "CktGNN"]
 	path = CktGNN
 	url = https://github.com/zehao-dong/CktGNN.git
-[submodule "DAGNN"]
-	path = DAGNN
+[submodule "dagnn"]
+	path = dagnn
 	url = https://github.com/shiningsunnyday/DAGNN.git
