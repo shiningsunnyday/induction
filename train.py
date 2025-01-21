@@ -1,3 +1,5 @@
+import os
+os.environ["CUDA_VISIBLE_DEVICES"] = ""
 import torch
 import torch.nn as nn
 import torch.optim as optim
@@ -18,28 +20,19 @@ import hashlib
 # torch
 from torch_geometric.nn import GCNConv
 from torch_geometric.data import Data as GraphData
-import importlib
-dagnn = importlib.import_module('dagnn.ogbg-code.model.dagnn')
-utils_dag = importlib.import_module('dagnn.src.utils_dag')
-DAGNN = dagnn.DAGNN
-# if error, go to induction/dagnn/ogbg-code/model/dagnn.py, change a line to "from dagnn.src.constants import *""
 import torch.nn.functional as F
 torch.multiprocessing.set_sharing_strategy('file_system')
 import pickle
 import hashlib
 from tqdm import tqdm
 import matplotlib.pyplot as plt
-from src.config import *
-from src.grammar.utils import get_next_version
-from src.grammar.ednce import *
-from src.grammar.common import *
-from src.examples.test_graphs import *
-from src.draw.graph import draw_graph
+from src.model import *
 import glob
 import re
 
 import sys
 sys.path.append('dagnn/dvae/bayesian_optimization')
+from sparse_gp import SparseGP
 sys.path.append('CktGNN')
 from utils import is_valid_DAG, is_valid_Circuit
 
@@ -242,269 +235,6 @@ class TokenGNN(nn.Module):
         return x
 
 
-# Define Transformer Encoder
-class TransformerEncoder(nn.Module):
-    def __init__(self, embed_dim, num_layers=2):
-        super(TransformerEncoder, self).__init__()
-        self.encoder = nn.TransformerEncoder(
-            nn.TransformerEncoderLayer(d_model=embed_dim, nhead=4),
-            num_layers=num_layers
-        )
-
-    def forward(self, x, mask=None, src_key_padding_mask=None):
-        return self.encoder(x, mask=mask, src_key_padding_mask=src_key_padding_mask)
-
-# Define VAE
-class TransformerVAE(nn.Module):
-    def __init__(self, encoder, encoder_layers, decoder_layers, embed_dim, latent_dim, seq_len):
-        super(TransformerVAE, self).__init__()        
-        # self.token_gnn = TokenGNN(embed_dim)
-        self.encoder = encoder
-        self.encoder_layers = encoder_layers
-        self.decoder_layers = decoder_layers
-        self.embed_dim = embed_dim
-        self.latent_dim = latent_dim
-        self.seq_len = seq_len
-        if encoder == "TOKEN_GNN":
-            self.gnn = DAGNN(None, None, 13, latent_dim, None, w_edge_attr=False, bidirectional=False, num_class=latent_dim)        
-            self.transformer_encoder = TransformerEncoder(embed_dim, num_layers=encoder_layers)            
-        elif encoder == "GNN":
-            self.token_embedding = nn.Embedding(VOCAB_SIZE, embed_dim)
-            self.gnn = DAGNN(None, None, 13, latent_dim, None, w_edge_attr=False, bidirectional=False, num_class=latent_dim)
-        else:
-            self.token_embedding = nn.Embedding(VOCAB_SIZE, embed_dim)
-            self.transformer_encoder = TransformerEncoder(embed_dim, num_layers=encoder_layers)
-        self.fc_mu = nn.Linear(embed_dim, latent_dim)
-        self.fc_logvar = nn.Linear(embed_dim, latent_dim)
-        
-        self.fc_decode = nn.Linear(latent_dim, latent_dim)
-        self.transformer_decoder = TransformerEncoder(embed_dim + latent_dim, num_layers=decoder_layers)
-        self.output_layer = nn.Linear(embed_dim + latent_dim, VOCAB_SIZE)
-        self.start_token_embedding = nn.Parameter(torch.randn(1, 1, embed_dim))
-        self.terminate_mask = torch.zeros((len(vocabulary_terminate),)).bool()
-        for i in range(len(vocabulary_terminate)):
-            self.terminate_mask[i] = vocabulary_terminate[i]
-        self.init_mask = torch.zeros((len(vocabulary_init),)).bool()
-        for i in range(len(vocabulary_init)):
-            self.init_mask[i] = vocabulary_init[i]
-
-
-    def visualize_tokens(self):
-        weights = self.token_embedding.weight.detach().cpu()
-        tsne = TSNE(n_components=2, random_state=42, perplexity=min(30, weights.shape[0]-1))
-        embeddings_2d = tsne.fit_transform(weights)
-        # Plot the 2D t-SNE
-        fig, ax = plt.subplots(figsize=(8, 8))
-        ax.scatter(embeddings_2d[:, 0], embeddings_2d[:, 1], alpha=0.7)
-        ax.set_title("2D t-SNE of nn.Embedding")
-        ax.set_xlabel("t-SNE Dim 1")
-        ax.set_ylabel("t-SNE Dim 2")
-        plt.close(fig)
-        return fig
-
-
-    def embed_tokens(self, token_ids, batch_g_list):
-        if token_ids.dim() == 2:
-            return torch.stack([self.embed_tokens(token_id_seq, g_list) for (token_id_seq, g_list) in zip(token_ids, batch_g_list)], dim=0)
-        else:
-            if self.encoder != "TOKEN_GNN":
-                return self.token_embedding(token_ids)
-            g_list = batch_g_list
-        embedded_tokens = []
-        g_list = [g_list[i] for i in range(len(g_list))]
-        for token_id, graph_data in zip(token_ids, g_list):
-            if graph_data is None:
-                embedded_token = torch.zeros((args.latent_dim,), device=args.cuda)
-            else:
-                graph_data.to(args.cuda)
-                embedded_token = self.gnn(graph_data).flatten()
-            embedded_tokens.append(embedded_token)
-        return torch.stack(embedded_tokens, dim=0)
-        # return torch.cat(embedded_tokens, dim=0)
-
-    def encode(self, x, attention_mask=None):        
-        if self.encoder == "GNN":            
-            pooled = torch.stack([self.gnn(g.to(args.cuda)).flatten() for g in x], dim=0)
-        else:
-            assert attention_mask is not None
-            encoded_seq = self.transformer_encoder(x.permute(1, 0, 2), src_key_padding_mask=~attention_mask).permute(1, 0, 2)
-            # Apply mean pooling along the sequence length dimension to get a fixed-size representation
-            pooled = torch.mean(encoded_seq, dim=1)  # (batch, embed_dim)
-        mu, logvar = self.fc_mu(pooled), self.fc_logvar(pooled)
-        return mu, logvar
-
-    def reparameterize(self, mu, logvar):
-        std = torch.exp(0.5 * logvar)
-        eps = torch.randn_like(std)
-        return mu + eps * std
-
-    def autoregressive_training_step(self, x, z, max_seq_len_list):
-        # Initialize with the learned start token embedding and z context
-        batch_size = z.size(0)
-        z_context = self.fc_decode(z)  # Shape (batch, latent_dim)
-        
-        # Initialize embeddings for each sequence using the start token
-        token_embeddings = list(torch.unbind(self.start_token_embedding.expand(batch_size, -1, -1), dim=0))  # Shape (batch, 1, embed_dim)
-        generated_logits = [[] for _ in range(batch_size)]  # Store logits for each sequence
-
-        max_seq_len = max(max_seq_len_list)
-
-        # Process each sequence individually, applying teacher forcing
-        for t in range(max_seq_len):
-            # Prepare a temporary batch of active sequences at the current timestep
-            temp_batch_embeddings = []
-            temp_z_context = []
-            active_indices = []
-
-            for idx in range(batch_size):
-                # Check if the current sequence needs more tokens (based on its max_seq_len)
-                if t < max_seq_len_list[idx]:
-                    # Get accumulated embeddings up to this step
-                    accumulated_embeddings = token_embeddings[idx]  # Concatenate embeddings so far
-                    temp_batch_embeddings.append(accumulated_embeddings)
-                    temp_z_context.append(z_context[idx].unsqueeze(0).expand(accumulated_embeddings.size(0), -1))
-                    active_indices.append(idx)
-
-            # If there are no active sequences, we’re done
-            if not active_indices:
-                break
-            
-            # Convert lists to tensors for batched transformer input
-            temp_batch_embeddings = torch.stack(temp_batch_embeddings)
-            temp_z_context = torch.stack(temp_z_context)
-
-            # Concatenate accumulated embeddings with z_context
-            transformer_input = torch.cat([temp_batch_embeddings, temp_z_context], dim=-1)
-
-            # Apply causal mask for autoregressive decoding on the current batch
-            seq_len = transformer_input.size(1)
-            causal_mask = torch.triu(torch.ones((seq_len, seq_len), dtype=torch.bool), diagonal=1).to(z.device)
-
-            output = self.transformer_decoder(
-                transformer_input.permute(1, 0, 2),  # Shape (seq_len, batch, embed_dim + latent_dim)
-                mask=causal_mask
-            ).permute(1, 0, 2)
-            
-
-            # Predict logits for the next token
-            logits = self.output_layer(output[:, -1, :])  # Only the last token's output
-            for i, idx in enumerate(active_indices):
-                generated_logits[idx].append(logits[i].unsqueeze(0))  # Collect logits for each sequence
-
-            # Use ground-truth tokens from x as the next input (teacher forcing)
-            for i, idx in enumerate(active_indices):
-                if t < max_seq_len_list[idx]:  # Ensure there are more ground-truth tokens to process
-                    # Get the ground-truth token from x and embed it using the GNN
-                    # .unsqueeze(0)  # Ground truth for next token
-                    next_token_embedding = x[idx][t].unsqueeze(0)
-                    # next_token_embedding = self.gnn(graph_data_vocabulary[next_token_id.item()]).unsqueeze(0)                    
-                    # next_token_embedding = batch_g_list[idx][t]
-                    # Append the embedded token to this sequence’s token_embeddings list
-                    token_embeddings[idx] = torch.cat((token_embeddings[idx], next_token_embedding), dim=0)
-
-        # Concatenate logits across time steps for each sequence to compute the loss                        
-        recon_logits_list = []
-        for seq_logits in generated_logits:
-            seq_logits_cat = torch.cat(seq_logits, dim=0)
-            padding = torch.zeros(max_seq_len - len(seq_logits), VOCAB_SIZE, device=seq_logits_cat.device)
-            recon_logits = torch.cat((seq_logits_cat, padding), dim=0)
-            recon_logits_list.append(recon_logits)
-        padded_logits = torch.stack(recon_logits_list, dim=0)
-        mask = torch.zeros((padded_logits.shape[0], max_seq_len), dtype=torch.bool, device=padded_logits.device)
-        for i, logits in enumerate(generated_logits):
-            mask[i, :len(logits)] = 1  # Mark valid positions up to the length of each sequence
-        return padded_logits.view(-1, VOCAB_SIZE), mask
-    
-
-    def _autoregressive_inference_active_indices(self, z_context, generated_sequences, token_embeddings, max_seq_len):
-        batch_size = z_context.size(0)
-        # Prepare a temporary batch of active sequences at the current timestep
-        temp_batch_embeddings = []
-        temp_z_context = []
-        active_indices = []
-        for idx in range(batch_size):
-            # Check if the sequence needs more tokens
-            if len(generated_sequences[idx]) < max_seq_len:
-                if len(generated_sequences[idx]):
-                    last_token = generated_sequences[idx][-1]
-                    if vocabulary_terminate[last_token]:
-                        continue
-                accumulated_embeddings = token_embeddings[idx]  # Use accumulated embeddings up to this step
-                temp_batch_embeddings.append(accumulated_embeddings)
-                temp_z_context.append(z_context[idx].unsqueeze(0).expand(accumulated_embeddings.size(0), -1))
-                active_indices.append(idx)        
-        return temp_batch_embeddings, temp_z_context, active_indices
-
-
-    def _autoregressive_inference_predict_logits(self, temp_batch_embeddings, temp_z_context):        
-        # Convert lists to tensors for batched transformer input
-        temp_batch_embeddings = torch.stack(temp_batch_embeddings)
-        temp_z_context = torch.stack(temp_z_context)
-        device = temp_z_context.device
-
-        # Concatenate accumulated embeddings with z_context
-        transformer_input = torch.cat([temp_batch_embeddings, temp_z_context], dim=-1)
-
-        # Apply causal mask for autoregressive decoding
-        seq_len = transformer_input.size(1)
-        causal_mask = torch.triu(torch.ones((seq_len, seq_len), dtype=torch.bool), diagonal=1).to(device)
-
-        output = self.transformer_decoder(
-            transformer_input.permute(1, 0, 2),  # Shape (seq_len, batch, embed_dim + latent_dim)
-            mask=causal_mask
-        ).permute(1, 0, 2)
-
-        # Predict logits for the next token and sample from the distribution
-        logits = self.output_layer(output[:, -1, :])  # Only the last token's output
-        # Mask out logits for start and terminate rules
-        if seq_len == self.seq_len:
-            logits[:,~self.terminate_mask] = float("-inf")
-        elif seq_len == 1:
-            logits[:,~self.init_mask] = float("-inf")
-        return logits
-
-
-
-    def autoregressive_inference(self, z, max_seq_len):
-        # Initialize with the start token embedding and z context
-        batch_size = z.size(0)
-        z_context = self.fc_decode(z)  # Shape (batch, latent_dim)
-
-        # Initialize embeddings for each sequence using the start token
-        token_embeddings = list(torch.unbind(self.start_token_embedding.expand(batch_size, -1, -1), dim=0))  # Shape (batch, 1, embed_dim)
-        generated_sequences = [[] for _ in range(batch_size)]  # Store generated tokens for each sequence
-
-        for t in range(max_seq_len):
-            temp_batch_embeddings, temp_z_context, active_indices = self._autoregressive_inference_active_indices(z_context, generated_sequences, token_embeddings, max_seq_len)
-            # If no active sequences remain, end generation
-            if not active_indices:
-                break
-            logits = self._autoregressive_inference_predict_logits(temp_batch_embeddings, temp_z_context)            
-            next_tokens = torch.argmax(logits, dim=-1)  # Shape (batch,)
-
-            # Update each active sequence with the newly generated token
-            for i, idx in enumerate(active_indices):
-                generated_sequences[idx].append(next_tokens[i].item())  # Store generated token
-                if ENCODER == "TOKEN_GNN":
-                    next_token_embedding = self.gnn(graph_data_vocabulary[next_tokens[i].item()])
-                else: # default to learnable embedding
-                    next_token_embedding = self.token_embedding(next_tokens[i])
-                # Append the new embedding to this sequence’s token embeddings
-                token_embeddings[idx] = torch.cat((token_embeddings[idx], next_token_embedding), dim=0)
-        return generated_sequences
-
-
-    def forward(self, x, attention_mask, seq_len_list, batch_g_list):
-        embedded_tokens = self.embed_tokens(x, batch_g_list)  # Embeds each token (graph) using GNN or learnable embedding        
-        if self.encoder == "GNN":
-            mu, logvar = self.encode(batch_g_list, attention_mask)
-        else:
-            mu, logvar = self.encode(embedded_tokens, attention_mask)
-        z = self.reparameterize(mu, logvar)
-        logits, logits_mask = self.autoregressive_training_step(embedded_tokens, z, seq_len_list)
-        return logits, logits_mask, mu, logvar
-
-
 # Loss function
 def vae_loss(args, recon_logits, mask, x, mu, logvar):    
     x_flat = x.view(-1)
@@ -562,22 +292,27 @@ def sample(model, num_samples=5, max_seq_len=10):
         while len(uniq_sequences) < num_samples:
             z = torch.randn(num_samples, args.latent_dim)  # Sample from the prior
             z = z.to(args.cuda)
-            generated_sequences = model.autoregressive_inference(z, max_seq_len)  # Decode from latent space            
+            generated_sequences = model.autoregressive_inference(z, token2rule, max_seq_len)  # Decode from latent space            
             uniq_sequences = uniq_sequences | set(map(tuple, generated_sequences))
     uniq_sequences = [list(l) for l in uniq_sequences]
     return uniq_sequences[:num_samples]
 
 
-def decode_from_latent_space(z, model, max_seq_len=10):
-    generated_sequences = model.autoregressive_inference(z, max_seq_len)
-    return generated_sequences
+def decode_from_latent_space(z, grammar, model, token2rule, max_seq_len):
+    # generated_sequences = model.autoregressive_interactive_inference(z, max_seq_len)
+    generated_sequences = model.autoregressive_interactive_inference(z, grammar, token2rule, max_seq_len)
+    generated_dags = []
+    for deriv in generated_sequences:
+        g = grammar.derive(deriv, token2rule)
+        generated_dags.append(g)
+    return generated_dags
     
 
 def train(args, train_data, test_data):
     folder = args.datapkl if args.datapkl else args.folder
     print(args.folder)
     # Initialize model and optimizer
-    model = TransformerVAE(args.encoder, args.encoder_layers, args.decoder_layers, args.embed_dim, args.latent_dim, MAX_SEQ_LEN)
+    model = TransformerVAE(args.encoder, args.encoder_layers, args.decoder_layers, VOCAB_SIZE, vocabulary_init, vocabulary_terminate, args.embed_dim, args.latent_dim, MAX_SEQ_LEN)
     optimizer = optim.Adam(model.parameters(), lr=1e-4)
     
     if args.encoder == "GNN":
@@ -612,7 +347,7 @@ def train(args, train_data, test_data):
     logger.info(best_ckpt_path)    
     if best_ckpt_path is not None:
         logger.info(f"loaded {best_ckpt_path} loss {best_loss} start_epoch {start_epoch}")
-        model.load_state_dict(torch.load(best_ckpt_path))
+        model.load_state_dict(torch.load(best_ckpt_path, map_location=args.cuda))
 
     patience = 10
     patience_counter = 0
@@ -725,6 +460,123 @@ def train_sgp(sgp, input_means, training_targets, batch_size=1000, lr=1e-4, max_
         logger.info(f"Epoch {i}: Loss = {loss_total}")
         sgp.predict(X_test)
 
+def bo(args, grammar, model, token2rule, y_train, y_test):
+    folder = args.datapkl if args.datapkl else args.folder
+    ckpt_dir = f'ckpts/api_ckt_ednce/{folder}'    
+    X_train = np.load(os.path.join(ckpt_dir, f"train_latent_{args.checkpoint}.npy"))    
+    X_test = np.load(os.path.join(ckpt_dir, f"test_latent_{args.checkpoint}.npy"))    
+    X_train_mean = X_train.mean(axis=0)
+    X_train_std = X_train.std(axis=0)
+    X_train = (X_train-X_train_mean)/X_train_std
+    X_test = (X_test-X_train_mean)/X_train_std    
+    iteration = 0
+    best_score = 1e15
+    best_arc = None
+    best_random_score = 1e15
+    best_random_arc = None
+    logger.info("Average pairwise distance between train points = {}".format(np.mean(pdist(X_train))))
+    logger.info("Average pairwise distance between test points = {}".format(np.mean(pdist(X_test))))    
+    if DATASET == "ckt":
+        evaluate_fn = evaluate_ckt
+    elif DATASET == "enas":
+        evaluate_fn = evaluate_nn
+    elif DATASET == "bn":
+        evaluate_fn = evaluate_bn
+    else:
+        raise NotImplementedError
+    while iteration < args.BO_rounds:
+        logger.info(f"Iteration: {iteration}")
+        if args.predictor:
+            pred = model.predictor(torch.FloatTensor(X_test).to(args.cuda))
+            pred = pred.detach().cpu().numpy()
+            pred = (-pred - mean_y_train) / std_y_train
+            uncert = np.zeros_like(pred)
+        else:
+            # We fit the GP
+            M = 500
+            # other BO hyperparameters
+            lr = 0.005  # the learning rate to train the SGP model
+            max_iter = args.max_iter  # how many iterations to optimize the SGP each time
+            sgp = SparseGP(X_train, 0 * X_train, y_train, M)
+            sgp.train_via_ADAM(X_train, 0 * X_train, y_train, X_test, X_test * 0, y_test, minibatch_size = 2 * M, max_iterations = max_iter, learning_rate = lr)
+            pred, uncert = sgp.predict(X_test, 0 * X_test)
+            # input_means = X_train
+            # input_vars = np.zeros_like(X_train)  # Variances initialized to 0
+            # training_targets = y_train
+            # n_inducing_points = M
+            # # Define kernel
+            # kernel = gpflow.kernels.RBF()
+            # # Initialize inducing points (e.g., random subset of training data)
+            # inducing_points = input_means[:n_inducing_points, :]
+            # # Create sparse variational GP model
+            # sgp = SVGP(kernel=kernel,
+            #         likelihood=gpflow.likelihoods.Gaussian(),
+            #         inducing_variable=inducing_points,
+            #         num_latent_gps=1)
+            # train_sgp(sgp, input_means, training_targets, batch_size=2*M)
+            # pred, var = sgp.predict_y(X_test)
+
+        logger.info(f"predictions: {pred.reshape(-1)}")
+        logger.info(f"real values: {y_test.reshape(-1)}")
+        error = np.sqrt(np.mean((pred - y_test)**2))
+        testll = np.mean(sps.norm.logpdf(pred - y_test, scale = np.sqrt(uncert)))
+        logger.info(f'Test RMSE: {error}')
+        logger.info(f'Test ll: {testll}')
+        pearson = float(pearsonr(pred.flatten(), y_test.flatten())[0])
+        logger.info(f'Pearson r: {pearson}')
+        with open('results/' + 'Test_RMSE_ll.txt', 'a') as test_file:
+            test_file.write('Test RMSE: {:.4f}, ll: {:.4f}, Pearson r: {:.4f}\n'.format(error, testll, pearson))
+
+        error_if_predict_mean = np.sqrt(np.mean((np.mean(y_train, 0) - y_test)**2))
+        logger.info(f'Test RMSE if predict mean: {error_if_predict_mean}')
+        if args.predictor:
+            pred = model.predictor(torch.FloatTensor(X_train).to(args.cuda))
+            pred = pred.detach().cpu().numpy()
+            pred = (-pred - mean_y_train) / std_y_train
+            uncert = np.zeros_like(pred)
+        else:
+            pred, uncert = sgp.predict(X_train, 0 * X_train)
+        error = np.sqrt(np.mean((pred - y_train)**2))
+        trainll = np.mean(sps.norm.logpdf(pred - y_train, scale = np.sqrt(uncert)))
+        logger.info(f'Train RMSE: {error}')
+        logger.info(f'Train ll: {trainll}')        
+        next_inputs = sgp.batched_greedy_ei(args.BO_batch_size, np.min(X_train, 0), np.max(X_train, 0), np.mean(X_train, 0), np.std(X_train, 0), sample=args.sample_dist, max_iter=args.max_ei_iter)
+        breakpoint()
+        valid_arcs_final = decode_from_latent_space(torch.FloatTensor(next_inputs).to(args.cuda), grammar, model, token2rule, MAX_SEQ_LEN)        
+        new_features = next_inputs
+        logger.info("Evaluating selected points")
+        scores = []        
+        for i in range(len(valid_arcs_final)):
+            score = evaluate_fn(args, valid_arcs_final[i])
+            if score < best_score:
+                best_score = score
+                best_arc = arc
+            scores.append(score)
+            # logger.info(i, score)
+        # logger.info("Iteration {}'s selected arcs' scores:".format(iteration))
+        # logger.info(scores, np.mean(scores))
+        save_object(scores, "{}scores{}.dat".format(save_dir, iteration))
+        save_object(valid_arcs_final, "{}valid_arcs_final{}.dat".format(save_dir, iteration))
+
+        if len(new_features) > 0:
+            X_train = np.concatenate([ X_train, new_features ], 0)
+            y_train = np.concatenate([ y_train, np.array(scores)[ :, None ] ], 0)
+        #
+        # logger.info("Current iteration {}'s best score: {}".format(iteration, - best_score * std_y_train - mean_y_train))
+        if best_arc is not None: # and iteration == 10:
+            logger.info(f"Best architecture: {best_arc}")
+            with open(save_dir + 'best_arc_scores.txt', 'a') as score_file:
+                score_file.write(best_arc + ', {:.4f}\n'.format(-best_score * std_y_train - mean_y_train))
+            if data_type == 'ENAS':
+                row = [int(x) for x in best_arc.split()]
+                g_best, _ = decode_ENAS_to_igraph(flat_ENAS_to_nested(row, max_n-2))
+            elif data_type == 'BN':
+                row = adjstr_to_BN(best_arc)
+                g_best, _ = decode_BN_to_igraph(row)
+            plot_DAG(g_best, save_dir, 'best_arc_iter_{}'.format(iteration), data_type=data_type, pdf=True)
+        #
+        iteration += 1
+
 
 def visualize_sequences(sampled_sequences, grammar, token2rule):
     logger.info("===SAMPLED SEQUENCES===")
@@ -749,245 +601,52 @@ def sample_sequences(model, grammar, token2rule, num_samples=5, max_seq_len=10):
     visualize_sequences(sampled_sequences, grammar, token2rule)
 
 
-def check_connections(grammar, g, rule):
-    I = rule.embedding
-    nt = grammar.search_nts(g, NONTERMS)[0]
-    conn = []
-    for d in ["in", "out"]:
-        for nei in neis(g, [nt], direction=[d]):
-            mu = g.nodes[nei]['label']
-            for i in range(len(rule.subgraph)):
-                if (mu, "black", "black", i, d, "in") in I:
-                    conn.append([nei, i])
-                if (mu, "black", "black", i, d, "out") in I:
-                    conn.append([i, nei])
-    return conn   
 
-
-def check_op_amp(grammar, conn, g, rule):
-    nodes = grammar.search_nts(rule.subgraph, ["deepskyblue", "dodgerblue"])
-    for n in nodes:
-        i = list(rule.subgraph).index(n)
-        preds = list(map(lambda a: a[0], filter(lambda a: a[1]==i, conn)))
-        succs = list(map(lambda a: a[1], filter(lambda a: a[0]==i, conn)))
-        new_succs = [list(rule.subgraph).index(j) for j in rule.subgraph.successors(n)]
-        safe = False
-        for a in preds:
-            succs = g.successors(a)                    
-            for s in filter(lambda x: g.nodes[x]['label'] in ['yellow', 'lawngreen'], succs):
-                succ_inter = bool(set(g.successors(s)) & (set(succs)))
-                # s connects to one of new_succ                        
-                new_succ_inter = any([(s, j) in conn for j in new_succs])
-                if succ_inter | new_succ_inter:
-                    breakpoint()
-                    safe = True
-        if not safe:
-            return False
-    return True
-
-
-def interactive_mask_logits(grammar, generated_graphs, generated_orders, logits, token2rule):
-    batch_size = logits.shape[0]
-    for i in tqdm(range(batch_size), desc="masking logits batch"):
-        if generated_graphs[i] is None:
-            continue
-        g = generated_graphs[i]
-        inmi = {}
-        for n in g:
-            if g.nodes[n]['label'] not in NONTERMS:
-                inmi[n] = len(inmi) # inv node map index
-        o = generated_orders[i]    
-        for j in tqdm(range(logits.shape[1]), desc="masking logits single"):
-            if logits[i, j] == float("-inf"):
-                continue # init, terminating logic already in _autoregressive_inference_predict_logits
-            # g = deepcopy(generated_graphs[i])
-            if vocabulary_init[j]:
-                continue
-            rule = grammar.rules[token2rule[j]]
-            o_j = order_init(rule.subgraph, ignore_nt=False)
-            ### sanity checks
-            ## stays connected
-            # g_, applied, node_map = grammar.one_step_derive(g, token2rule[j], token2rule, return_applied=True)
-            # inv_node_map_index = dict(zip(node_map.values(), map(lambda k: list(rule.subgraph).index(k), node_map.keys())))
-            # stays_connected = nx.is_connected(nx.Graph(g_))            
-            ## stays connected
-            # new_edges = set(g_.edges)-set(g.edges)-set(product(inv_node_map_index, inv_node_map_index))
-            conn = check_connections(grammar, g, rule)
-            ## check acyclic
-            # cycle can only form from ((a, x), (y, b)) in product(conn, conn) satisfying:
-            # 1. a and b from g
-            # 2. x and y from range(len(rule.subgraph))
-            # 3. o_j[x,y]
-            # 4. o[b,a]
-            out_pairs = filter(lambda a: isinstance(a[1], int), conn)
-            in_pairs = filter(lambda a: isinstance(a[0], int), conn)
-            acyclic = True
-            for (a, x), (y, b) in product(out_pairs, in_pairs):
-                if o_j[x, y] and o[inmi[b], inmi[a]]:
-                    acyclic = False
-            # if len(conn) != len(new_edges):
-            #     breakpoint()
-            # for u, v in new_edges:
-            #     if u in inv_node_map_index:
-            #         u = inv_node_map_index[u]
-            #     if v in inv_node_map_index:
-            #         v = inv_node_map_index[v]
-            #     if [u, v] not in conn:
-            #         breakpoint()
-
-            # stays_connected <=> len(conn)
-            # assert bool(len(conn)) == stays_connected
-            ## op-amp circuit constraints            
-            
-            # if nx.is_directed_acyclic_graph(g_):
-            #     if vocabulary_terminate[j]:
-            #         ig_ = nx_to_igraph(g_)
-            #         assert is_valid_Circuit(ig_, subg=False)
-            if not (acyclic and len(conn)):
-                logits[i, j] = float("-inf")
-            else:
-                amp_valid = check_op_amp(grammar, conn, g, rule)
-                if not amp_valid:
-                    logits[i, j] = float("-inf")
-
-
-
-def order_init(g, ignore_nt=True):
-    is_term = lambda n: g.nodes[n]['label'] not in NONTERMS
-    if ignore_nt:
-        nodes = [n for n in g if is_term(n)]
-        g_ = copy_graph(g, nodes)
-    else:
-        nodes = list(g)
-        g_ = g
-    paths = nx.all_pairs_shortest_path(g_)
-    o = np.zeros((len(nodes), len(nodes)), dtype=int)
-    for s, l in paths:
-        for t in l:
-            if ignore_nt and all([is_term(n) for n in l[t]]) or not ignore_nt:
-                i = nodes.index(s)
-                j = nodes.index(t)
-                o[i, j] = 1
-    return o
-
-
-def get_inmi(g, ignore_nt=True):
-    inmi = {}
-    for n in g:
-        if g.nodes[n]['label'] not in NONTERMS:
-            inmi[n] = len(inmi) # inv node map index    
-    return inmi
-
-
-def update_order(g, o, grammar, j, token2rule):
-    rule = grammar.rules[token2rule[j]]
-    inmi = get_inmi(g, ignore_nt=True)
-    rhs = rule.subgraph
-    inmi_rhs = get_inmi(rhs, ignore_nt=True)
-    n = len(o)
-    m = len(inmi_rhs)
-    r_adj = order_init(rhs)
-    o_ = np.zeros((n+m, n+m))
-    o_[:n, :n] = o
-    o_[n:, n:] = r_adj
-    conn = check_connections(grammar, g, rule)
-    # get all (a, x) pairs
-    out_pairs = filter(lambda a: isinstance(a[1], int), conn)
-    for (a, x) in out_pairs:
-        # get all y reachable from x
-        if list(rhs)[x] not in inmi_rhs:
-            continue
-        for y in np.argwhere(r_adj[inmi_rhs[list(rhs)[x]]]).flatten():
-            # get all b that reaches a
-            for b in np.argwhere(o[:, inmi[a]]).flatten():
-                o_[b, y+n] = 1
-    in_pairs = filter(lambda a: isinstance(a[0], int), conn)
-    for (y, b) in in_pairs:
-        # get all x that reaches y
-        if list(rhs)[y] not in inmi_rhs:
-            continue
-        for x in np.argwhere(r_adj[:, inmi_rhs[list(rhs)[y]]]).flatten():
-            # get all a reachable from b
-            for a in np.argwhere(o[inmi[b]]).flatten():
-                o_[x+n, a] = 1
-    # all paths going through y
-    for y in inmi_rhs.values():
-        for a in np.argwhere(o_[:n, y+n]).flatten():
-            for b in np.argwhere(o_[y+n, :n]).flatten():
-                o_[a, b] = 1
-    # all paths going from x
-    return o_
-
-
-def interactive_sample_sequences(args, model, grammar, token2rule, num_samples=5, max_seq_len=10):
+def interactive_sample_sequences(args, model, grammar, token2rule, num_samples=5, max_seq_len=10, unique=False, visualize=False):
     num_samples = args.num_samples
     sample_batch_size = args.sample_batch_size
     model.eval()
-    uniq_sequences = set()
+    if unique:
+        uniq_sequences = set()
+    else:
+        sequences = []
     with torch.no_grad():
         with tqdm(total=num_samples) as pbar:
-            while len(uniq_sequences) < num_samples:
+            while len(uniq_sequences if unique else sequences) < num_samples:
                 z = torch.randn(sample_batch_size, args.latent_dim)  
                 z = z.to(args.cuda)            
-                batch_size = z.size(0)
-                z_context = model.fc_decode(z)              
-                token_embeddings = list(torch.unbind(model.start_token_embedding.expand(batch_size, -1, -1), dim=0))  
-                generated_sequences = [[] for _ in range(batch_size)]                  
-                generated_graphs = [None for _ in range(batch_size)]
-                generated_orders = [np.zeros((0, 0)) for _ in range(batch_size)]
-                for t in range(max_seq_len):
-                    temp_batch_embeddings, temp_z_context, active_indices = model._autoregressive_inference_active_indices(z_context, generated_sequences, token_embeddings, max_seq_len)                
-                    if not active_indices:
-                        break
-                    logits = model._autoregressive_inference_predict_logits(temp_batch_embeddings, temp_z_context)
-                    interactive_mask_logits(grammar, [generated_graphs[i] for i in active_indices], [generated_orders[i] for i in active_indices], logits, token2rule)
-                    next_tokens = torch.argmax(logits, dim=-1)
-                    for i, idx in enumerate(active_indices):
-                        generated_sequences[idx].append(next_tokens[i].item())
-                        if generated_graphs[idx] is None:                            
-                            generated_graphs[idx] = grammar.derive([next_tokens[i].item()], token2rule)
-                            # init acyclic order
-                            generated_orders[idx] = order_init(generated_graphs[idx])
-                        else:
-                            order_copy = deepcopy(generated_orders[idx])
-                            generated_orders[idx] = update_order(generated_graphs[idx], generated_orders[idx], grammar, next_tokens[i].item(), token2rule)
-                            # update acyclic order
-                            g_copy = deepcopy(generated_graphs[idx])
-                            generated_graphs[idx] = grammar.one_step_derive(generated_graphs[idx], next_tokens[i].item(), token2rule)
-                            # debug
-                            g_ = copy_graph(generated_graphs[idx], [n for n in generated_graphs[idx] if generated_graphs[idx].nodes[n]['label'] not in NONTERMS])
-                            for i_ in range(len(g_)):
-                                for j_ in range(len(g_)):
-                                    if bool(nx.has_path(g_, list(g_)[i_], list(g_)[j_])) != bool(generated_orders[idx][i_, j_]):
-                                        breakpoint()
-                                        update_order(g_copy, order_copy, grammar, next_tokens[i].item(), token2rule)
-                        if not nx.is_directed_acyclic_graph(generated_graphs[idx]):
-                            breakpoint()
-                            update_order(g_copy, order_copy, grammar, next_tokens[i].item(), token2rule)
-                        if model.encoder == "TOKEN_GNN":
-                            next_token_embedding = model.gnn(graph_data_vocabulary[next_tokens[i].item()])
-                        else: # default to learnable embedding
-                            next_token_embedding = model.token_embedding(next_tokens[i]).unsqueeze(0)
-                        token_embeddings[idx] = torch.cat((token_embeddings[idx], next_token_embedding), dim=0)       
-                uniq_sequences = uniq_sequences | set(map(tuple, generated_sequences))                
-                pbar.update(len(uniq_sequences)-pbar.n)
-    uniq_sequences = [list(l) for l in uniq_sequences]
-    sampled_sequences = uniq_sequences[:num_samples]
+                generated_sequences = model.autoregressive_interactive_inference(z, grammar, token2rule, max_seq_len=max_seq_len)    
+                if unique:
+                    uniq_sequences = uniq_sequences | set(map(tuple, generated_sequences))                
+                    pbar.update(len(uniq_sequences)-pbar.n)
+                else:
+                    sequences += generated_sequences
+                    pbar.update(len(sequences)-pbar.n)
+    if unique:
+        uniq_sequences = [list(l) for l in uniq_sequences]
+        sampled_sequences = uniq_sequences[:num_samples]
+    else:
+        sampled_sequences = sequences[:num_samples]
     logger.info("===SAMPLED SEQUENCES===")
+    gs = []
     for i, seq in enumerate(sampled_sequences):
         logger.info('->'.join(map(str, seq)))
         # Visualize new sequence
-        path = f'data/api_ckt_ednce/generate/{i}.png'
-        img_path = f'data/api_ckt_ednce/generate/{i}_g.png'
-        fig, axes = plt.subplots(len(seq), figsize=(5, 5*(len(seq))))
-        for idx, j in enumerate(map(int, seq)):
-            r = grammar.rules[j]
-            draw_graph(r.subgraph, ax=axes[idx], scale=5)
-        fig.savefig(path)
-        logger.info(os.path.abspath(path))
-        g = grammar.derive(seq, token2rule)
-        draw_graph(g, path=img_path)    
-    breakpoint()
+        if visualize:
+            path = f'data/api_ckt_ednce/generate/{i}.png'
+            img_path = f'data/api_ckt_ednce/generate/{i}_g.png'
+            fig, axes = plt.subplots(len(seq), figsize=(5, 5*(len(seq))))
+            for idx, j in enumerate(map(int, seq)):
+                r = grammar.rules[j]
+                draw_graph(r.subgraph, ax=axes[idx], scale=5)
+            fig.savefig(path)
+            logger.info(os.path.abspath(path))
+            g = grammar.derive(seq, token2rule)
+            draw_graph(g, path=img_path)    
+        else:
+            g = grammar.derive(seq, token2rule)
+        gs.append(g)
+    return gs
     
 
 def load_y(g, num_graphs):
@@ -1128,6 +787,70 @@ def hash_args(args, ignore_keys=['datapkl', 'checkpoint']):
     arg_dict = {k: v for k, v in args.__dict__.items() if k not in ignore_keys}
     return hashlib.md5(json.dumps(arg_dict, sort_keys=True).encode()).hexdigest()
 
+def is_novel(g, orig_graphs):
+    for o in orig_graphs:
+        if nx.is_isomorphic(g, o, node_match=node_match):
+            return False
+    return True
+
+
+def is_valid_circuit(g):    
+    s = next(filter(lambda n: g.nodes[n]['type'] == 'input', g))
+    t = next(filter(lambda n: g.nodes[n]['type'] == 'output', g))
+    for path in nx.all_shortest_paths(g, s, t):
+        for i in path:
+            good = True
+            if g.nodes[i]['type'] in ['-gm-','+gm-']:                
+                good = False
+                predecessors_ = g.predecessors(i)
+                successors_ = g.successors(i)
+                for v_p in predecessors_:
+                    v_p_succ = g.successors(v_p)
+                    for v_cand in v_p_succ:
+                        inster_set = set(g.successors(v_cand)) & set(successors_)
+                        if g.nodes[v_cand]['type'] in ['R','C'] and len(inster_set):
+                            good = True
+            if not good:
+                return False
+    return good              
+
+
+def evaluate(orig_graphs, graphs):
+    ckt_valid, dag_valid, novel = [], [], []
+    for g in graphs:
+        if not is_valid_circuit(g):
+            breakpoint()
+        is_valid_ckt = is_valid_circuit(g)
+        ckt_valid.append(is_valid_ckt)
+        dag_valid.append(nx.is_directed_acyclic_graph(g))
+        novel.append(is_novel(g, orig_graphs))
+    return {"valid_dag": np.mean(dag_valid), "valid_ckt": np.mean(ckt_valid), "novel": np.mean(novel), "n": len(graphs)}
+
+
+def evaluate_nn(args, g):
+    if arc is not None:
+        score = -eva.eval(arc)
+        score = (score - mean_y_train) / std_y_train
+    else:
+        score = max(y_train)[ 0 ]    
+
+def convert_ckt(g, fname):
+    breakpoint()
+    num_subg = len(g)
+    num_nodes = len(g)
+    # get longest path from input->output
+    num_stages = pass
+
+
+def evaluate_ckt(args, g):    
+    folder = args.datapkl if args.datapkl else args.folder
+    path = os.path.join(f'cache/api_ckt_ednce/{folder}')
+    # write converter:
+    fname = os.path.join(path, f"{hash_object(g)}.txt")
+    convert_ckt(g, fname)
+    # for n in g:
+        # if g.nodes[n]
+
 
 def main(args):
     cache_dir = 'cache/api_ckt_ednce/'
@@ -1152,21 +875,24 @@ def main(args):
         print(f'The folder being written to is: {folder}')        
     # prepare y
     # TODO: remove this later
-    # indices = list(range(num_graphs))
-    # # random.Random(0).shuffle(indices)
-    # train_indices, test_indices = indices[:int(num_graphs*0.9)], indices[int(num_graphs*0.9):]    
-    # y = load_y(orig, num_graphs)    
-    # y = np.array(y)
-    # train_y = y[train_indices, None]
-    # mean_train_y = np.mean(train_y)
-    # std_train_y = np.std(train_y)    
-    # test_y = y[test_indices, None]
-    # train_y = (train_y-mean_train_y)/std_train_y
-    # test_y = (test_y-mean_train_y)/std_train_y    
+    indices = list(range(num_graphs))
+    # random.Random(0).shuffle(indices)
+    train_indices, test_indices = indices[:int(num_graphs*0.9)], indices[int(num_graphs*0.9):]    
+    y = load_y(orig, num_graphs)    
+    y = np.array(y)
+    train_y = y[train_indices, None]
+    mean_train_y = np.mean(train_y)
+    std_train_y = np.std(train_y)    
+    test_y = y[test_indices, None]
+    train_y = (train_y-mean_train_y)/std_train_y
+    test_y = (test_y-mean_train_y)/std_train_y    
     model = train(args, train_data, test_data)
-    # breakpoint()
-    # bo(args, None, train_y, test_y)
-    #interactive_sample_sequences(args, model, grammar, token2rule, max_seq_len=MAX_SEQ_LEN)    
+    breakpoint()
+    bo(args, grammar, model, token2rule, train_y, test_y)
+    graphs = interactive_sample_sequences(args, model, grammar, token2rule, max_seq_len=MAX_SEQ_LEN, unique=False, visualize=False)    
+    orig_graphs = [nx.induced_subgraph(orig, orig.comps[i]) for i in range(num_graphs)]
+    metrics = evaluate(orig_graphs, graphs)
+    print(metrics)
 
 
 
@@ -1190,6 +916,8 @@ if __name__ == "__main__":
     parser.add_argument("--datapkl", help="path to folder")
     parser.add_argument("--klcoeff", type=float, default=0.5, help="coefficient to KL div term in VAE loss")
     # eval
+    parser.add_argument("--max-iter", type=int, default=500)
+    parser.add_argument("--max-ei-iter", type=int, default=150)
     args = parser.parse_args()        
     #breakpoint()
     main(args)
