@@ -328,7 +328,6 @@ class TransformerVAE(nn.Module):
                     # s connects to one of new_succ                        
                     new_succ_inter = any([(s, j) in conn for j in new_succs])
                     if succ_inter | new_succ_inter:
-                        breakpoint()
                         safe = True
             if not safe:
                 return False

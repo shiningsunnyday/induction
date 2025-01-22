@@ -32,6 +32,7 @@ import re
 
 import sys
 sys.path.append('dagnn/dvae/bayesian_optimization')
+sys.path.append('../')
 from sparse_gp import SparseGP
 from utils import is_valid_DAG, is_valid_Circuit
 from OCB.src.simulator.graph_to_fom import cktgraph_to_fom
@@ -555,7 +556,6 @@ def bo(args, grammar, model, token2rule, y_train, y_test):
         logger.info(f'Train RMSE: {error}')
         logger.info(f'Train ll: {trainll}')        
         next_inputs = sgp.batched_greedy_ei(args.BO_batch_size, np.min(X_train, 0), np.max(X_train, 0), np.mean(X_train, 0), np.std(X_train, 0), sample=args.sample_dist, max_iter=args.max_ei_iter)
-        #breakpoint()
         valid_arcs_final = decode_from_latent_space(torch.FloatTensor(next_inputs).to(args.cuda), grammar, model, token2rule, MAX_SEQ_LEN)
         new_features = next_inputs
         logger.info("Evaluating selected points")
@@ -867,6 +867,9 @@ def normalize_format(g):
                 main_path = path
     if num_stages not in [2, 3]:
         raise ValueError(f"op-amp has {num_stages} stages")
+    # if len(set(sum([[n]+list(g.predecessors(n)) for n in main_path], []))) < len(g):
+    #     # another unfortunate restriction of the converter
+    #     raise ValueError("every node needs to be on main path or flow into one")
     # relabel main path from 0,2,...len(main_path)-1,1
     rename = {}
     for i, n in enumerate(main_path):
@@ -879,7 +882,7 @@ def normalize_format(g):
     for n in g:
         if n not in rename:
             rename[n] = len(rename)
-    g = nx.relabel_nodes(g, rename)
+    g = nx.relabel_nodes(g, rename)    
     return g, num_stages
 
 
@@ -888,112 +891,100 @@ def convert_ckt(g, fname):
     g, stage = normalize_format(g)
     num_subg = len(g)
     num_nodes = len(g)
-    with open(fname, 'w+') as f:
-        f.write(f"{num_subg} {num_nodes} {stage}\n")
-        SUB_FEAT = {}
-        subg_type = {
-            "input": 0,
-            "output": 1,
-            "R": 2,
-            "C": 3,
-            "+gm+": 6,
-            "-gm+": 7,
-            "+gm-": 8,
-            "-gm-": 9
-        }
-        subg_list = [subg_type[g.nodes[i]['type']] for i in range(num_subg)]
-        pos_subg_dict = [i for i in range(num_subg)]
-        pre_subg_dict = [list(g.predecessors(i)) for i in range(num_subg)]
-        pre_subg_dict[1] = [1] + pre_subg_dict[1]
-        num_edge_dict = [len(pre_subg_dict[i]) for i in range(num_subg)]
-        for i in range(num_subg):
-            if i == 0:
-                sub_inform = [0, i, 0, 0, 0, 1, 8, 0, 1]
-                sub_feats = [-1,0, -1]
-            elif i == 1:
-                subg_t = subg_list[1]
-                pos_ = pos_subg_dict[1]
-                num_edge = num_edge_dict[1]
-                predecessive_ind = pre_subg_dict[1]
-                sub_inform = [subg_t, 1, pos_, num_edge] + predecessive_ind + [1, 9, 0, 1]
-                sub_feats = [-1,0,-1]
-                SUB_FEAT[1] = sub_feats
-            else:
-                subg_t = subg_list[i]
-                num_edge = num_edge_dict[i]
-                pos_ = pos_subg_dict[i]
-                predecessive_ind = pre_subg_dict[i]
-                if num_edge == 0 and len(predecessive_ind) == 0:
-                    predecessive_ind = [0]
-                sub_types = [6]
-                sub_feats = [-1]
-                sub_types += [NODE_TYPE[i] for i in SUBG_NODE[subg_list[i]]]
-                size = len(SUBG_NODE[subg_list[i]])
-                sub_feats += [g.nodes[i]['feat']]
-                sub_types += [7]
-                sub_feats += [-1]
-                assert(len(sub_types) == len(sub_feats))
-                #print(sub_types)
-                #print(sub_feats)
-                nodes_in_subg = len(sub_types)
-                flatten_adj = [0,1,0,1,0,1,0,1,0]
-                sub_inform = [subg_t, i, pos_, num_edge] + predecessive_ind + [nodes_in_subg] + sub_types + sub_feats + flatten_adj
-                #print(sub_inform)
-            #SUB_INF[subg_list[i]] = sub_inform 
-            SUB_FEAT[i] = sub_feats
-            for val in sub_inform:
-                f.write(str(val))
-                f.write(' ')
-            f.write('\r\n')
-        all_predecessive_dict = {}
-        all_type_dict = {}
-        all_feat_dict = {}
-        
-        ind_order = []
-        if stage == 3:
-            main_path = [0,2,3,4,1]
-        elif stage == 2:
-            main_path = [0,2,3,1]
+    to_write = ""
+    to_write+=(f"{num_subg} {num_nodes} {stage}\n")
+    SUB_FEAT = {}
+    subg_type = {
+        "input": 0,
+        "output": 1,
+        "R": 2,
+        "C": 3,
+        "+gm+": 6,
+        "-gm+": 7,
+        "+gm-": 8,
+        "-gm-": 9
+    }
+    subg_list = [subg_type[g.nodes[i]['type']] for i in range(num_subg)]
+    pos_subg_dict = [i for i in range(num_subg)]
+    pre_subg_dict = [list(g.predecessors(i)) for i in range(num_subg)]
+    pre_subg_dict[1] = pre_subg_dict[1]
+    num_edge_dict = [len(pre_subg_dict[i]) for i in range(num_subg)]
+    for i in range(num_subg):
+        if i == 0:
+            sub_inform = [0, i, 0, 0, 0, 1, 8, 0, 1]
+            sub_feats = [-1,0, -1]
+        elif i == 1:
+            subg_t = subg_list[1]
+            pos_ = pos_subg_dict[1]
+            num_edge = num_edge_dict[1]
+            predecessive_ind = pre_subg_dict[1]
+            sub_inform = [subg_t, 1, pos_, num_edge] + predecessive_ind + [1, 9, 0, 1]
+            sub_feats = [-1,0,-1]
+            SUB_FEAT[1] = sub_feats
         else:
-            raise MyException('Undefined number of stages')
-        for i in main_path:
-            if i == 0:
-                ind_order.append(i)
-            else:
-                for j in pre_subg_dict[i]:
-                    if j not in ind_order:
-                        ind_order.append(j)
-                ind_order.append(i)
-        ind_dict = {}
-        node_count = 0
-        #print(ind_order)
-        for i in ind_order:
-            #print(i)
-            #print(pre_subg_dict[i])
-            num_nodes_subg = len(SUBG_NODE[subg_list[i]])
-            ind_dict[i] = [node_count, node_count + num_nodes_subg - 1]
-            insubg_id = 0
-            #print(ind_dict)
-            #print(pre_subg_dict)
-            for node_id in range(node_count, node_count + num_nodes_subg):
-                all_type_dict[node_id] = NODE_TYPE[SUBG_NODE[subg_list[i]][insubg_id]]
-                all_feat_dict[node_id] = SUB_FEAT[i][insubg_id + 1]
-                if SUBG_CON[subg_list[i]] == 'series':
-                    pre_nodes = []
-                    if insubg_id == 0:
-                        for j in pre_subg_dict[i]:
-                            if SUBG_CON[subg_list[j]] == 'series':
-                                pre_nodes.append(ind_dict[j][1])
-                            elif SUBG_CON[subg_list[j]] == 'parral':
-                                for h in range(ind_dict[j][0],ind_dict[j][1]+1):
-                                    pre_nodes.append(h)
-                            else:
-                                pre_nodes.append(ind_dict[j][0])
-                    else:
-                        pre_nodes.append(node_id-1)
-                    all_predecessive_dict[node_id] = pre_nodes
-                elif SUBG_CON[subg_list[i]] == 'parral':
-                    pre_nodes = []
+            subg_t = subg_list[i]
+            num_edge = num_edge_dict[i]
+            pos_ = pos_subg_dict[i]
+            predecessive_ind = pre_subg_dict[i]
+            if num_edge == 0 and len(predecessive_ind) == 0:
+                predecessive_ind = [0]
+            sub_types = [6]
+            sub_feats = [-1]
+            sub_types += [NODE_TYPE[i] for i in SUBG_NODE[subg_list[i]]]
+            size = len(SUBG_NODE[subg_list[i]])
+            sub_feats += [g.nodes[i]['feat']]
+            sub_types += [7]
+            sub_feats += [-1]
+            assert(len(sub_types) == len(sub_feats))
+            #print(sub_types)
+            #print(sub_feats)
+            nodes_in_subg = len(sub_types)
+            flatten_adj = [0,1,0,1,0,1,0,1,0]
+            sub_inform = [subg_t, i, pos_, num_edge] + predecessive_ind + [nodes_in_subg] + sub_types + sub_feats + flatten_adj
+            #print(sub_inform)
+        #SUB_INF[subg_list[i]] = sub_inform 
+        SUB_FEAT[i] = sub_feats
+        for val in sub_inform:
+            to_write+=(str(val))
+            to_write+=(' ')
+        to_write+=('\r\n')
+    all_predecessive_dict = {}
+    all_type_dict = {}
+    all_feat_dict = {}
+    
+    # ind_order = []
+    # if stage == 3:
+    #     main_path = [0,2,3,4,1]
+    # elif stage == 2:
+    #     main_path = [0,2,3,1]
+    # else:
+    #     raise MyException('Undefined number of stages')
+    # for i in main_path:
+    #     if i == 0:
+    #         ind_order.append(i)
+    #     else:
+    #         for j in pre_subg_dict[i]:
+    #             if j not in ind_order:
+    #                 ind_order.append(j)
+    #         ind_order.append(i)
+    ind_order = next(nx.all_topological_sorts(g))
+    ind_dict = {}
+    node_count = 0
+    #print(ind_order)
+    for i in ind_order:
+        #print(i)
+        #print(pre_subg_dict[i])
+        num_nodes_subg = len(SUBG_NODE[subg_list[i]])
+        ind_dict[i] = [node_count, node_count + num_nodes_subg - 1]
+        insubg_id = 0
+        #print(ind_dict)
+        #print(pre_subg_dict)
+        for node_id in range(node_count, node_count + num_nodes_subg):
+            all_type_dict[node_id] = NODE_TYPE[SUBG_NODE[subg_list[i]][insubg_id]]
+            all_feat_dict[node_id] = SUB_FEAT[i][insubg_id + 1]
+            if SUBG_CON[subg_list[i]] == 'series':
+                pre_nodes = []
+                if insubg_id == 0:
                     for j in pre_subg_dict[i]:
                         if SUBG_CON[subg_list[j]] == 'series':
                             pre_nodes.append(ind_dict[j][1])
@@ -1002,31 +993,44 @@ def convert_ckt(g, fname):
                                 pre_nodes.append(h)
                         else:
                             pre_nodes.append(ind_dict[j][0])
-                    all_predecessive_dict[node_id] = pre_nodes
                 else:
-                    pre_nodes = []
-                    for j in pre_subg_dict[i]:
-                        if SUBG_CON[subg_list[j]] == 'series':
-                            pre_nodes.append(ind_dict[j][1])
-                        elif SUBG_CON[subg_list[j]] == 'parral':
-                            for h in range(ind_dict[j][0],ind_dict[j][1]+1):
-                                pre_nodes.append(h)
-                        else:
-                            pre_nodes.append(ind_dict[j][0])
-                    all_predecessive_dict[node_id] = pre_nodes
-                insubg_id += 1
-            node_count += num_nodes_subg
-        ### [node type, node feat, previous node]    
-        for i in range(num_nodes):
-            type_ =  all_type_dict[i]
-            feat_ = all_feat_dict[i]
-            predecessors_ = all_predecessive_dict[i]
-            inform = [type_, feat_] + predecessors_
-            for val in inform:
-                f.write(str(val))
-                f.write(' ')
-            f.write('\r\n')            
-
+                    pre_nodes.append(node_id-1)
+                all_predecessive_dict[node_id] = pre_nodes
+            elif SUBG_CON[subg_list[i]] == 'parral':
+                pre_nodes = []
+                for j in pre_subg_dict[i]:
+                    if SUBG_CON[subg_list[j]] == 'series':
+                        pre_nodes.append(ind_dict[j][1])
+                    elif SUBG_CON[subg_list[j]] == 'parral':
+                        for h in range(ind_dict[j][0],ind_dict[j][1]+1):
+                            pre_nodes.append(h)
+                    else:
+                        pre_nodes.append(ind_dict[j][0])
+                all_predecessive_dict[node_id] = pre_nodes
+            else:
+                pre_nodes = []
+                for j in pre_subg_dict[i]:
+                    if SUBG_CON[subg_list[j]] == 'series':
+                        pre_nodes.append(ind_dict[j][1])
+                    elif SUBG_CON[subg_list[j]] == 'parral':
+                        for h in range(ind_dict[j][0],ind_dict[j][1]+1):
+                            pre_nodes.append(h)
+                    else:
+                        pre_nodes.append(ind_dict[j][0])
+                all_predecessive_dict[node_id] = pre_nodes
+            insubg_id += 1
+        node_count += num_nodes_subg
+    ### [node type, node feat, previous node]    
+    for i in range(num_nodes):
+        type_ =  all_type_dict[i]
+        feat_ = all_feat_dict[i]
+        predecessors_ = all_predecessive_dict[i]
+        inform = [type_, feat_] + predecessors_
+        for val in inform:
+            to_write+=(str(val))
+            to_write+=(' ')
+        to_write+=('\r\n')
+    breakpoint()
 
 
 def evaluate_ckt(args, g):    
@@ -1035,6 +1039,7 @@ def evaluate_ckt(args, g):
     # write converter:
     fname = os.path.join(path, f"{hash_object(g)}.txt")
     convert_ckt(g, fname)
+    breakpoint()
     # for n in g:
         # if g.nodes[n]
 
