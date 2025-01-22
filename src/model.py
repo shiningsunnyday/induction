@@ -327,10 +327,9 @@ class TransformerVAE(nn.Module):
                 succs = g.successors(a)                    
                 for s in filter(lambda x: g.nodes[x]['label'] in ['yellow', 'lawngreen'], succs):
                     succ_inter = bool(set(g.successors(s)) & (set(succs)))
-                    # s connects to one of new_succ                        
+                    # s connects to one of new_succ   
                     new_succ_inter = any([(s, j) in conn for j in new_succs])
                     if succ_inter | new_succ_inter:
-                        breakpoint()
                         safe = True
             if not safe:
                 return False

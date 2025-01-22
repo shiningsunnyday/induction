@@ -15,7 +15,7 @@
 	url = https://github.com/MITIBMxGraph/RevTrack.git
 [submodule "CktGNN"]
 	path = CktGNN
-	url = https://github.com/zehao-dong/CktGNN.git
+	url = https://github.com/shiningsunnyday/CktGNN.git
 [submodule "dagnn"]
 	path = dagnn
 	url = https://github.com/shiningsunnyday/DAGNN.git
