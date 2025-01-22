@@ -41,11 +41,11 @@ class TransformerVAE(nn.Module):
         self.latent_dim = latent_dim
         self.seq_len = seq_len
         if encoder == "TOKEN_GNN":
-            self.gnn = DAGNN(None, None, 13, latent_dim, None, w_edge_attr=False, bidirectional=False, num_class=latent_dim)        
+            self.gnn = DAGNN(None, None, 13, latent_dim, None, w_edge_attr=False, bidirectional=False, num_class=embed_dim)        
             self.transformer_encoder = TransformerEncoder(embed_dim, num_layers=encoder_layers)            
         elif encoder == "GNN":
             self.token_embedding = nn.Embedding(vocab_size, embed_dim)
-            self.gnn = DAGNN(None, None, 13, latent_dim, None, w_edge_attr=False, bidirectional=False, num_class=latent_dim)
+            self.gnn = DAGNN(None, None, 13, latent_dim, None, w_edge_attr=False, bidirectional=False, num_class=embed_dim)
         else:
             self.token_embedding = nn.Embedding(vocab_size, embed_dim)
             self.transformer_encoder = TransformerEncoder(embed_dim, num_layers=encoder_layers)

@@ -324,7 +324,6 @@ def decode_from_latent_space(z, grammar, model, token2rule, max_seq_len):
     
 
 def train(args, train_data, test_data):
-    folder = args.datapkl if args.datapkl else args.folder
     print(args.folder)
     # Initialize model and optimizer
     model = TransformerVAE(args.encoder, args.encoder_layers, args.decoder_layers, VOCAB_SIZE, vocabulary_init, vocabulary_terminate, args.embed_dim, args.latent_dim, MAX_SEQ_LEN)
@@ -347,8 +346,8 @@ def train(args, train_data, test_data):
     if args.encoder == "TOKEN_GNN":
         for i, graph_data in enumerate(graph_data_vocabulary):
             graph_data_vocabulary[i] = graph_data.to(args.cuda)
-    ckpts = glob.glob(f'ckpts/api_ckt_ednce/{folder}/*.pth')
-    logger.info(f'ckpts/api_ckt_ednce/{folder}/*.pth')
+    ckpts = glob.glob(f'ckpts/api_ckt_ednce/{args.folder}/*.pth')
+    logger.info(f'ckpts/api_ckt_ednce/{args.folder}/*.pth')
     start_epoch = 0
     best_loss = float("inf")
     best_ckpt_path = None
@@ -556,7 +555,7 @@ def bo(args, grammar, model, token2rule, y_train, y_test):
         logger.info(f'Train RMSE: {error}')
         logger.info(f'Train ll: {trainll}')        
         next_inputs = sgp.batched_greedy_ei(args.BO_batch_size, np.min(X_train, 0), np.max(X_train, 0), np.mean(X_train, 0), np.std(X_train, 0), sample=args.sample_dist, max_iter=args.max_ei_iter)
-        breakpoint()
+        #breakpoint()
         valid_arcs_final = decode_from_latent_space(torch.FloatTensor(next_inputs).to(args.cuda), grammar, model, token2rule, MAX_SEQ_LEN)
         new_features = next_inputs
         logger.info("Evaluating selected points")
@@ -835,7 +834,8 @@ def evaluate(orig_graphs, graphs):
     ckt_valid, dag_valid, novel = [], [], []
     for g in graphs:
         if not is_valid_circuit(g):
-            breakpoint()
+            print("not valid circuit")
+            #breakpoint()
         is_valid_ckt = is_valid_circuit(g)
         ckt_valid.append(is_valid_ckt)
         dag_valid.append(is_valid_DAG(nx_to_igraph(g, subg=False)))
@@ -1060,7 +1060,7 @@ def main(args):
         num_graphs = 200000
         orig = load_bn(args)
     elif args.dataset == "enas":
-        breakpoint()
+        #breakpoint()
         num_graphs = None
         orig = load_bn(args)
     else:
@@ -1124,5 +1124,5 @@ if __name__ == "__main__":
                         help='from which distrbiution to sample random points in the latent \
                         space as candidates to select; uniform or normal')       
     args = parser.parse_args()        
-    breakpoint()
+    #breakpoint()
     main(args)
