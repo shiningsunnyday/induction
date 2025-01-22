@@ -1,5 +1,8 @@
 import os
 #os.environ["CUDA_VISIBLE_DEVICES"] = ""
+import sys
+sys.path.append('dagnn/dvae/bayesian_optimization')
+sys.path.append('CktGNN')
 import torch
 import torch.nn as nn
 import torch.optim as optim
@@ -30,10 +33,7 @@ from src.model import *
 import glob
 import re
 
-import sys
-sys.path.append('dagnn/dvae/bayesian_optimization')
-sys.path.append('../')
-from sparse_gp import SparseGP
+# from sparse_gp import SparseGP
 from utils import is_valid_DAG, is_valid_Circuit
 from OCB.src.simulator.graph_to_fom import cktgraph_to_fom
 # Logging

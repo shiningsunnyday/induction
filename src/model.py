@@ -91,9 +91,9 @@ class TransformerVAE(nn.Module):
         g_list = [g_list[i] for i in range(len(g_list))]
         for token_id, graph_data in zip(token_ids, g_list):
             if graph_data is None:
-                embedded_token = torch.zeros((self.args.latent_dim,), device=self.args.cuda)
+                embedded_token = torch.zeros((self.latent_dim,), device=self.cuda)
             else:
-                graph_data.to(self.args.cuda)
+                graph_data.to(self.cuda)
                 embedded_token = self.gnn(graph_data).flatten()
             embedded_tokens.append(embedded_token)
         return torch.stack(embedded_tokens, dim=0)
@@ -101,7 +101,7 @@ class TransformerVAE(nn.Module):
 
     def encode(self, x, attention_mask=None):        
         if self.encoder == "GNN":            
-            pooled = torch.stack([self.gnn(g.to(self.args.cuda)).flatten() for g in x], dim=0)
+            pooled = torch.stack([self.gnn(g.to(self.cuda)).flatten() for g in x], dim=0)
         else:
             assert attention_mask is not None
             encoded_seq = self.transformer_encoder(x.permute(1, 0, 2), src_key_padding_mask=~attention_mask).permute(1, 0, 2)
