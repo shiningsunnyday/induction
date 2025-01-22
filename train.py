@@ -823,6 +823,9 @@ def is_valid_circuit(g):
                     v_p_succ = g.successors(v_p)
                     for v_cand in v_p_succ:
                         inster_set = set(g.successors(v_cand)) & set(successors_)
+                        # predecessor's sucessor's successors & successors
+                            # each +gm- or -gm- "self" has a predecessor whose successor is R or C
+                            # and that R or C shares a successor with the self
                         if g.nodes[v_cand]['type'] in ['R','C'] and len(inster_set):
                             good = True
             if not good:
