@@ -9,7 +9,7 @@ EMBED_DIM_VALUES=256
 
 NUM_SAMPLES=3
 
-ENCODER_LAYERS=(5 6 7 8)
+ENCODER_LAYERS=4
 
 DECODER_LAYERS=6
 
@@ -21,19 +21,18 @@ BATCH_SIZE=256
 
 EPOCHS=500
 
-CUDA="cuda"
+CUDA="cuda:2"
 
-KL_DIV=0.5
+KL_DIV=(0.6 0.7 0.8 0.9 1.0)
 
-SEED=1234
+DATASET="ckt" # choices=["ckt", "bn", "enas"]
 
-
-for EL in "${ENCODER_LAYERS[@]}"
+for KL in "${KL_DIV[@]}"
 do
-    echo "Running training with encoder layers=$EL"
+    echo "Running training with kl div coeff=$KL"
     python train.py \
         --num-samples $NUM_SAMPLES \
-        --encoder-layers $EL \
+        --encoder-layers $ENCODER_LAYERS \
         --decoder-layers $DECODER_LAYERS \
         --encoder $ENCODER \
         --batch-size $BATCH_SIZE \
@@ -42,8 +41,8 @@ do
         --latent-dim $LATENT_DIM_VALUES \
         --embed-dim $EMBED_DIM_VALUES \
         --datapkl $DATAPKL \
-        --klcoeff $KL_DIV \
-        --seed $SEED
+        --klcoeff $KL \
+        --dataset $DATASET \
 
 done
 echo "All runs finished!!!"

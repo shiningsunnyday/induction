@@ -31,15 +31,17 @@ class TransformerEncoder(nn.Module):
 
 # Define VAE
 class TransformerVAE(nn.Module):
-    def __init__(self, encoder, encoder_layers, decoder_layers, vocab_size, vocabulary_init, vocabulary_terminate, embed_dim, latent_dim, seq_len):
+    def __init__(self, encoder, encoder_layers, decoder_layers, vocab_size, vocabulary_init, vocabulary_terminate, embed_dim, latent_dim, seq_len, args):
         super(TransformerVAE, self).__init__()        
         # self.token_gnn = TokenGNN(embed_dim)
+        self.args = args
         self.encoder = encoder
         self.encoder_layers = encoder_layers
         self.decoder_layers = decoder_layers
         self.embed_dim = embed_dim
         self.latent_dim = latent_dim
         self.seq_len = seq_len
+        self.vocab_size = vocab_size
         if encoder == "TOKEN_GNN":
             self.gnn = DAGNN(None, None, 13, latent_dim, None, w_edge_attr=False, bidirectional=False, num_class=embed_dim)        
             self.transformer_encoder = TransformerEncoder(embed_dim, num_layers=encoder_layers)            
@@ -89,9 +91,9 @@ class TransformerVAE(nn.Module):
         g_list = [g_list[i] for i in range(len(g_list))]
         for token_id, graph_data in zip(token_ids, g_list):
             if graph_data is None:
-                embedded_token = torch.zeros((args.latent_dim,), device=args.cuda)
+                embedded_token = torch.zeros((self.args.latent_dim,), device=self.args.cuda)
             else:
-                graph_data.to(args.cuda)
+                graph_data.to(self.args.cuda)
                 embedded_token = self.gnn(graph_data).flatten()
             embedded_tokens.append(embedded_token)
         return torch.stack(embedded_tokens, dim=0)
@@ -99,7 +101,7 @@ class TransformerVAE(nn.Module):
 
     def encode(self, x, attention_mask=None):        
         if self.encoder == "GNN":            
-            pooled = torch.stack([self.gnn(g.to(args.cuda)).flatten() for g in x], dim=0)
+            pooled = torch.stack([self.gnn(g.to(self.args.cuda)).flatten() for g in x], dim=0)
         else:
             assert attention_mask is not None
             encoded_seq = self.transformer_encoder(x.permute(1, 0, 2), src_key_padding_mask=~attention_mask).permute(1, 0, 2)
@@ -181,14 +183,14 @@ class TransformerVAE(nn.Module):
         recon_logits_list = []
         for seq_logits in generated_logits:
             seq_logits_cat = torch.cat(seq_logits, dim=0)
-            padding = torch.zeros(max_seq_len - len(seq_logits), VOCAB_SIZE, device=seq_logits_cat.device)
+            padding = torch.zeros(max_seq_len - len(seq_logits), self.vocab_size, device=seq_logits_cat.device)
             recon_logits = torch.cat((seq_logits_cat, padding), dim=0)
             recon_logits_list.append(recon_logits)
         padded_logits = torch.stack(recon_logits_list, dim=0)
         mask = torch.zeros((padded_logits.shape[0], max_seq_len), dtype=torch.bool, device=padded_logits.device)
         for i, logits in enumerate(generated_logits):
             mask[i, :len(logits)] = 1  # Mark valid positions up to the length of each sequence
-        return padded_logits.view(-1, VOCAB_SIZE), mask
+        return padded_logits.view(-1, self.vocab_size), mask
     
 
     def _autoregressive_inference_active_indices(self, z_context, generated_sequences, token_embeddings, max_seq_len):

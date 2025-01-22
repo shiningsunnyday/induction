@@ -326,7 +326,7 @@ def decode_from_latent_space(z, grammar, model, token2rule, max_seq_len):
 def train(args, train_data, test_data):
     print(args.folder)
     # Initialize model and optimizer
-    model = TransformerVAE(args.encoder, args.encoder_layers, args.decoder_layers, VOCAB_SIZE, vocabulary_init, vocabulary_terminate, args.embed_dim, args.latent_dim, MAX_SEQ_LEN)
+    model = TransformerVAE(args.encoder, args.encoder_layers, args.decoder_layers, VOCAB_SIZE, vocabulary_init, vocabulary_terminate, args.embed_dim, args.latent_dim, MAX_SEQ_LEN, args)
     optimizer = optim.Adam(model.parameters(), lr=1e-4)
     
     if args.encoder == "GNN":
