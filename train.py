@@ -1033,7 +1033,8 @@ def convert_ckt(g, fname):
             to_write+=(str(val))
             to_write+=(' ')
         to_write+=('\r\n')
-    breakpoint()
+    with open(fname, 'w+') as f:
+        f.write(to_write)
 
 
 def evaluate_ckt(args, g):    
@@ -1042,9 +1043,8 @@ def evaluate_ckt(args, g):
     # write converter:
     fname = os.path.join(path, f"{hash_object(g)}.txt")
     convert_ckt(g, fname)
-    breakpoint()
-    # for n in g:
-        # if g.nodes[n]
+    fom = cktgraph_to_fom(fname)
+    return fom
 
 
 def main(args):
