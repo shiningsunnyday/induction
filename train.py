@@ -32,8 +32,10 @@ import matplotlib.pyplot as plt
 from src.model import *
 import glob
 import re
+sys.path.append('dagnn/dvae')
+from util import save_object, plot_DAG, flat_ENAS_to_nested, adjstr_to_BN
 
-# from sparse_gp import SparseGP
+from sparse_gp import SparseGP
 from utils import is_valid_DAG, is_valid_Circuit
 from OCB.src.simulator.graph_to_fom import cktgraph_to_fom
 # Logging
@@ -475,9 +477,10 @@ def train_sgp(sgp, input_means, training_targets, batch_size=1000, lr=1e-4, max_
         logger.info(f"Epoch {i}: Loss = {loss_total}")
         sgp.predict(X_test)
 
-def bo(args, grammar, model, token2rule, y_train, y_test):
+def bo(args, grammar, model, token2rule, y_train, y_test, mean_train_y, std_train_y):
     folder = args.datapkl if args.datapkl else args.folder
     ckpt_dir = f'ckpts/api_{args.dataset}_ednce/{folder}'    
+    save_dir = f'results/api_{args.dataset}_ednce'
     X_train = np.load(os.path.join(ckpt_dir, f"train_latent_{args.checkpoint}.npy"))    
     X_test = np.load(os.path.join(ckpt_dir, f"test_latent_{args.checkpoint}.npy"))    
     X_train_mean = X_train.mean(axis=0)
@@ -539,7 +542,7 @@ def bo(args, grammar, model, token2rule, y_train, y_test):
         logger.info(f'Test ll: {testll}')
         pearson = float(pearsonr(pred.flatten(), y_test.flatten())[0])
         logger.info(f'Pearson r: {pearson}')
-        with open('results/' + 'Test_RMSE_ll.txt', 'a') as test_file:
+        with open(os.path.join(save_dir, 'Test_RMSE_ll.txt'), 'a') as test_file:
             test_file.write('Test RMSE: {:.4f}, ll: {:.4f}, Pearson r: {:.4f}\n'.format(error, testll, pearson))
 
         error_if_predict_mean = np.sqrt(np.mean((np.mean(y_train, 0) - y_test)**2))
@@ -564,7 +567,7 @@ def bo(args, grammar, model, token2rule, y_train, y_test):
             score = evaluate_fn(args, valid_arcs_final[i])
             if score < best_score:
                 best_score = score
-                best_arc = arc
+                best_arc = valid_arcs_final[i]
             scores.append(score)
             # logger.info(i, score)
         # logger.info("Iteration {}'s selected arcs' scores:".format(iteration))
@@ -580,14 +583,15 @@ def bo(args, grammar, model, token2rule, y_train, y_test):
         if best_arc is not None: # and iteration == 10:
             logger.info(f"Best architecture: {best_arc}")
             with open(save_dir + 'best_arc_scores.txt', 'a') as score_file:
-                score_file.write(best_arc + ', {:.4f}\n'.format(-best_score * std_y_train - mean_y_train))
-            if data_type == 'ENAS':
+                score_file.write(best_arc + ', {:.4f}\n'.format(best_score))
+            if args.dataset == 'enas':
                 row = [int(x) for x in best_arc.split()]
-                g_best, _ = decode_ENAS_to_igraph(flat_ENAS_to_nested(row, max_n-2))
-            elif data_type == 'BN':
+                g_best, _ = decode_ENAS_to_igraph(flat_ENAS_to_nested(row, 8-2))
+                plot_DAG(g_best, save_dir, 'best_arc_iter_{}'.format(iteration), data_type='ENAS', pdf=True)
+            elif args.dataset == 'bn':
                 row = adjstr_to_BN(best_arc)
                 g_best, _ = decode_BN_to_igraph(row)
-            plot_DAG(g_best, save_dir, 'best_arc_iter_{}'.format(iteration), data_type=data_type, pdf=True)
+                plot_DAG(g_best, save_dir, 'best_arc_iter_{}'.format(iteration), data_type='BN', pdf=True)
         #
         iteration += 1
 
@@ -778,8 +782,8 @@ def load_data(args, anno, grammar, orig, cache_dir, num_graphs):
     vocab = []
     for key, graph in rule2token.items():
         graph_data, term = convert_graph_to_data(graph)
-        terminate[relabel[key]] = term
         init[relabel[key]] = grammar.rules[key].nt == 'black'
+        terminate[relabel[key]] = term and not init[relabel[key]]
         vocab.append(graph_data)
     if args.encoder == "GNN":
         globals()['MAX_SEQ_LEN'] = max([len(seq) for seq, _ in data])
@@ -1091,7 +1095,7 @@ def main(args):
     test_y = y[test_indices, None]
     train_y = (train_y-mean_train_y)/std_train_y
     test_y = (test_y-mean_train_y)/std_train_y        
-    bo(args, grammar, model, token2rule, train_y, test_y)
+    bo(args, grammar, model, token2rule, train_y, test_y, mean_train_y, std_train_y)
     graphs = interactive_sample_sequences(args, model, grammar, token2rule, max_seq_len=MAX_SEQ_LEN, unique=False, visualize=False)    
     orig_graphs = [nx.induced_subgraph(orig, orig.comps[i]) for i in range(num_graphs)]
     metrics = evaluate(orig_graphs, graphs)
@@ -1131,5 +1135,5 @@ if __name__ == "__main__":
                         help='from which distrbiution to sample random points in the latent \
                         space as candidates to select; uniform or normal')       
     args = parser.parse_args()        
-    #breakpoint()
+    breakpoint()
     main(args)
