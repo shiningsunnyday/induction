@@ -11,7 +11,7 @@ NUM_SAMPLES=3
 
 ENCODER_LAYERS=4
 
-DECODER_LAYERS=(1 2 3 4 5 6 7 8 9 10)
+DECODER_LAYERS=(1 2 3 4 5 6 7 8)
 
 ENCODER="GNN"
 
@@ -44,5 +44,5 @@ do
         --klcoeff $KL_DIV \
         --dataset $DATASET \
 
-done
+doneO
 echo "All runs finished!!!"

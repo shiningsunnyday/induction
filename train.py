@@ -138,7 +138,7 @@ def convert_graph_to_data(graph):
             feat_val = 0.
         if one_hot_vector.argmax().item() >= len(TERMS):
             term = False # nonterm node
-        if args.dataset == 'enas':
+        if args.dataset == 'enas' and args.encoder == 'TOKEN':
             feat = one_hot_vector
         else:
             feat = torch.cat((one_hot_vector, torch.tensor([feat_val])))
@@ -1170,5 +1170,5 @@ if __name__ == "__main__":
                         help='from which distrbiution to sample random points in the latent \
                         space as candidates to select; uniform or normal')       
     args = parser.parse_args()        
-    breakpoint()
+    #breakpoint()
     main(args)

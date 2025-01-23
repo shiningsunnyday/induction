@@ -9,9 +9,9 @@ EMBED_DIM_VALUES=256
 
 NUM_SAMPLES=3
 
-ENCODER_LAYERS=(4)
+ENCODER_LAYERS=4
 
-DECODER_LAYERS=4
+DECODER_LAYERS=(1 2 3 4 5 6 7 8)
 
 ENCODER="TOKEN"
 
@@ -27,14 +27,14 @@ KL_DIV=0.5
 
 DATASET="enas" # choices=["ckt", "bn", "enas"]
 
-for EL in "${ENCODER_LAYERS[@]}"
+for DL in "${DECODER_LAYERS[@]}"
 do
-    echo "Running training with encoder layers=$EL"
+    echo "Running training with decoder layers=$DL"
     export config="/home/ofoo/induction/src/config/enas.yaml"
     python train.py \
         --num-samples $NUM_SAMPLES \
-        --encoder-layers $EL \
-        --decoder-layers $DECODER_LAYERS \
+        --encoder-layers $ENCODER_LAYERS \
+        --decoder-layers $DL \
         --encoder $ENCODER \
         --batch-size $BATCH_SIZE \
         --epochs $EPOCHS \
