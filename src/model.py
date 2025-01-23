@@ -31,10 +31,10 @@ class TransformerEncoder(nn.Module):
 
 # Define VAE
 class TransformerVAE(nn.Module):
-    def __init__(self, encoder, encoder_layers, decoder_layers, vocab_size, vocabulary_init, vocabulary_terminate, embed_dim, latent_dim, seq_len, args):
+    def __init__(self, encoder, encoder_layers, decoder_layers, vocab_size, vocabulary_init, vocabulary_terminate, embed_dim, latent_dim, seq_len, cuda):
         super(TransformerVAE, self).__init__()        
         # self.token_gnn = TokenGNN(embed_dim)
-        self.args = args
+        self.cuda = cuda
         self.encoder = encoder
         self.encoder_layers = encoder_layers
         self.decoder_layers = decoder_layers
@@ -43,11 +43,11 @@ class TransformerVAE(nn.Module):
         self.seq_len = seq_len
         self.vocab_size = vocab_size
         if encoder == "TOKEN_GNN":
-            self.gnn = DAGNN(None, None, 13, latent_dim, None, w_edge_attr=False, bidirectional=False, num_class=embed_dim)        
+            self.gnn = DAGNN(None, None, len(TERMS+NONTERMS)+1, latent_dim, None, w_edge_attr=False, bidirectional=False, num_class=embed_dim)        
             self.transformer_encoder = TransformerEncoder(embed_dim, num_layers=encoder_layers)            
         elif encoder == "GNN":
             self.token_embedding = nn.Embedding(vocab_size, embed_dim)
-            self.gnn = DAGNN(None, None, 13, latent_dim, None, w_edge_attr=False, bidirectional=False, num_class=embed_dim)
+            self.gnn = DAGNN(None, None, len(TERMS+NONTERMS)+1, latent_dim, None, w_edge_attr=False, bidirectional=False, num_class=embed_dim)
         else:
             self.token_embedding = nn.Embedding(vocab_size, embed_dim)
             self.transformer_encoder = TransformerEncoder(embed_dim, num_layers=encoder_layers)
@@ -93,14 +93,14 @@ class TransformerVAE(nn.Module):
             if graph_data is None:
                 embedded_token = torch.zeros((self.latent_dim,), device=self.cuda)
             else:
-                graph_data.to(self.cuda)
+                graph_data.to(self.cuda)                
                 embedded_token = self.gnn(graph_data).flatten()
             embedded_tokens.append(embedded_token)
         return torch.stack(embedded_tokens, dim=0)
         # return torch.cat(embedded_tokens, dim=0)
 
     def encode(self, x, attention_mask=None):        
-        if self.encoder == "GNN":            
+        if self.encoder == "GNN":
             pooled = torch.stack([self.gnn(g.to(self.cuda)).flatten() for g in x], dim=0)
         else:
             assert attention_mask is not None

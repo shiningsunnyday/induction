@@ -37,7 +37,7 @@ import re
 from utils import is_valid_DAG, is_valid_Circuit
 from OCB.src.simulator.graph_to_fom import cktgraph_to_fom
 # Logging
-logger = create_logger("train", "cache/api_ckt_ednce/train.log")
+logger = create_logger("train", f"cache/api_{DATASET}_ednce/train.log")
 
 # Generate a random vocabulary of small graphs using NetworkX
 def generate_random_graphs(vocab_size):
@@ -327,7 +327,7 @@ def decode_from_latent_space(z, grammar, model, token2rule, max_seq_len):
 def train(args, train_data, test_data):
     print(args.folder)
     # Initialize model and optimizer
-    model = TransformerVAE(args.encoder, args.encoder_layers, args.decoder_layers, VOCAB_SIZE, vocabulary_init, vocabulary_terminate, args.embed_dim, args.latent_dim, MAX_SEQ_LEN, args)
+    model = TransformerVAE(args.encoder, args.encoder_layers, args.decoder_layers, VOCAB_SIZE, vocabulary_init, vocabulary_terminate, args.embed_dim, args.latent_dim, MAX_SEQ_LEN, args.cuda)
     optimizer = optim.Adam(model.parameters(), lr=1e-4)
     
     if args.encoder == "GNN":
@@ -347,8 +347,8 @@ def train(args, train_data, test_data):
     if args.encoder == "TOKEN_GNN":
         for i, graph_data in enumerate(graph_data_vocabulary):
             graph_data_vocabulary[i] = graph_data.to(args.cuda)
-    ckpts = glob.glob(f'ckpts/api_ckt_ednce/{args.folder}/*.pth')
-    logger.info(f'ckpts/api_ckt_ednce/{args.folder}/*.pth')
+    ckpts = glob.glob(f'ckpts/api_{args.dataset}_ednce/{args.folder}/*.pth')
+    logger.info(f'ckpts/api_{args.dataset}_ednce/{args.folder}/*.pth')
     start_epoch = 0
     best_loss = float("inf")
     best_ckpt_path = None
@@ -423,7 +423,7 @@ def train(args, train_data, test_data):
         if val_loss < best_loss:
             patience_counter = 0 # reset counter
             best_loss = val_loss
-            ckpt_path = f'ckpts/api_ckt_ednce/{args.folder}/epoch={epoch}_loss={best_loss}.pth'
+            ckpt_path = f'ckpts/api_{args.dataset}_ednce/{args.folder}/epoch={epoch}_loss={best_loss}.pth'
             torch.save(model.state_dict(), ckpt_path)
             logger.info(ckpt_path)
         else:
@@ -438,12 +438,12 @@ def train(args, train_data, test_data):
             f"  - Batch Size: {args.batch_size}"
             f"  - KL Divergence Coefficient: {args.klcoeff}")
         logger.info(f"Epoch {epoch}, Train Loss: {train_loss}, Val Loss: {val_loss}, Train Rec: {train_rec_acc_mean}, Val Rec: {valid_rec_acc_mean}")
-        np.save(f'ckpts/api_ckt_ednce/{args.folder}/train_latent_{epoch}.npy', train_latent)
-        np.save(f'ckpts/api_ckt_ednce/{args.folder}/test_latent_{epoch}.npy', test_latent)
+        np.save(f'ckpts/api_{args.dataset}_ednce/{args.folder}/train_latent_{epoch}.npy', train_latent)
+        np.save(f'ckpts/api_{args.dataset}_ednce/{args.folder}/test_latent_{epoch}.npy', test_latent)
         fig = model.visualize_tokens()
-        fig.savefig(f'ckpts/api_ckt_ednce/{args.folder}/{epoch}.png')        
+        fig.savefig(f'ckpts/api_{args.dataset}_ednce/{args.folder}/{epoch}.png')        
         embedding = model.token_embedding.weight.detach().cpu().numpy()
-        np.save(f'ckpts/api_ckt_ednce/{args.folder}/embedding_{epoch}.npy', embedding)
+        np.save(f'ckpts/api_{args.dataset}_ednce/{args.folder}/embedding_{epoch}.npy', embedding)
         if patience_counter > patience:
             logger.info(f"Early stopping triggered at epoch {epoch}. Best loss: {best_loss}")
             break
@@ -477,7 +477,7 @@ def train_sgp(sgp, input_means, training_targets, batch_size=1000, lr=1e-4, max_
 
 def bo(args, grammar, model, token2rule, y_train, y_test):
     folder = args.datapkl if args.datapkl else args.folder
-    ckpt_dir = f'ckpts/api_ckt_ednce/{folder}'    
+    ckpt_dir = f'ckpts/api_{args.dataset}_ednce/{folder}'    
     X_train = np.load(os.path.join(ckpt_dir, f"train_latent_{args.checkpoint}.npy"))    
     X_test = np.load(os.path.join(ckpt_dir, f"test_latent_{args.checkpoint}.npy"))    
     X_train_mean = X_train.mean(axis=0)
@@ -597,8 +597,8 @@ def visualize_sequences(sampled_sequences, grammar, token2rule):
     for i, seq in enumerate(sampled_sequences):
         logger.info('->'.join(map(str, seq)))
         # Visualize new sequence
-        path = f'data/api_ckt_ednce/generate/{i}.png'
-        img_path = f'data/api_ckt_ednce/generate/{i}_g.png'
+        path = f'data/api_{DATASET}_ednce/generate/{i}.png'
+        img_path = f'data/api_{DATASET}_ednce/generate/{i}_g.png'
         fig, axes = plt.subplots(len(seq), figsize=(5, 5*(len(seq))))
         for idx, j in enumerate(map(int, seq)):
             r = grammar.rules[j]
@@ -647,8 +647,8 @@ def interactive_sample_sequences(args, model, grammar, token2rule, num_samples=5
         logger.info('->'.join(map(str, seq)))
         # Visualize new sequence
         if visualize:
-            path = f'data/api_ckt_ednce/generate/{i}.png'
-            img_path = f'data/api_ckt_ednce/generate/{i}_g.png'
+            path = f'data/api_{args.dataset}_ednce/generate/{i}.png'
+            img_path = f'data/api_{args.dataset}_ednce/generate/{i}_g.png'
             fig, axes = plt.subplots(len(seq), figsize=(5, 5*(len(seq))))
             for idx, j in enumerate(map(int, seq)):
                 r = grammar.rules[j]
@@ -1039,7 +1039,7 @@ def convert_ckt(g, fname):
 
 def evaluate_ckt(args, g):    
     folder = args.datapkl if args.datapkl else args.folder
-    path = os.path.join(f'cache/api_ckt_ednce/{folder}')
+    path = os.path.join(f'cache/api_{args.dataset}_ednce/{folder}')
     # write converter:
     fname = os.path.join(path, f"{hash_object(g)}.txt")
     convert_ckt(g, fname)
@@ -1067,10 +1067,9 @@ def main(args):
     elif args.dataset == "bn":        
         num_graphs = 200000
         orig = load_bn(args)
-    elif args.dataset == "enas":
-        #breakpoint()
-        num_graphs = None
-        orig = load_bn(args)
+    elif args.dataset == "enas":   
+        num_graphs = 19020
+        orig = load_enas(args)                
     else:
         raise NotImplementeredError        
     train_data, test_data, token2rule = load_data(args, anno, grammar, orig, cache_dir, num_graphs)
