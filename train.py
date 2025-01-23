@@ -117,6 +117,7 @@ def add_order_info_01(graph):
 
 def to_one_hot(y, labels):
     one_hot_vector = torch.zeros((len(labels),))
+    #breakpoint()
     one_hot_vector[labels.index(y)] = 1.
     return one_hot_vector
 
@@ -135,7 +136,10 @@ def convert_graph_to_data(graph):
             feat_val = 0.
         if one_hot_vector.argmax().item() >= len(TERMS):
             term = False # nonterm node
-        feat = torch.cat((one_hot_vector, torch.tensor([feat_val])))
+        if args.dataset == 'enas':
+            feat = one_hot_vector
+        else:
+            feat = torch.cat((one_hot_vector, torch.tensor([feat_val])))
         features.append(feat)
     x = torch.stack(features, dim=0)
     # x = torch.rand((graph.number_of_nodes(), EMBED_DIM))    
@@ -364,7 +368,7 @@ def train(args, train_data, test_data):
         logger.info(f"loaded {best_ckpt_path} loss {best_loss} start_epoch {start_epoch}")
         model.load_state_dict(torch.load(best_ckpt_path, map_location=args.cuda))
 
-    patience = 10
+    patience = 5
     patience_counter = 0
     train_latent = np.empty((len(train_data), args.latent_dim))
     test_latent = np.empty((len(test_data), args.latent_dim))
@@ -703,9 +707,30 @@ def process_single(g_orig, rules):
         for n in sub:
             key = all_node_maps[i][n]
             if key in iso:
+                #print(g_orig.nodes[iso[key]]['feat'])
                 sub.nodes[n]['feat'] = g_orig.nodes[iso[key]]['feat']
         rule_ids[i] = (rule_ids[i], sub, all_applied[i-1] if i else None)
     return rule_ids
+
+def process_single_one_hot(g_orig, rules):
+    rule_ids = [r[0] for r in rules]
+    rules = [r[1] for r in rules]
+    g, all_applied, all_node_maps = derive(rules)
+    matcher = DiGraphMatcher(g, g_orig, node_match=node_match)
+    iso = next(matcher.isomorphisms_iter())
+    # use iso to embed feats and instructions        
+    for i, r in enumerate(rules):
+        sub = deepcopy(nx.DiGraph(r.subgraph))
+        # node feats
+        for n in sub:
+            key = all_node_maps[i][n]
+            if key in iso:
+                node_label = g_orig.nodes[iso[key]]['label']
+                one_hot_vec = to_one_hot(node_label, TERMS + NONTERMS)
+                sub.nodes[n]['feat'] = one_hot_vec
+        rule_ids[i] = (rule_ids[i], sub, all_applied[i-1] if i else None)
+    return rule_ids
+
 
 
 def load_data(args, anno, grammar, orig, cache_dir, num_graphs):
@@ -764,8 +789,16 @@ def load_data(args, anno, grammar, orig, cache_dir, num_graphs):
                     rules = [(r, grammar.rules[r]) for r in rule_ids]
                     pargs.append((g_orig, rules))
             if args.encoder != "GNN":
-                with mp.Pool(20) as p:
-                    data = p.starmap(process_single, tqdm(pargs, "processing data mp"))
+                #data = [process_single(parg) for parg in tqdm(pargs, "processing data")]
+                if args.dataset == 'enas':
+                    #data = [process_single_one_hot(parg) for parg in tqdm(pargs, "processing data")]
+                    data = [process_single_one_hot(*parg) for parg in tqdm(pargs, "processing data sequentially")]
+                    # with mp.Pool(4) as p:
+                    #     data = p.starmap(process_single_one_hot, tqdm(pargs, "processing data mp"))
+                else:
+                    with mp.Pool(20) as p:
+                        data = p.starmap(process_single, tqdm(pargs, "processing data mp"))
+
             pickle.dump((data, rule2token), open(save_path, 'wb+'))
     relabel = dict(zip(list(sorted(rule2token)), range(len(rule2token))))    
     token2rule = dict(zip(relabel.values(), relabel.keys()))

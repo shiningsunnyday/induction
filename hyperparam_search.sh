@@ -11,37 +11,37 @@ NUM_SAMPLES=3
 
 ENCODER_LAYERS=4
 
-DECODER_LAYERS=6
+DECODER_LAYERS=(1 2 3 4 5 6 7 8 9 10)
 
 ENCODER="GNN"
 
-DATAPKL="GNN"
+# DATAPKL="GNN"
 
 BATCH_SIZE=256
 
 EPOCHS=500
 
-CUDA="cuda:2"
+CUDA="cuda"
 
-KL_DIV=(0.2 0.3 0.4 0.5)
+KL_DIV=0.5
 
-DATASET="ckt" # choices=["ckt", "bn", "enas"]
+DATASET="enas" # choices=["ckt", "bn", "enas"]
 
-for KL in "${KL_DIV[@]}"
+for DL in "${DECODER_LAYERS[@]}"
 do
-    echo "Running training with kl div coeff=$KL"
+    echo "Running training with decoder layers=$DL"
+    export config="/home/ofoo/induction/src/config/enas.yaml"
     python train.py \
         --num-samples $NUM_SAMPLES \
         --encoder-layers $ENCODER_LAYERS \
-        --decoder-layers $DECODER_LAYERS \
+        --decoder-layers $DL \
         --encoder $ENCODER \
         --batch-size $BATCH_SIZE \
         --epochs $EPOCHS \
         --cuda $CUDA \
         --latent-dim $LATENT_DIM_VALUES \
         --embed-dim $EMBED_DIM_VALUES \
-        --datapkl $DATAPKL \
-        --klcoeff $KL \
+        --klcoeff $KL_DIV \
         --dataset $DATASET \
 
 done
