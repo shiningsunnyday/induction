@@ -438,11 +438,12 @@ class TransformerVAE(nn.Module):
             for j in tqdm(range(logits.shape[1]), desc="masking logits single"):
                 if logits[i, j] == float("-inf"):
                     continue # init, terminating logic already in _autoregressive_inference_predict_logits
-                # g = deepcopy(generated_graphs[i])
-                if self.init_mask[j]:
-                    continue
+                # g = deepcopy(generated_graphs[i])                
                 rule = grammar.rules[token2rule[j]]
                 o_j = TransformerVAE.order_init(rule.subgraph, ignore_nt=False)
+                if not check_reachable():
+                    logits[i, j] = float("-inf")
+                    continue
                 ### sanity checks
                 ## stays connected
                 # g_, applied, node_map = grammar.one_step_derive(g, token2rule[j], token2rule, return_applied=True)
@@ -506,7 +507,7 @@ class TransformerVAE(nn.Module):
                 next_tokens = torch.argmax(logits, dim=-1) # greedy
             else:
                 probs = torch.softmax(logits, dim=-1) # sample
-                # nan_idxes = (probs!=probs).any(axis=-1)
+                nan_idxes = (probs!=probs).any(axis=-1)
                 # if nan_idxes.any(): # should not happen
                 #     breakpoint()
                 #     uniform = torch.ones_like(probs[nan_idxes, :])

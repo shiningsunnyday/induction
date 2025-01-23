@@ -303,6 +303,7 @@ def sample(model, num_samples=5, max_seq_len=10):
 def decode_from_latent_space(z, grammar, model, token2rule, max_seq_len):
     # generated_sequences = model.autoregressive_interactive_inference(z, max_seq_len)
     generated_dags = [None for _ in range(z.shape[0])]
+    generated_derivs = [None for _ in range(z.shape[0])]
     idxes = list(range(z.shape[0]))
     with tqdm(total=z.shape[0], desc="decoding") as pbar:
         while idxes:
@@ -316,6 +317,7 @@ def decode_from_latent_space(z, grammar, model, token2rule, max_seq_len):
                 try: # not our fault, but due to the converter assuming 2 or 3-stage op-amps, we'll keep sampling until we satisfy that restriction
                     normalize_format(g)
                     generated_dags[idx] = g
+                    generated_derivs[idx] = deriv
                     mask.append(False)
                 except ValueError:
                     new_idxes.append(idx)
@@ -323,7 +325,7 @@ def decode_from_latent_space(z, grammar, model, token2rule, max_seq_len):
             idxes = new_idxes
             z = z[mask]
             pbar.update(len(idxes)-pbar.n)
-    return generated_dags
+    return generated_dags, generated_derivs
     
 
 def train(args, train_data, test_data):
@@ -559,7 +561,7 @@ def bo(args, grammar, model, token2rule, y_train, y_test, mean_train_y, std_trai
         logger.info(f'Train RMSE: {error}')
         logger.info(f'Train ll: {trainll}')        
         next_inputs = sgp.batched_greedy_ei(args.BO_batch_size, np.min(X_train, 0), np.max(X_train, 0), np.mean(X_train, 0), np.std(X_train, 0), sample=args.sample_dist, max_iter=args.max_ei_iter)
-        valid_arcs_final = decode_from_latent_space(torch.FloatTensor(next_inputs).to(args.cuda), grammar, model, token2rule, MAX_SEQ_LEN)
+        valid_arcs_final, generated_sequences = decode_from_latent_space(torch.FloatTensor(next_inputs).to(args.cuda), grammar, model, token2rule, MAX_SEQ_LEN)
         new_features = next_inputs
         logger.info("Evaluating selected points")
         scores = []        
@@ -567,7 +569,7 @@ def bo(args, grammar, model, token2rule, y_train, y_test, mean_train_y, std_trai
             score = evaluate_fn(args, valid_arcs_final[i])
             if score < best_score:
                 best_score = score
-                best_arc = valid_arcs_final[i]
+                best_arc = generated_sequences[i]                
             scores.append(score)
             # logger.info(i, score)
         # logger.info("Iteration {}'s selected arcs' scores:".format(iteration))
@@ -1095,7 +1097,7 @@ def main(args):
     test_y = y[test_indices, None]
     train_y = (train_y-mean_train_y)/std_train_y
     test_y = (test_y-mean_train_y)/std_train_y        
-    # bo(args, grammar, model, token2rule, train_y, test_y, mean_train_y, std_train_y)
+    bo(args, grammar, model, token2rule, train_y, test_y, mean_train_y, std_train_y)
     graphs = interactive_sample_sequences(args, model, grammar, token2rule, max_seq_len=MAX_SEQ_LEN, unique=False, visualize=False)    
     orig_graphs = [nx.induced_subgraph(orig, orig.comps[i]) for i in range(num_graphs)]
     metrics = evaluate(orig_graphs, graphs)
