@@ -1095,7 +1095,7 @@ def main(args):
     test_y = y[test_indices, None]
     train_y = (train_y-mean_train_y)/std_train_y
     test_y = (test_y-mean_train_y)/std_train_y        
-    bo(args, grammar, model, token2rule, train_y, test_y, mean_train_y, std_train_y)
+    # bo(args, grammar, model, token2rule, train_y, test_y, mean_train_y, std_train_y)
     graphs = interactive_sample_sequences(args, model, grammar, token2rule, max_seq_len=MAX_SEQ_LEN, unique=False, visualize=False)    
     orig_graphs = [nx.induced_subgraph(orig, orig.comps[i]) for i in range(num_graphs)]
     metrics = evaluate(orig_graphs, graphs)

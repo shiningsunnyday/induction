@@ -397,6 +397,33 @@ class TransformerVAE(nn.Module):
                         reachable = True
                 if not reachable:
                     return False
+            for x in range(o_j.shape[0]):
+                reachable = False
+                for (y, b) in in_pairs:
+                    if o_j[x, y] and o[inmi[b], inmi[t]]:
+                        reachable = True
+                if not reachable:
+                    return False                
+            s = next(filter(lambda n: INVERSE_LOOKUP.get(g.nodes[n]['label'], '') == 'input', g))   
+            for t in g:
+                if t not in inmi:
+                    continue
+                reachable = False
+                if o[inmi[s], inmi[t]]:
+                    reachable = True
+                    continue
+                for (a, x), (y, b) in product(out_pairs, in_pairs):
+                    if o_j[x, y] and o[inmi[s], inmi[a]] and o[inmi[b], inmi[t]]:
+                        reachable = True
+                if not reachable:
+                    return False                        
+            for y in range(o_j.shape[0]):
+                reachable = False
+                for (a, x) in out_pairs:
+                    if o_j[x, y] and o[inmi[s], inmi[a]]:
+                        reachable = True
+                if not reachable:
+                    return False                
             return True   
         batch_size = logits.shape[0]
         for i in tqdm(range(batch_size), desc="masking logits batch"):
