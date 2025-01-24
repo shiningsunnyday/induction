@@ -239,7 +239,7 @@ class TransformerVAE(nn.Module):
         else:
             logits[:,self.init_mask] = float("-inf")
         if seq_len == self.seq_len:
-            logits[:,~self.terminate_mask] = float("-inf")            
+            logits[:,~self.terminate_mask] = float("-inf")
         return logits
 
 
@@ -312,7 +312,7 @@ class TransformerVAE(nn.Module):
                         conn.append([nei, i])
                     if (mu, "black", "black", i, d, "out") in I:
                         conn.append([i, nei])
-        return conn   
+        return conn
 
     @staticmethod
     def check_op_amp(grammar, conn, g, rule):
@@ -383,8 +383,8 @@ class TransformerVAE(nn.Module):
                 if o_j[x, y] and o[inmi[b], inmi[a]]:
                     acyclic = False
             return acyclic
-        def check_reachable():         
-            t = next(filter(lambda n: INVERSE_LOOKUP.get(g.nodes[n]['label'], '') == 'output', g))                
+        def check_reachable(out_pairs, in_pairs):         
+            t = get_node_by_label(g, 'output')
             for s in g:
                 if s not in inmi: # can get rewired some other way
                     continue
@@ -404,7 +404,7 @@ class TransformerVAE(nn.Module):
                         reachable = True
                 if not reachable:
                     return False                
-            s = next(filter(lambda n: INVERSE_LOOKUP.get(g.nodes[n]['label'], '') == 'input', g))   
+            s = get_node_by_label(g, 'input')
             for t in g:
                 if t not in inmi:
                     continue
@@ -427,13 +427,12 @@ class TransformerVAE(nn.Module):
             return True   
         batch_size = logits.shape[0]
         for i in tqdm(range(batch_size), desc="masking logits batch"):
-            if generated_graphs[i] is None:
-                continue
             g = generated_graphs[i]
             inmi = {}
-            for n in g:
-                if g.nodes[n]['label'] not in NONTERMS:
-                    inmi[n] = len(inmi) # inv node map index
+            if g is not None:
+                for n in g:
+                    if g.nodes[n]['label'] not in NONTERMS:
+                        inmi[n] = len(inmi) # inv node map index
             o = generated_orders[i]    
             for j in tqdm(range(logits.shape[1]), desc="masking logits single"):
                 if logits[i, j] == float("-inf"):
@@ -441,9 +440,16 @@ class TransformerVAE(nn.Module):
                 # g = deepcopy(generated_graphs[i])                
                 rule = grammar.rules[token2rule[j]]
                 o_j = TransformerVAE.order_init(rule.subgraph, ignore_nt=False)
-                if not check_reachable():
-                    logits[i, j] = float("-inf")
-                    continue
+                if generated_graphs[i] is None:
+                    # for simplicity for now, ensure the rule itself is reachable
+                    # if we can do lookahead on the first step, that'll be better
+                    s = get_node_by_label(rule.subgraph, 'input')
+                    t = get_node_by_label(rule.subgraph, 'output')
+                    x = list(rule.subgraph).index(s)
+                    y = list(rule.subgraph).index(t)
+                    if min(o_j[x].sum(), o_j[:, y].sum()) < o_j.shape[0]:
+                        logits[i, j] = float("-inf")                        
+                        continue
                 ### sanity checks
                 ## stays connected
                 # g_, applied, node_map = grammar.one_step_derive(g, token2rule[j], token2rule, return_applied=True)
@@ -481,12 +487,13 @@ class TransformerVAE(nn.Module):
                 #         assert is_valid_Circuit(ig_, subg=False)
                 out_pairs = list(filter(lambda a: isinstance(a[1], int), conn))
                 in_pairs = list(filter(lambda a: isinstance(a[0], int), conn))
-                if not (len(conn) and check_reachable() and check_acyclic()):
+                if not (len(conn) and check_reachable(out_pairs, in_pairs) and check_acyclic()):
                     logits[i, j] = float("-inf")
                 else:
-                    amp_valid = TransformerVAE.check_op_amp(grammar, conn, g, rule)
-                    if not amp_valid:
-                        logits[i, j] = float("-inf")        
+                    if DATASET == "ckt":
+                        amp_valid = TransformerVAE.check_op_amp(grammar, conn, g, rule)                    
+                        if not amp_valid:
+                            logits[i, j] = float("-inf")        
 
 
     def autoregressive_interactive_inference(self, z, grammar, token2rule, max_seq_len=10, decode='greedy'):
@@ -507,6 +514,7 @@ class TransformerVAE(nn.Module):
                 next_tokens = torch.argmax(logits, dim=-1) # greedy
             else:
                 probs = torch.softmax(logits, dim=-1) # sample
+                probs_copy = probs.clone()
                 nan_idxes = (probs!=probs).any(axis=-1)
                 # if nan_idxes.any(): # should not happen
                 #     breakpoint()
@@ -518,7 +526,13 @@ class TransformerVAE(nn.Module):
                 else:
                     next_tokens = [None for _ in range(probs.shape[0])]
                     idxes = deepcopy(active_indices)
-                    while idxes: # one-step lookahead                    
+                    while idxes: # one-step lookahead
+                        nan_idxes = (probs!=probs).any(axis=-1)
+                        if nan_idxes.any(): # give up and quickly terminate
+                            print("give up on lookahead")
+                            orig_probs = probs_copy.clone()
+                            orig_probs[:,  ~self.terminate_mask] = 0.
+                            probs[nan_idxes, :] = orig_probs[nan_idxes]
                         cur_next_tokens = torch.multinomial(probs, 1).squeeze(-1)
                         mask = [True for _ in range(len(idxes))]
                         for j in range(len(idxes)-1,-1,-1):
@@ -561,7 +575,7 @@ class TransformerVAE(nn.Module):
                                 breakpoint()
                                 TransformerVAE.update_order(g_copy, order_copy, grammar, next_tokens[i].item(), token2rule)
                     g = generated_graphs[idx]
-                    s = next(filter(lambda n: g.nodes[n]['type'] == 'input', g))
+                    s = get_node_by_label(g, 'input')
                     for t in range(len(g)):
                         if not nx.has_path(g, s, list(g)[t]):
                             breakpoint()

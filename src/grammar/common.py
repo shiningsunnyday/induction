@@ -131,6 +131,10 @@ def check_input_xor_output(subgraph):
     return sum(inp_outp) == 1
 
 
+def get_node_by_label(g, label):
+    return next(filter(lambda n: INVERSE_LOOKUP.get(g.nodes[n]['label'], '') == label, g))
+
+
 def nx_to_igraph(g):
     g = deepcopy(g)
     for n in g:
@@ -165,6 +169,7 @@ def copy_graph(g, nodes, copy_attrs=True):
             if e[1] in nodes:
                 g_copy.add_edge(e[0], e[1], **e[2])
     return g_copy
+    
 
 def copy_graph_mp(g, list_of_nodes, copy_attrs=True):
     res = []

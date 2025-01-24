@@ -458,46 +458,45 @@ def train(args, train_data, test_data):
     return model
 
 
-def train_sgp(sgp, input_means, training_targets, batch_size=1000, lr=1e-4, max_iter=500):
-    train_dataset = tf.data.Dataset.from_tensor_slices((input_means, training_targets))
-    train_dataset = train_dataset.shuffle(buffer_size=1024).batch(batch_size)
-    # Define optimizer
-    adam_optimizer = tf.optimizers.Adam(learning_rate=lr)
-    # Training function
-    @tf.function
-    def train_step(model, optimizer, batch):
-        with tf.GradientTape() as tape:
-            data_input, data_output = batch
-            # Compute variational ELBO loss
-            loss = -model.elbo((data_input, data_output))
-        gradients = tape.gradient(loss, model.trainable_variables)
-        optimizer.apply_gradients(zip(gradients, model.trainable_variables))
-        return loss
+def train_sgp(args, save_file, X_train, X_test, y_train, y_test):
+    # We fit the GP
+    M = 500
+    # other BO hyperparameters
+    lr = 0.005  # the learning rate to train the SGP model
+    max_iter = args.max_iter  # how many iterations to optimize the SGP each time
+    sgp = SparseGP(X_train, 0 * X_train, y_train, M)
+    sgp.train_via_ADAM(X_train, 0 * X_train, y_train, X_test, X_test * 0, y_test, minibatch_size = 2 * M, max_iterations = max_iter, learning_rate = lr)
+    pred, uncert = sgp.predict(X_test, 0 * X_test)
+    logger.info(f"predictions: {pred.reshape(-1)}")
+    logger.info(f"real values: {y_test.reshape(-1)}")
+    error = np.sqrt(np.mean((pred - y_test)**2))
+    testll = np.mean(sps.norm.logpdf(pred - y_test, scale = np.sqrt(uncert)))
+    logger.info(f'Test RMSE: {error}')
+    logger.info(f'Test ll: {testll}')
+    pearson = float(pearsonr(pred.flatten(), y_test.flatten())[0])
+    logger.info(f'Pearson r: {pearson}')
+    with open(save_file, 'a+') as test_file:
+        test_file.write('Test RMSE: {:.4f}, ll: {:.4f}, Pearson r: {:.4f}\n'.format(error, testll, pearson))
+    error_if_predict_mean = np.sqrt(np.mean((np.mean(y_train, 0) - y_test)**2))
+    logger.info(f'Test RMSE if predict mean: {error_if_predict_mean}')    
+    return sgp
 
-    # Train for a given number of iterations
-    for i in range(max_iter):
-        loss_total = 0.
-        for step, batch in enumerate(train_dataset):
-            loss = train_step(sgp, adam_optimizer, batch)
-            loss_total += loss.numpy()
-        logger.info(f"Epoch {i}: Loss = {loss_total}")
-        sgp.predict(X_test)
 
-def bo(args, grammar, model, token2rule, y_train, y_test, mean_train_y, std_train_y):
+
+def bo(args, grammar, model, token2rule, y_train, y_test, target_mean, target_std):
+    ### IMPORTANT: y_train and y_test are 2D numpys, where the last column is the BO property
     folder = args.datapkl if args.datapkl else args.folder
     ckpt_dir = f'ckpts/api_{args.dataset}_ednce/{folder}'    
-    save_dir = f'results/api_{args.dataset}_ednce'
+    save_dir = f'results/api_{args.dataset}_ednce/'
     X_train = np.load(os.path.join(ckpt_dir, f"train_latent_{args.checkpoint}.npy"))    
     X_test = np.load(os.path.join(ckpt_dir, f"test_latent_{args.checkpoint}.npy"))    
     X_train_mean = X_train.mean(axis=0)
     X_train_std = X_train.std(axis=0)
     X_train = (X_train-X_train_mean)/X_train_std
     X_test = (X_test-X_train_mean)/X_train_std    
+    best_score = float("-inf")
+    best_arc = None    
     iteration = 0
-    best_score = 1e15
-    best_arc = None
-    best_random_score = 1e15
-    best_random_arc = None
     logger.info("Average pairwise distance between train points = {}".format(np.mean(pdist(X_train))))
     logger.info("Average pairwise distance between test points = {}".format(np.mean(pdist(X_test))))    
     if DATASET == "ckt":
@@ -508,58 +507,15 @@ def bo(args, grammar, model, token2rule, y_train, y_test, mean_train_y, std_trai
         evaluate_fn = evaluate_bn
     else:
         raise NotImplementedError
+    # for i in range(y_train.shape[1]): # evaluate latent space
+    #     save_file = os.path.join(save_dir, f'Prop_{i}_Test_RMSE_ll.txt')
+    #     sgp = train_sgp(args, save_file, X_train, X_test, y_train[:, i:i+1], y_test[:, i:i+1])
+    y_train, y_test = y_train[:, -1:], y_test[:, -1:]
+    save_file = os.path.join(save_dir, f'Test_RMSE_ll.txt')
     while iteration < args.BO_rounds:
         logger.info(f"Iteration: {iteration}")
-        if args.predictor:
-            pred = model.predictor(torch.FloatTensor(X_test).to(args.cuda))
-            pred = pred.detach().cpu().numpy()
-            pred = (-pred - mean_y_train) / std_y_train
-            uncert = np.zeros_like(pred)
-        else:
-            # We fit the GP
-            M = 500
-            # other BO hyperparameters
-            lr = 0.005  # the learning rate to train the SGP model
-            max_iter = args.max_iter  # how many iterations to optimize the SGP each time
-            sgp = SparseGP(X_train, 0 * X_train, y_train, M)
-            sgp.train_via_ADAM(X_train, 0 * X_train, y_train, X_test, X_test * 0, y_test, minibatch_size = 2 * M, max_iterations = max_iter, learning_rate = lr)
-            pred, uncert = sgp.predict(X_test, 0 * X_test)
-            # input_means = X_train
-            # input_vars = np.zeros_like(X_train)  # Variances initialized to 0
-            # training_targets = y_train
-            # n_inducing_points = M
-            # # Define kernel
-            # kernel = gpflow.kernels.RBF()
-            # # Initialize inducing points (e.g., random subset of training data)
-            # inducing_points = input_means[:n_inducing_points, :]
-            # # Create sparse variational GP model
-            # sgp = SVGP(kernel=kernel,
-            #         likelihood=gpflow.likelihoods.Gaussian(),
-            #         inducing_variable=inducing_points,
-            #         num_latent_gps=1)
-            # train_sgp(sgp, input_means, training_targets, batch_size=2*M)
-            # pred, var = sgp.predict_y(X_test)
-
-        logger.info(f"predictions: {pred.reshape(-1)}")
-        logger.info(f"real values: {y_test.reshape(-1)}")
-        error = np.sqrt(np.mean((pred - y_test)**2))
-        testll = np.mean(sps.norm.logpdf(pred - y_test, scale = np.sqrt(uncert)))
-        logger.info(f'Test RMSE: {error}')
-        logger.info(f'Test ll: {testll}')
-        pearson = float(pearsonr(pred.flatten(), y_test.flatten())[0])
-        logger.info(f'Pearson r: {pearson}')
-        with open(os.path.join(save_dir, 'Test_RMSE_ll.txt'), 'a') as test_file:
-            test_file.write('Test RMSE: {:.4f}, ll: {:.4f}, Pearson r: {:.4f}\n'.format(error, testll, pearson))
-
-        error_if_predict_mean = np.sqrt(np.mean((np.mean(y_train, 0) - y_test)**2))
-        logger.info(f'Test RMSE if predict mean: {error_if_predict_mean}')
-        if args.predictor:
-            pred = model.predictor(torch.FloatTensor(X_train).to(args.cuda))
-            pred = pred.detach().cpu().numpy()
-            pred = (-pred - mean_y_train) / std_y_train
-            uncert = np.zeros_like(pred)
-        else:
-            pred, uncert = sgp.predict(X_train, 0 * X_train)
+        sgp = train_sgp(args, save_file, X_train, X_test, y_train, y_test)
+        pred, uncert = sgp.predict(X_train, 0 * X_train)
         error = np.sqrt(np.mean((pred - y_train)**2))
         trainll = np.mean(sps.norm.logpdf(pred - y_train, scale = np.sqrt(uncert)))
         logger.info(f'Train RMSE: {error}')
@@ -571,9 +527,9 @@ def bo(args, grammar, model, token2rule, y_train, y_test, mean_train_y, std_trai
         scores = []        
         for i in range(len(valid_arcs_final)):
             score = evaluate_fn(args, valid_arcs_final[i])
-            if score < best_score:
+            if score > best_score:
                 best_score = score
-                best_arc = generated_sequences[i]                
+                best_arc = '->'.join(map(str, generated_sequences[i]))
             scores.append(score)
             # logger.info(i, score)
         # logger.info("Iteration {}'s selected arcs' scores:".format(iteration))
@@ -582,14 +538,15 @@ def bo(args, grammar, model, token2rule, y_train, y_test, mean_train_y, std_trai
         save_object(valid_arcs_final, "{}valid_arcs_final{}.dat".format(save_dir, iteration))
 
         if len(new_features) > 0:
-            X_train = np.concatenate([ X_train, new_features ], 0)
-            y_train = np.concatenate([ y_train, np.array(scores)[ :, None ] ], 0)
+            X_train = np.concatenate([X_train, new_features], 0)
+            std_scores = (np.array(scores)-target_mean)/target_std
+            y_train = np.concatenate([y_train, std_scores], 0)
         #
         # logger.info("Current iteration {}'s best score: {}".format(iteration, - best_score * std_y_train - mean_y_train))
         if best_arc is not None: # and iteration == 10:
             logger.info(f"Best architecture: {best_arc}")
             with open(save_dir + 'best_arc_scores.txt', 'a') as score_file:
-                score_file.write(best_arc + ', {:.4f}\n'.format(best_score))
+                score_file.write(best_arc + ',{:.4f}\n'.format(best_score))
             if args.dataset == 'enas':
                 row = [int(x) for x in best_arc.split()]
                 g_best, _ = decode_ENAS_to_igraph(flat_ENAS_to_nested(row, 8-2))
@@ -675,8 +632,11 @@ def interactive_sample_sequences(args, model, grammar, token2rule, num_samples=5
 
 def load_y(g, num_graphs, target):
     y = []
-    for pre in range(num_graphs):        
-        y.append(g.graph[f'{pre}:{target}'])
+    for pre in range(num_graphs):
+        label = []
+        for t in target:
+            label.append(g.graph[f'{pre}:{t}'])
+        y.append(label)
     return y
 
 
@@ -818,7 +778,7 @@ def load_data(args, anno, grammar, orig, cache_dir, num_graphs):
     for key, graph in rule2token.items():
         graph_data, term = convert_graph_to_data(graph)
         init[relabel[key]] = grammar.rules[key].nt == 'black'
-        terminate[relabel[key]] = term and not init[relabel[key]]
+        terminate[relabel[key]] = term
         vocab.append(graph_data)
     if args.encoder == "GNN":
         globals()['MAX_SEQ_LEN'] = max([len(seq) for seq, _ in data])
@@ -1110,7 +1070,7 @@ def main(args):
         num_graphs = 19020
         orig = load_enas(args)                
     else:
-        raise NotImplementeredError        
+        raise NotImplementedError        
     train_data, test_data, token2rule = load_data(args, anno, grammar, orig, cache_dir, num_graphs)
     if args.datapkl:
         print(f'The folder being written to is: {args.datapkl}')
@@ -1122,16 +1082,18 @@ def main(args):
     indices = list(range(num_graphs))
     # random.Random(0).shuffle(indices)
     train_indices, test_indices = indices[:int(num_graphs*0.9)], indices[int(num_graphs*0.9):]    
-    y = load_y(orig, num_graphs, target={"ckt":"fom", "bn":"bic", "enas":"acc"}[args.dataset])
+    y = load_y(orig, num_graphs, target={"ckt": ["gain", "bw", "pm", "fom"], 
+                                         "bn": ["bic"], 
+                                         "enas": ["acc"]}[args.dataset])
     y = np.array(y)
-    train_y = y[train_indices, None]
-    mean_train_y = np.mean(train_y)
-    std_train_y = np.std(train_y)    
-    test_y = y[test_indices, None]
+    train_y = y[train_indices]
+    mean_train_y = np.mean(train_y, axis=0)
+    std_train_y = np.std(train_y, axis=0)
+    test_y = y[test_indices]
     train_y = (train_y-mean_train_y)/std_train_y
-    test_y = (test_y-mean_train_y)/std_train_y        
-    bo(args, grammar, model, token2rule, train_y, test_y, mean_train_y, std_train_y)
-    graphs = interactive_sample_sequences(args, model, grammar, token2rule, max_seq_len=MAX_SEQ_LEN, unique=False, visualize=False)    
+    test_y = (test_y-mean_train_y)/std_train_y
+    bo(args, grammar, model, token2rule, train_y, test_y, mean_train_y[-1], std_train_y[-1])
+    graphs = interactive_sample_sequences(args, model, grammar, token2rule, max_seq_len=MAX_SEQ_LEN, unique=False, visualize=False)
     orig_graphs = [nx.induced_subgraph(orig, orig.comps[i]) for i in range(num_graphs)]
     metrics = evaluate(orig_graphs, graphs)
     print(metrics)
