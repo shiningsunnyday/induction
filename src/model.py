@@ -542,6 +542,7 @@ class TransformerVAE(nn.Module):
                                 cond = True
                             else:
                                 logits = torch.ones((1, logits.shape[1])) # dummy
+                                logits[:, self.init_mask] = float("-inf")
                                 lookahead_graph = grammar.one_step_derive(generated_graphs[idxes[j]], cur.item(), token2rule)
                                 lookahead_order = TransformerVAE.update_order(generated_graphs[idxes[j]], generated_orders[idxes[j]], grammar, cur.item(), token2rule)
                                 self.interactive_mask_logits(grammar, [lookahead_graph], [lookahead_order], logits, token2rule)

@@ -671,7 +671,7 @@ def process_single(g_orig, rules, iso=True):
         iso = next(matcher.isomorphisms_iter())
     # use iso to embed feats and instructions        
     for i, r in enumerate(rules):
-        sub = deepcopy(nx.DiGraph(r.subgraph))
+        sub = nx.DiGraph(r.subgraph)
         # node feats
         if iso:
             for n in sub:
@@ -739,7 +739,7 @@ def load_data(args, anno, grammar, orig, cache_dir, num_graphs):
             rule2token = {}
             pargs = []
             data = []
-            for pre in tqdm(range(1000), "gathering rule tokens"):
+            for pre in tqdm(range(num_graphs), "gathering rule tokens"):
                 seq = find_anno[pre]
                 seq = seq[::-1] # derivation
                 rule_ids = [anno[s].attrs['rule'] for s in seq]
@@ -766,9 +766,9 @@ def load_data(args, anno, grammar, orig, cache_dir, num_graphs):
                 #     # with mp.Pool(4) as p:
                 #     #     data = p.starmap(process_single_one_hot, tqdm(pargs, "processing data mp"))
                 # else:
-                with mp.Pool(20) as p:
-                    data = p.starmap(process_single, tqdm(pargs, "processing data mp"))
-
+                data = [process_single(*parg) for parg in tqdm(pargs, "processing data")]
+                # with mp.Pool(20) as p:
+                #     data = p.starmap(process_single, tqdm(pargs, "processing data mp"))
             pickle.dump((data, rule2token), open(save_path, 'wb+'))
     relabel = dict(zip(list(sorted(rule2token)), range(len(rule2token))))    
     token2rule = dict(zip(relabel.values(), relabel.keys()))
@@ -1137,5 +1137,5 @@ if __name__ == "__main__":
                         help='from which distrbiution to sample random points in the latent \
                         space as candidates to select; uniform or normal')       
     args = parser.parse_args()        
-    #breakpoint()
+    breakpoint()
     main(args)
