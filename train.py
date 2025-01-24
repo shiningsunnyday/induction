@@ -660,42 +660,46 @@ def derive(seq):
     return cur, all_applied, all_node_maps  
 
 
-def process_single(g_orig, rules):
+def process_single(g_orig, rules, iso=True):
+    # iso is for node feats, must match isomorphism first
+    # node feats only present in circuit graphs
     rule_ids = [r[0] for r in rules]
     rules = [r[1] for r in rules]
     g, all_applied, all_node_maps = derive(rules)
-    matcher = DiGraphMatcher(g, g_orig, node_match=node_match)
-    iso = next(matcher.isomorphisms_iter())
+    if iso:
+        matcher = DiGraphMatcher(g, g_orig, node_match=node_match)
+        iso = next(matcher.isomorphisms_iter())
     # use iso to embed feats and instructions        
     for i, r in enumerate(rules):
         sub = deepcopy(nx.DiGraph(r.subgraph))
         # node feats
-        for n in sub:
-            key = all_node_maps[i][n]
-            if key in iso:
-                #print(g_orig.nodes[iso[key]]['feat'])
-                sub.nodes[n]['feat'] = g_orig.nodes[iso[key]]['feat']
+        if iso:
+            for n in sub:
+                key = all_node_maps[i][n]
+                if key in iso:
+                    #print(g_orig.nodes[iso[key]]['feat'])
+                    sub.nodes[n]['feat'] = g_orig.nodes[iso[key]]['feat']
         rule_ids[i] = (rule_ids[i], sub, all_applied[i-1] if i else None)
     return rule_ids
 
-def process_single_one_hot(g_orig, rules):
-    rule_ids = [r[0] for r in rules]
-    rules = [r[1] for r in rules]
-    g, all_applied, all_node_maps = derive(rules)
-    matcher = DiGraphMatcher(g, g_orig, node_match=node_match)
-    iso = next(matcher.isomorphisms_iter())
-    # use iso to embed feats and instructions        
-    for i, r in enumerate(rules):
-        sub = deepcopy(nx.DiGraph(r.subgraph))
-        # node feats
-        for n in sub:
-            key = all_node_maps[i][n]
-            if key in iso:
-                node_label = g_orig.nodes[iso[key]]['label']
-                one_hot_vec = to_one_hot(node_label, TERMS + NONTERMS)
-                sub.nodes[n]['feat'] = one_hot_vec
-        rule_ids[i] = (rule_ids[i], sub, all_applied[i-1] if i else None)
-    return rule_ids
+# def process_single_one_hot(g_orig, rules):
+#     rule_ids = [r[0] for r in rules]
+#     rules = [r[1] for r in rules]
+#     g, all_applied, all_node_maps = derive(rules)
+#     matcher = DiGraphMatcher(g, g_orig, node_match=node_match)
+#     iso = next(matcher.isomorphisms_iter())
+#     # use iso to embed feats and instructions        
+#     for i, r in enumerate(rules):
+#         sub = deepcopy(nx.DiGraph(r.subgraph))
+#         # node feats
+#         for n in sub:
+#             key = all_node_maps[i][n]
+#             if key in iso:
+#                 node_label = g_orig.nodes[iso[key]]['label']
+#                 one_hot_vec = to_one_hot(node_label, TERMS + NONTERMS)
+#                 sub.nodes[n]['feat'] = one_hot_vec
+#         rule_ids[i] = (rule_ids[i], sub, all_applied[i-1] if i else None)
+#     return rule_ids
 
 
 
@@ -735,14 +739,14 @@ def load_data(args, anno, grammar, orig, cache_dir, num_graphs):
             rule2token = {}
             pargs = []
             data = []
-            for pre in tqdm(range(num_graphs), "gathering rule tokens"):
+            for pre in tqdm(range(1000), "gathering rule tokens"):
                 seq = find_anno[pre]
                 seq = seq[::-1] # derivation
                 rule_ids = [anno[s].attrs['rule'] for s in seq]
                 # orig_nodes = [list(anno[s].attrs['nodes']) for s in seq]
                 # orig_feats = [[orig.nodes[n]['feat'] if n in orig else 0.0 for n in nodes] for nodes in orig_nodes]    
                 # g_orig = copy_graph(orig, orig.comps[pre])
-                g_orig = nx.induced_subgraph(orig, orig.comps[pre]).copy()                
+                g_orig = nx.induced_subgraph(orig, orig.comps[pre])
                 for i, r in enumerate(rule_ids):
                     # from networkx.algorithms.isomorphism import DiGraphMatcher
                     rule2token[r] = grammar.rules[r].subgraph
@@ -753,17 +757,17 @@ def load_data(args, anno, grammar, orig, cache_dir, num_graphs):
                     data.append((rule_ids, g_orig))
                 else:                    
                     rules = [(r, grammar.rules[r]) for r in rule_ids]
-                    pargs.append((g_orig, rules))
+                    pargs.append((g_orig, rules, args.dataset == "ckt"))
             if args.encoder != "GNN":
                 #data = [process_single(parg) for parg in tqdm(pargs, "processing data")]
-                if args.dataset == 'enas':
-                    #data = [process_single_one_hot(parg) for parg in tqdm(pargs, "processing data")]
-                    data = [process_single_one_hot(*parg) for parg in tqdm(pargs, "processing data sequentially")]
-                    # with mp.Pool(4) as p:
-                    #     data = p.starmap(process_single_one_hot, tqdm(pargs, "processing data mp"))
-                else:
-                    with mp.Pool(20) as p:
-                        data = p.starmap(process_single, tqdm(pargs, "processing data mp"))
+                # if args.dataset == 'enas':
+                #     #data = [process_single_one_hot(parg) for parg in tqdm(pargs, "processing data")]
+                #     data = [process_single_one_hot(*parg) for parg in tqdm(pargs, "processing data sequentially")]
+                #     # with mp.Pool(4) as p:
+                #     #     data = p.starmap(process_single_one_hot, tqdm(pargs, "processing data mp"))
+                # else:
+                with mp.Pool(20) as p:
+                    data = p.starmap(process_single, tqdm(pargs, "processing data mp"))
 
             pickle.dump((data, rule2token), open(save_path, 'wb+'))
     relabel = dict(zip(list(sorted(rule2token)), range(len(rule2token))))    
