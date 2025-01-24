@@ -339,8 +339,10 @@ def load_enas(args):
     data, graph_args = load_ENAS_graphs('D-VAE/data/final_structures6.txt', num_samples, n_types=6, fmt='igraph')
     whole_g = nx.DiGraph()
     gs = []
+    gs_dict = {}
     for i in range(len(data)):
         g = data[i][0].to_networkx()
+        gs_dict[f"{i}:acc"] = data[i][1]
         for n in g:
             g.nodes[n]["type"] = list(LOOKUP)[g.nodes[n]["type"]]
             g.nodes[n]["label"] = LOOKUP[g.nodes[n]["type"]]
@@ -349,7 +351,7 @@ def load_enas(args):
         node_map = {n: f"{i}:{n}" for n in g}
         g = nx.relabel_nodes(g, node_map)
         gs.append(g)
-    whole_g = union(gs)
+    whole_g = union(gs, gs_dict)
     whole_g = MyGraph(whole_g)
     return whole_g
 

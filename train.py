@@ -1,5 +1,5 @@
 import os
-#os.environ["CUDA_VISIBLE_DEVICES"] = ""
+os.environ["CUDA_VISIBLE_DEVICES"] = ""
 import sys
 sys.path.append('dagnn/dvae/bayesian_optimization')
 sys.path.append('CktGNN')
@@ -797,7 +797,7 @@ def load_data(args, anno, grammar, orig, cache_dir, num_graphs):
     return train_data, test_data, token2rule
 
 
-def hash_args(args, ignore_keys=['datapkl', 'checkpoint']):
+def hash_args(args, ignore_keys=['datapkl', 'checkpoint', 'cuda']):
     arg_dict = {k: v for k, v in args.__dict__.items() if k not in ignore_keys}
     return hashlib.md5(json.dumps(arg_dict, sort_keys=True).encode()).hexdigest()
 
@@ -1049,6 +1049,7 @@ def evaluate_ckt(args, g):
 def main(args):
     cache_dir = f'cache/api_{args.dataset}_ednce/'
     folder = hash_args(args)
+    print(f"folder: {folder}")
     setattr(args, "folder", folder)
     os.makedirs(f'ckpts/api_{args.dataset}_ednce/{folder}', exist_ok=True)
     os.makedirs(f'cache/api_{args.dataset}_ednce/{folder}', exist_ok=True)
