@@ -549,10 +549,10 @@ class TransformerVAE(nn.Module):
                                 cond = logits.max() > float("-inf")
                             if cond:
                                 mask[j] = False # done with this
-                                next_tokens[idxes[j]] = cur
+                                next_tokens[j] = cur
                                 idxes.pop(j)
                             else:
-                                probs[idxes[j], cur.item()] = float("-inf")
+                                probs[j, cur.item()] = float("-inf")
                                 mask[j] = True                            
                         probs = probs[mask]
                     assert all([token is not None for token in next_tokens])
