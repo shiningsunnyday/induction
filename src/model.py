@@ -449,7 +449,7 @@ class TransformerVAE(nn.Module):
                     y = list(rule.subgraph).index(t)
                     if min(o_j[x].sum(), o_j[:, y].sum()) < o_j.shape[0]:
                         logits[i, j] = float("-inf")                        
-                        continue
+                    continue
                 ### sanity checks
                 ## stays connected
                 # g_, applied, node_map = grammar.one_step_derive(g, token2rule[j], token2rule, return_applied=True)
