@@ -2,7 +2,6 @@ import os
 os.environ["CUDA_VISIBLE_DEVICES"] = ""
 import sys
 sys.path.append('dagnn/dvae/bayesian_optimization')
-sys.path.append('CktGNN')
 import torch
 import torch.nn as nn
 import torch.optim as optim
@@ -16,6 +15,8 @@ from scipy.spatial.distance import pdist
 import scipy.stats as sps
 from scipy.stats import pearsonr
 import hashlib
+import fcntl
+from functools import partial
 # import gpflow
 # from gpflow.models import SVGP
 # from gpflow.optimizers import NaturalGradient
@@ -27,13 +28,19 @@ import torch.nn.functional as F
 torch.multiprocessing.set_sharing_strategy('file_system')
 import pickle
 import hashlib
+import shutil
 from tqdm import tqdm
 import matplotlib.pyplot as plt
 from src.model import *
+if DATASET == "enas":
+    sys.path.append('/home/msun415/induction/dagnn/dvae/software/enas/src/cifar10')    
+else:
+    sys.path.append('CktGNN')
 import glob
 import re
 sys.path.append('dagnn/dvae')
-from util import save_object, plot_DAG, flat_ENAS_to_nested, adjstr_to_BN
+from util import save_object, plot_DAG, flat_ENAS_to_nested, adjstr_to_BN, decode_igraph_to_ENAS, is_valid_ENAS, is_valid_BN, is_valid_DAG, decode_igraph_to_BN_adj
+from evaluate_BN import Eval_BN
 
 from sparse_gp import SparseGP
 from utils import is_valid_DAG, is_valid_Circuit
@@ -305,27 +312,37 @@ def sample(model, num_samples=5, max_seq_len=10):
 
 
 def decode_from_latent_space(z, grammar, model, token2rule, max_seq_len):
-    # generated_sequences = model.autoregressive_interactive_inference(z, max_seq_len)
     generated_dags = [None for _ in range(z.shape[0])]
     generated_derivs = [None for _ in range(z.shape[0])]
     idxes = list(range(z.shape[0]))
     with tqdm(total=z.shape[0], desc="decoding") as pbar:
-        while idxes:
-            generated_sequences = model.autoregressive_interactive_inference(z, grammar, token2rule, max_seq_len, decode='softmax')     
+        while idxes:     
+            generated_sequences, generated_orders, generated_paths = model.autoregressive_interactive_inference(z, grammar, token2rule, max_seq_len, decode='softmax')
             new_idxes = []
             mask = []
-            for idx, deriv in zip(idxes, generated_sequences):
+            for idx, deriv, order, path in zip(idxes, generated_sequences, generated_orders, generated_paths):
                 g = grammar.derive(deriv, token2rule)
                 for n in g:
                     g.nodes[n]['type'] = INVERSE_LOOKUP[g.nodes[n]['label']]
-                try: # not our fault, but due to the converter assuming 2 or 3-stage op-amps, we'll keep sampling until we satisfy that restriction
-                    normalize_format(g)
-                    generated_dags[idx] = g
-                    generated_derivs[idx] = deriv
-                    mask.append(False)
-                except ValueError:
-                    new_idxes.append(idx)
-                    mask.append(True)        
+                if DATASET == 'ckt':
+                    try: # not our fault, but due to the converter assuming 2 or 3-stage op-amps, we'll keep sampling until we satisfy that restriction
+                        normalize_format(g)
+                    except ValueError:
+                        new_idxes.append(idx)
+                        mask.append(True) 
+                        continue
+                elif DATASET == "enas":
+                    # relabel
+                    g = nx.relabel_nodes(g, dict(zip(path, range(len(g)))))
+                    g = copy_graph(nx.DiGraph(g), list(range(len(g))))
+                    for n in g:
+                        g.nodes[n]['type'] = list(LOOKUP).index(g.nodes[n]['type'])
+                else:
+                    for n in g:
+                        g.nodes[n]['type'] = list(LOOKUP).index(g.nodes[n]['type'])
+                generated_dags[idx] = g
+                generated_derivs[idx] = deriv
+                mask.append(False)          
             idxes = new_idxes
             z = z[mask]
             pbar.update(len(idxes)-pbar.n)
@@ -333,28 +350,13 @@ def decode_from_latent_space(z, grammar, model, token2rule, max_seq_len):
     
 
 def train(args, train_data, test_data):
-    print(args.folder)
-    # Initialize model and optimizer
-    model = TransformerVAE(args.encoder, args.encoder_layers, args.decoder_layers, VOCAB_SIZE, vocabulary_init, vocabulary_terminate, args.embed_dim, args.latent_dim, MAX_SEQ_LEN, args.cuda)
-    optimizer = optim.Adam(model.parameters(), lr=1e-4)
-    
-    if args.encoder == "GNN":
-        train_dataset = GraphDataset(train_data)
-        test_dataset = GraphDataset(test_data) 
-    else:       
-        # Dummy dataset: Replace with actual sequence data
-        # dataset = [torch.tensor(seq) for seq in data]
-        train_dataset = TokenDataset(train_data)
-        # train_dataloader = DataLoader(train_dataset, batch_size=BATCH_SIZE, shuffle=True, collate_fn=collate_batch, num_workers=8, timeout=1000, prefetch_factor=1)
-        test_dataset = TokenDataset(test_data)
-        # test_dataloader = DataLoader(test_dataset, batch_size=BATCH_SIZE, shuffle=False, collate_fn=collate_batch, num_workers=8, timeout=1000, prefetch_factor=1)    
-
-    # Training loop
-    model.train()
+    if len(os.listdir(f"ckpts/api_{args.dataset}_ednce/{args.folder}")) == 0: # add necc. ckpts
+        breakpoint()
+    # Initialize model
+    model = TransformerVAE(args.encoder, args.encoder_layers, args.decoder_layers, VOCAB_SIZE, vocabulary_init, vocabulary_terminate, args.embed_dim, args.latent_dim, MAX_SEQ_LEN, args.cuda)    
     model = model.to(args.cuda)
-    if args.encoder == "TOKEN_GNN":
-        for i, graph_data in enumerate(graph_data_vocabulary):
-            graph_data_vocabulary[i] = graph_data.to(args.cuda)
+
+    # Load ckpts   
     ckpts = glob.glob(f'ckpts/api_{args.dataset}_ednce/{args.folder}/*.pth')
     logger.info(f'ckpts/api_{args.dataset}_ednce/{args.folder}/*.pth')
     start_epoch = 0
@@ -372,6 +374,28 @@ def train(args, train_data, test_data):
         logger.info(f"loaded {best_ckpt_path} loss {best_loss} start_epoch {start_epoch}")
         model.load_state_dict(torch.load(best_ckpt_path, map_location=args.cuda))
 
+    if start_epoch >= args.epochs:
+        return model
+
+    # Prepare data
+    if args.encoder == "GNN":
+        train_dataset = GraphDataset(train_data)
+        test_dataset = GraphDataset(test_data) 
+    else:       
+        # Dummy dataset: Replace with actual sequence data
+        # dataset = [torch.tensor(seq) for seq in data]
+        train_dataset = TokenDataset(train_data)
+        # train_dataloader = DataLoader(train_dataset, batch_size=BATCH_SIZE, shuffle=True, collate_fn=collate_batch, num_workers=8, timeout=1000, prefetch_factor=1)
+        test_dataset = TokenDataset(test_data)
+        # test_dataloader = DataLoader(test_dataset, batch_size=BATCH_SIZE, shuffle=False, collate_fn=collate_batch, num_workers=8, timeout=1000, prefetch_factor=1)                 
+    
+    if args.encoder == "TOKEN_GNN":
+        for i, graph_data in enumerate(graph_data_vocabulary):
+            graph_data_vocabulary[i] = graph_data.to(args.cuda)
+
+    optimizer = optim.Adam(model.parameters(), lr=1e-4)
+    # Training loop
+    model.train()    
     patience = 5
     patience_counter = 0
     train_latent = np.empty((len(train_data), args.latent_dim))
@@ -488,8 +512,16 @@ def bo(args, grammar, model, token2rule, y_train, y_test, target_mean, target_st
     folder = args.datapkl if args.datapkl else args.folder
     ckpt_dir = f'ckpts/api_{args.dataset}_ednce/{folder}'    
     save_dir = f'results/api_{args.dataset}_ednce/'
-    X_train = np.load(os.path.join(ckpt_dir, f"train_latent_{args.checkpoint}.npy"))    
-    X_test = np.load(os.path.join(ckpt_dir, f"test_latent_{args.checkpoint}.npy"))    
+    X_train = np.load(os.path.join(ckpt_dir, f"train_latent_{args.checkpoint}.npy"))
+    X_test = np.load(os.path.join(ckpt_dir, f"test_latent_{args.checkpoint}.npy"))
+    if args.dataset == "bn":
+        # remove duplicates, otherwise SGP ill-conditioned
+        X_train, unique_idxs = np.unique(X_train, axis=0, return_index=True)
+        y_train = y_train[unique_idxs]
+        random_shuffle = np.random.permutation(range(len(X_train)))
+        keep = 5000
+        X_train = X_train[random_shuffle[:keep]]
+        y_train = y_train[random_shuffle[:keep]]    
     X_train_mean = X_train.mean(axis=0)
     X_train_std = X_train.std(axis=0)
     X_train = (X_train-X_train_mean)/X_train_std
@@ -500,11 +532,12 @@ def bo(args, grammar, model, token2rule, y_train, y_test, target_mean, target_st
     logger.info("Average pairwise distance between train points = {}".format(np.mean(pdist(X_train))))
     logger.info("Average pairwise distance between test points = {}".format(np.mean(pdist(X_test))))    
     if DATASET == "ckt":
-        evaluate_fn = evaluate_ckt
+        evaluate_fn = partial(evaluate_ckt, args)
     elif DATASET == "enas":
-        evaluate_fn = evaluate_nn
+        evaluate_fn = partial(evaluate_nn, default_val=min(y_train)*target_std+target_mean)
     elif DATASET == "bn":
-        evaluate_fn = evaluate_bn
+        eva = Eval_BN(save_dir)
+        evaluate_fn = lambda g: eva.eval(decode_igraph_to_BN_adj(nx_to_igraph(g)))
     else:
         raise NotImplementedError
     # for i in range(y_train.shape[1]): # evaluate latent space
@@ -524,13 +557,23 @@ def bo(args, grammar, model, token2rule, y_train, y_test, target_mean, target_st
         valid_arcs_final, generated_sequences = decode_from_latent_space(torch.FloatTensor(next_inputs).to(args.cuda), grammar, model, token2rule, MAX_SEQ_LEN)
         new_features = next_inputs
         logger.info("Evaluating selected points")
-        scores = []        
-        for i in range(len(valid_arcs_final)):
-            score = evaluate_fn(args, valid_arcs_final[i])
-            if score > best_score:
-                best_score = score
-                best_arc = '->'.join(map(str, generated_sequences[i]))
-            scores.append(score)
+        scores = []
+        if args.dataset == "enas":
+            # Prepare data
+            scores = send_enas_listener(valid_arcs_final)
+            for i, score in enumerate(scores):
+                if score > best_score:
+                    best_score = score
+                    best_deriv = '->'.join(map(str, generated_sequences[i]))
+                    best_arc = valid_arcs_final[i]
+        else:
+            for i in range(len(valid_arcs_final)):
+                score = evaluate_fn(valid_arcs_final[i])
+                if score > best_score:
+                    best_score = score
+                    best_deriv = '->'.join(map(str, generated_sequences[i]))
+                    best_arc = valid_arcs_final[i]
+                scores.append(score)
             # logger.info(i, score)
         # logger.info("Iteration {}'s selected arcs' scores:".format(iteration))
         # logger.info(scores, np.mean(scores))
@@ -538,18 +581,20 @@ def bo(args, grammar, model, token2rule, y_train, y_test, target_mean, target_st
         save_object(valid_arcs_final, "{}valid_arcs_final{}.dat".format(save_dir, iteration))
 
         if len(new_features) > 0:
+            scores = np.array(scores)[:, None]
             X_train = np.concatenate([X_train, new_features], 0)
-            std_scores = (np.array(scores)-target_mean)/target_std
+            std_scores = (scores-target_mean)/target_std
             y_train = np.concatenate([y_train, std_scores], 0)
         #
         # logger.info("Current iteration {}'s best score: {}".format(iteration, - best_score * std_y_train - mean_y_train))
         if best_arc is not None: # and iteration == 10:
-            logger.info(f"Best architecture: {best_arc}")
-            with open(save_dir + 'best_arc_scores.txt', 'a') as score_file:
-                score_file.write(best_arc + ',{:.4f}\n'.format(best_score))
+            logger.info(f"Best deriv: {best_deriv}")
+            with open(save_dir + 'best_deriv_scores.txt', 'a') as score_file:
+                score_file.write(best_deriv + ',{:.4f}\n'.format(best_score))
             if args.dataset == 'enas':
-                row = [int(x) for x in best_arc.split()]
-                g_best, _ = decode_ENAS_to_igraph(flat_ENAS_to_nested(row, 8-2))
+                # row = [int(x) for x in best_arc.split()]
+                # g_best, _ = decode_ENAS_to_igraph(flat_ENAS_to_nested(row, 8-2))
+                g_best = nx_to_igraph(best_arc)
                 plot_DAG(g_best, save_dir, 'best_arc_iter_{}'.format(iteration), data_type='ENAS', pdf=True)
             elif args.dataset == 'bn':
                 row = adjstr_to_BN(best_arc)
@@ -596,7 +641,7 @@ def interactive_sample_sequences(args, model, grammar, token2rule, num_samples=5
             while len(uniq_sequences if unique else sequences) < num_samples:
                 z = torch.randn(sample_batch_size, args.latent_dim)  
                 z = z.to(args.cuda)            
-                generated_sequences = model.autoregressive_interactive_inference(z, grammar, token2rule, max_seq_len=max_seq_len)    
+                generated_sequences, _ = model.autoregressive_interactive_inference(z, grammar, token2rule, max_seq_len=max_seq_len)    
                 if unique:
                     uniq_sequences = uniq_sequences | set(map(tuple, generated_sequences))                
                     pbar.update(len(uniq_sequences)-pbar.n)
@@ -747,6 +792,8 @@ def load_data(args, anno, grammar, orig, cache_dir, num_graphs):
                 # orig_feats = [[orig.nodes[n]['feat'] if n in orig else 0.0 for n in nodes] for nodes in orig_nodes]    
                 # g_orig = copy_graph(orig, orig.comps[pre])
                 g_orig = nx.induced_subgraph(orig, orig.comps[pre])
+                if args.encoder == "GNN":
+                    g_orig = g_orig.copy()
                 for i, r in enumerate(rule_ids):
                     # from networkx.algorithms.isomorphism import DiGraphMatcher
                     rule2token[r] = grammar.rules[r].subgraph
@@ -801,8 +848,8 @@ def load_data(args, anno, grammar, orig, cache_dir, num_graphs):
     return train_data, test_data, token2rule
 
 
-def hash_args(args, ignore_keys=['datapkl', 'checkpoint', 'cuda']):
-    arg_dict = {k: v for k, v in args.__dict__.items() if k not in ignore_keys}
+def hash_args(args, use_keys=['dataset', 'encoder']):
+    arg_dict = {k: v for k, v in args.__dict__.items() if k in use_keys}
     return hashlib.md5(json.dumps(arg_dict, sort_keys=True).encode()).hexdigest()
 
 def is_novel(g, orig_graphs):
@@ -838,23 +885,78 @@ def is_valid_circuit(g):
 
 def evaluate(orig_graphs, graphs):
     ckt_valid, dag_valid, novel = [], [], []
-    for g in graphs:
+    for g in tqdm(graphs, desc="evaluating"):
         if not is_valid_circuit(g):
             print("not valid circuit")
             #breakpoint()
         is_valid_ckt = is_valid_circuit(g)
         ckt_valid.append(is_valid_ckt)
-        dag_valid.append(is_valid_DAG(nx_to_igraph(g, subg=False)))
+        dag_valid.append(is_valid_DAG(nx_to_igraph(g), subg=False))
         novel.append(is_novel(g, orig_graphs))
     return {"valid_dag": np.mean(dag_valid), "valid_ckt": np.mean(ckt_valid), "novel": np.mean(novel), "n": len(graphs)}
 
 
-def evaluate_nn(args, g):
-    if arc is not None:
-        score = -eva.eval(arc)
+def evaluate_nn(args, g, default_val=0.0):
+    breakpoint()
+    # if args.dataset == "enas":
+    #     from evaluation import *
+    #     eva = Eval_NN()
+    g_ = nx_to_igraph(g)
+    if is_valid_ENAS(g_):
+        arc = decode_igraph_to_ENAS(g_)
+        score = eva.eval(arc)
         score = (score - mean_y_train) / std_y_train
     else:
-        score = max(y_train)[ 0 ]    
+        score = 0.0
+
+
+def send_enas_listener(valid_arcs_final):
+    def lock(f):
+        try:
+            fcntl.flock(f, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except IOError:
+            return False
+        return True    
+    # Prepare data
+    generated_samples = [decode_igraph_to_ENAS(nx_to_igraph(g)).replace(' ',',') for g in valid_arcs_final]
+    # File communication to obtain retro-synthesis rate
+    sender_filename = 'enas_in.txt'
+    receiver_filename = 'enas_out.txt'
+    receiver_filename_suffix = 'enas_out_copy.txt'
+    open(sender_filename, 'w+').close() # clear
+    open(receiver_filename, 'w+').close() # clear
+    while(True):
+        with open(sender_filename, 'r') as fr:
+            editable = lock(fr)
+            if editable:
+                with open(sender_filename, 'w') as fw:
+                    for sample in generated_samples:
+                        fw.write('{}\n'.format(sample))                
+                fcntl.flock(fr, fcntl.LOCK_UN)
+                break
+    num_samples = len(generated_samples)
+    print("Waiting for enas evaluation...")
+    latest = time.time()
+    while(True):
+        with open(receiver_filename, 'r') as fr:
+            editable = lock(fr)
+            if editable:
+                syn_status = []
+                lines = fr.readlines()
+                if len(lines) == num_samples:
+                    for idx, line in enumerate(lines):
+                        splitted_line = line.strip().split()
+                        syn_status.append((idx, splitted_line[2]))
+                    break          
+            fcntl.flock(fr, fcntl.LOCK_UN)
+        time.sleep(1)
+    generated_samples = [generated_samples[int(idx)] for idx, _ in syn_status]
+    shutil.copyfile(receiver_filename, receiver_filename_suffix) # save res
+    return [float(s[1]) for s in syn_status]
+
+
+def evaluate_bn(args, g):
+    breakpoint()
 
 
 def normalize_format(g): 
@@ -1087,9 +1189,7 @@ def main(args):
     indices = list(range(num_graphs))
     # random.Random(0).shuffle(indices)
     train_indices, test_indices = indices[:int(num_graphs*0.9)], indices[int(num_graphs*0.9):]    
-    y = load_y(orig, num_graphs, target={"ckt": ["gain", "bw", "pm", "fom"], 
-                                         "bn": ["bic"], 
-                                         "enas": ["acc"]}[args.dataset])
+    y = load_y(orig, num_graphs, target={"ckt": ["gain", "bw", "pm", "fom"],"bn": ["bic"],"enas": ["acc"]}[args.dataset])
     y = np.array(y)
     train_y = y[train_indices]
     mean_train_y = np.mean(train_y, axis=0)
@@ -1097,7 +1197,8 @@ def main(args):
     test_y = y[test_indices]
     train_y = (train_y-mean_train_y)/std_train_y
     test_y = (test_y-mean_train_y)/std_train_y
-    # bo(args, grammar, model, token2rule, train_y, test_y, mean_train_y[-1], std_train_y[-1])
+    bo(args, grammar, model, token2rule, train_y, test_y, mean_train_y[-1], std_train_y[-1])
+    breakpoint()
     graphs = interactive_sample_sequences(args, model, grammar, token2rule, max_seq_len=MAX_SEQ_LEN, unique=False, visualize=False)
     orig_graphs = [nx.induced_subgraph(orig, orig.comps[i]) for i in range(num_graphs)]
     metrics = evaluate(orig_graphs, graphs)
@@ -1136,6 +1237,6 @@ if __name__ == "__main__":
     parser.add_argument('--sample-dist', default='uniform', 
                         help='from which distrbiution to sample random points in the latent \
                         space as candidates to select; uniform or normal')       
-    args = parser.parse_args()        
+    args = parser.parse_args()  
     breakpoint()
     main(args)

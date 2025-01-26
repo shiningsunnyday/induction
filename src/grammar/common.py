@@ -137,16 +137,15 @@ def get_node_by_label(g, label):
 
 def nx_to_igraph(g):
     g = deepcopy(g)
-    for n in g:
-        g.nodes[n]["type"] = list(LOOKUP).index(g.nodes[n]["type"])
+    # for n in g:
+    #     g.nodes[n]["type"] = list(LOOKUP).index(g.nodes[n]["type"])
     for e in g.edges:
         if "_igraph_index" in g.edges[e]:
             g.edges[e].pop("_igraph_index")
     for n in g:
         if "_igraph_index" in g.nodes[n]:
             g.nodes[n].pop("_igraph_index")
-    ig = igraph.Graph(directed=True)
-    ig = ig.from_networkx(g)
+    ig = igraph.Graph.from_networkx(g)
     return ig
 
 

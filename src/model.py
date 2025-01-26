@@ -289,7 +289,18 @@ class TransformerVAE(nn.Module):
                     i = nodes.index(s)
                     j = nodes.index(t)
                     o[i, j] = 1
-        return o
+        return o    
+
+    @staticmethod
+    def path_init(g):
+        for order in nx.all_topological_sorts(g):
+            bad = False
+            for l in range(len(order)-1):
+                if order[l+1] not in g[order[l]]:
+                    bad = True 
+                    break
+            if not bad:
+                return order        
 
     @staticmethod
     def get_inmi(g, ignore_nt=True):
@@ -333,12 +344,44 @@ class TransformerVAE(nn.Module):
                         safe = True
             if not safe:
                 return False
-        return True        
+        return True
+
+    @staticmethod
+    def check_bn(grammar, conn, g, rule):
+        rs = rule.subgraph
+        nodes = grammar.search_nts(rs, TERMS)        
+        cur_labels = set([g.nodes[n]['label'] for n in g])
+        labels = set([rs.nodes[n]['label'] for n in nodes])
+        # not in g
+        for l in labels:
+            if l in cur_labels:
+                return False
+        if len(nodes) == len(rs):
+            if (set(TERMS)-set([g.nodes[n]['label'] for n in g])) != set(labels):
+                return False
+        return True           
+
+
+    @staticmethod
+    def update_path(g, o, grammar, j, token2rule):     
+        if o is None:
+            return o
+        rule = grammar.rules[token2rule[j]]
+        conn = TransformerVAE.check_connections(grammar, g, rule)
+        out_pairs = list(filter(lambda a: isinstance(a[1], int), conn))
+        in_pairs = list(filter(lambda a: isinstance(a[0], int), conn))
+        o_j, l = TransformerVAE.check_linear(rule, o, in_pairs, out_pairs)
+        return o[:l] + o_j + o[l:]
+                
+
 
     @staticmethod
     def update_order(g, o, grammar, j, token2rule):
-        # updates node-node predecence info, ignoring nts
         rule = grammar.rules[token2rule[j]]
+        conn = TransformerVAE.check_connections(grammar, g, rule)
+        out_pairs = list(filter(lambda a: isinstance(a[1], int), conn))
+        in_pairs = list(filter(lambda a: isinstance(a[0], int), conn))
+        # updates node-node predecence info, ignoring nts
         inmi = TransformerVAE.get_inmi(g, ignore_nt=True)
         rhs = rule.subgraph
         inmi_rhs = TransformerVAE.get_inmi(rhs, ignore_nt=True)
@@ -348,9 +391,6 @@ class TransformerVAE(nn.Module):
         o_ = np.zeros((n+m, n+m))
         o_[:n, :n] = o
         o_[n:, n:] = r_adj
-        conn = TransformerVAE.check_connections(grammar, g, rule)
-        # get all (a, x) pairs
-        out_pairs = list(filter(lambda a: isinstance(a[1], int), conn))
         for (a, x) in out_pairs:
             # get all y reachable from x
             if list(rhs)[x] not in inmi_rhs:
@@ -358,8 +398,7 @@ class TransformerVAE(nn.Module):
             for y in np.argwhere(r_adj[inmi_rhs[list(rhs)[x]]]).flatten():
                 # get all b that reaches a
                 for b in np.argwhere(o[:, inmi[a]]).flatten():
-                    o_[b, y+n] = 1
-        in_pairs = list(filter(lambda a: isinstance(a[0], int), conn))
+                    o_[b, y+n] = 1            
         for (y, b) in in_pairs:
             # get all x that reaches y
             if list(rhs)[y] not in inmi_rhs:
@@ -374,9 +413,45 @@ class TransformerVAE(nn.Module):
                 for b in np.argwhere(o_[y+n, :n]).flatten():
                     o_[a, b] = 1
         # all paths going from x
-        return o_        
+        return o_    
+
+
+
+    @staticmethod
+    def check_linear(rule, order, in_pairs, out_pairs):
+        # rule itself needs to be linear
+        top_sorts = list(nx.all_topological_sorts(rule.subgraph))
+        for o in top_sorts: # fast, just one token
+            # find an insertion point
+            s, t = list(o)[0], list(o)[-1]
+            for l in range(1, len(order)-1):
+                a = order[l]
+                b = order[l+1]
+                if (a, s) in out_pairs and (t, b) in in_pairs:
+                    return l # index
+        return o, 0
     
-    def interactive_mask_logits(self, grammar, generated_graphs, generated_orders, logits, token2rule):
+    def interactive_mask_logits(self, grammar, generated_graphs, generated_orders, generated_paths, logits, token2rule):
+        def mask_init_ckt():
+            # for simplicity for now, ensure the rule itself is reachable
+            # if we can do lookahead on the first step, that'll be better
+            s = get_node_by_label(rule.subgraph, 'input')
+            t = get_node_by_label(rule.subgraph, 'output')
+            x = list(rule.subgraph).index(s)
+            y = list(rule.subgraph).index(t)            
+            return min(o_j[x].sum(), o_j[:, y].sum()) < o_j.shape[0]
+        def mask_init_enas():
+            for order in nx.all_topological_sorts(rule.subgraph):
+                bad = False
+                for l in range(len(order)-1):
+                    if order[l+1] not in rule.subgraph[order[l]]:
+                        bad = True
+                        break
+                if not bad:
+                    return False # good
+            return True # bad
+        def mask_init_bn():
+            return False # always good
         def check_acyclic():
             acyclic = True
             for (a, x), (y, b) in product(out_pairs, in_pairs):
@@ -434,20 +509,21 @@ class TransformerVAE(nn.Module):
                     if g.nodes[n]['label'] not in NONTERMS:
                         inmi[n] = len(inmi) # inv node map index
             o = generated_orders[i]    
-            for j in tqdm(range(logits.shape[1]), desc="masking logits single"):
+            # for j in tqdm(range(logits.shape[1]), desc="masking logits single"):
+            for j in range(logits.shape[1]):
                 if logits[i, j] == float("-inf"):
                     continue # init, terminating logic already in _autoregressive_inference_predict_logits
                 # g = deepcopy(generated_graphs[i])                
-                rule = grammar.rules[token2rule[j]]
+                rule = grammar.rules[token2rule[j]]                
                 o_j = TransformerVAE.order_init(rule.subgraph, ignore_nt=False)
-                if generated_graphs[i] is None:
-                    # for simplicity for now, ensure the rule itself is reachable
-                    # if we can do lookahead on the first step, that'll be better
-                    s = get_node_by_label(rule.subgraph, 'input')
-                    t = get_node_by_label(rule.subgraph, 'output')
-                    x = list(rule.subgraph).index(s)
-                    y = list(rule.subgraph).index(t)
-                    if min(o_j[x].sum(), o_j[:, y].sum()) < o_j.shape[0]:
+                if generated_graphs[i] is None:                    
+                    if DATASET == "ckt":                        
+                        cond = mask_init_ckt()
+                    elif DATASET == "enas":
+                        cond = mask_init_enas()
+                    else:                        
+                        cond = mask_init_bn()
+                    if cond:
                         logits[i, j] = float("-inf")                        
                     continue
                 ### sanity checks
@@ -489,11 +565,18 @@ class TransformerVAE(nn.Module):
                 in_pairs = list(filter(lambda a: isinstance(a[0], int), conn))
                 if not (len(conn) and check_reachable(out_pairs, in_pairs) and check_acyclic()):
                     logits[i, j] = float("-inf")
-                else:
-                    if DATASET == "ckt":
-                        amp_valid = TransformerVAE.check_op_amp(grammar, conn, g, rule)                    
-                        if not amp_valid:
-                            logits[i, j] = float("-inf")        
+                if DATASET == "ckt":
+                    amp_valid = TransformerVAE.check_op_amp(grammar, conn, g, rule)
+                    if not amp_valid:
+                        logits[i, j] = float("-inf")
+                elif DATASET == "enas":
+                    _, linear = TransformerVAE.check_linear(rule, generated_paths[i], in_pairs, out_pairs)
+                    if not linear:
+                        logits[i, j] = float("-inf")
+                elif DATASET == "bn":
+                    bn_valid = TransformerVAE.check_bn(grammar, conn, g, rule)
+                    if not bn_valid:
+                        logits[i, j] = float("-inf")
 
 
     def autoregressive_interactive_inference(self, z, grammar, token2rule, max_seq_len=10, decode='greedy'):
@@ -503,13 +586,15 @@ class TransformerVAE(nn.Module):
         token_embeddings = list(torch.unbind(self.start_token_embedding.expand(batch_size, -1, -1), dim=0))  
         generated_sequences = [[] for _ in range(batch_size)]                  
         generated_graphs = [None for _ in range(batch_size)]
-        generated_orders = [np.zeros((0, 0)) for _ in range(batch_size)]
+        generated_orders = [np.zeros((0, 0)) for _ in range(batch_size)] # info to guarantee validity
+        generated_paths = [[] for _ in range(batch_size)] # consecutive path
+
         for t in range(max_seq_len):
             temp_batch_embeddings, temp_z_context, active_indices = self._autoregressive_inference_active_indices(z_context, generated_sequences, token_embeddings, max_seq_len)                
             if not active_indices:
                 break
             logits = self._autoregressive_inference_predict_logits(temp_batch_embeddings, temp_z_context)
-            self.interactive_mask_logits(grammar, [generated_graphs[i] for i in active_indices], [generated_orders[i] for i in active_indices], logits, token2rule)
+            self.interactive_mask_logits(grammar, [generated_graphs[i] for i in active_indices], [generated_orders[i] for i in active_indices], [generated_paths[i] for i in active_indices], logits, token2rule)
             if decode == 'greedy':
                 next_tokens = torch.argmax(logits, dim=-1) # greedy
             else:
@@ -521,75 +606,83 @@ class TransformerVAE(nn.Module):
                 #     uniform = torch.ones_like(probs[nan_idxes, :])
                 #     uniform[:,  ~self.terminate_mask] = 0.
                 #     probs[nan_idxes, :] = uniform
-                if t == 0:
-                    next_tokens = torch.multinomial(probs, 1).squeeze(-1)
-                else:
-                    next_tokens = [None for _ in range(probs.shape[0])]
-                    idxes = deepcopy(active_indices)
-                    while idxes: # one-step lookahead
-                        nan_idxes = (probs!=probs).any(axis=-1)
-                        if nan_idxes.any(): # give up and quickly terminate
-                            print("give up on lookahead")
-                            orig_probs = probs_copy.clone()
-                            orig_probs[:,  ~self.terminate_mask] = 0.
-                            probs[nan_idxes, :] = orig_probs[nan_idxes]
-                        cur_next_tokens = torch.multinomial(probs, 1).squeeze(-1)
-                        mask = [True for _ in range(len(idxes))]
-                        for j in range(len(idxes)-1,-1,-1):
-                            # assert adding is ok
-                            cur = cur_next_tokens[j]
-                            if self.terminate_mask[cur]:
-                                cond = True
+                next_tokens = [None for _ in range(probs.shape[0])]
+                idxes = deepcopy(active_indices)
+                while idxes: # one-step lookahead
+                    nan_idxes = (probs!=probs).any(axis=-1)
+                    if nan_idxes.any(): # give up and quickly terminate
+                        print("give up on lookahead")
+                        orig_probs = probs_copy.clone()
+                        orig_probs[:,  ~self.terminate_mask] = 0.
+                        probs[nan_idxes, :] = orig_probs[nan_idxes]
+                    cur_next_tokens = torch.multinomial(probs, 1).squeeze(-1)
+                    mask = [True for _ in range(len(idxes))]
+                    for j in range(len(idxes)-1,-1,-1):
+                        # assert adding is ok
+                        cur = cur_next_tokens[j]
+                        if self.terminate_mask[cur]:
+                            cond = True
+                        else:
+                            logits = torch.ones((1, logits.shape[1])) # dummy
+                            logits[:, self.init_mask] = float("-inf")
+                            if generated_graphs[idxes[j]] is None:
+                                lookahead_graph = grammar.derive([cur.item()], token2rule)
+                                lookahead_order = TransformerVAE.order_init(lookahead_graph)
+                                lookahead_path = TransformerVAE.path_init(lookahead_graph)
                             else:
-                                logits = torch.ones((1, logits.shape[1])) # dummy
-                                logits[:, self.init_mask] = float("-inf")
                                 lookahead_graph = grammar.one_step_derive(generated_graphs[idxes[j]], cur.item(), token2rule)
-                                lookahead_order = TransformerVAE.update_order(generated_graphs[idxes[j]], generated_orders[idxes[j]], grammar, cur.item(), token2rule)
-                                self.interactive_mask_logits(grammar, [lookahead_graph], [lookahead_order], logits, token2rule)
-                                cond = logits.max() > float("-inf")
-                            if cond:
-                                mask[j] = False # done with this
-                                next_tokens[j] = cur
-                                idxes.pop(j)
-                            else:
-                                probs[j, cur.item()] = float("-inf")
-                                mask[j] = True                            
-                        probs = probs[mask]
-                    assert all([token is not None for token in next_tokens])
+                                lookahead_order = TransformerVAE.update_order(generated_graphs[idxes[j]], generated_orders[idxes[j]], grammar, cur.item(), token2rule)                        
+                                lookahead_path = TransformerVAE.update_path(generated_graphs[idxes[j]], generated_paths[idxes[j]], grammar, cur.item(), token2rule)
+                            self.interactive_mask_logits(grammar, [lookahead_graph], [lookahead_order], [lookahead_path], logits, token2rule)
+                            cond = logits[:, self.terminate_mask&(~self.init_mask)].max() > float("-inf") # fail-safe
+                        if cond:
+                            next_tokens[idxes[j]] = cur
+                            mask[j] = False # done with this                            
+                            idxes.pop(j)
+                        else:
+                            probs[j, cur.item()] = 0.0
+                            mask[j] = True                            
+                    probs = probs[mask]
+                assert all([token is not None for token in next_tokens])
             for i, idx in enumerate(active_indices):
                 generated_sequences[idx].append(next_tokens[i].item())
-                if generated_graphs[idx] is None:                            
+                if generated_graphs[idx] is None:
                     generated_graphs[idx] = grammar.derive([next_tokens[i].item()], token2rule)
                     # init acyclic order
                     generated_orders[idx] = TransformerVAE.order_init(generated_graphs[idx]) # ignores nt
+                    generated_paths[idx] = TransformerVAE.path_init(generated_graphs[idx]) # ignores nt
                 else:
                     order_copy = deepcopy(generated_orders[idx])
                     generated_orders[idx] = TransformerVAE.update_order(generated_graphs[idx], generated_orders[idx], grammar, next_tokens[i].item(), token2rule)
+                    generated_paths[idx] = TransformerVAE.update_path(generated_graphs[idx], generated_paths[idx], grammar, next_tokens[i].item(), token2rule)
                     # update acyclic order
                     g_copy = deepcopy(generated_graphs[idx])
                     generated_graphs[idx] = grammar.one_step_derive(generated_graphs[idx], next_tokens[i].item(), token2rule)
                     # debug
                     g_ = copy_graph(generated_graphs[idx], [n for n in generated_graphs[idx] if generated_graphs[idx].nodes[n]['label'] not in NONTERMS])
-                    for i_ in range(len(g_)):
-                        for j_ in range(len(g_)):
-                            if bool(nx.has_path(g_, list(g_)[i_], list(g_)[j_])) != bool(generated_orders[idx][i_, j_]):
-                                breakpoint()
-                                TransformerVAE.update_order(g_copy, order_copy, grammar, next_tokens[i].item(), token2rule)
+                    ## debug
+                    # for i_ in range(len(g_)):
+                    #     for j_ in range(len(g_)):
+                    #         if bool(nx.has_path(g_, list(g_)[i_], list(g_)[j_])) != bool(generated_orders[idx][i_, j_]):
+                    #             breakpoint()
+                    #             TransformerVAE.update_order(g_copy, order_copy, grammar, next_tokens[i].item(), token2rule)
                     g = generated_graphs[idx]
                     s = get_node_by_label(g, 'input')
-                    for t in range(len(g)):
-                        if not nx.has_path(g, s, list(g)[t]):
-                            breakpoint()
-                            TransformerVAE.update_order(g_copy, order_copy, grammar, next_tokens[i].item(), token2rule)
-                if not nx.is_directed_acyclic_graph(generated_graphs[idx]):
-                    breakpoint()
-                    TransformerVAE.update_order(g_copy, order_copy, grammar, next_tokens[i].item(), token2rule)
+                    ## debug
+                    # for t in range(len(g)):
+                    #     if not nx.has_path(g, s, list(g)[t]):
+                    #         breakpoint()
+                    #         TransformerVAE.update_order(g_copy, order_copy, grammar, next_tokens[i].item(), token2rule)
+                ## debug
+                # if not nx.is_directed_acyclic_graph(generated_graphs[idx]):
+                #     breakpoint()
+                #     TransformerVAE.update_order(g_copy, order_copy, grammar, next_tokens[i].item(), token2rule)
                 if self.encoder == "TOKEN_GNN":
                     next_token_embedding = self.gnn(graph_data_vocabulary[next_tokens[i].item()])
                 else: # default to learnable embedding
                     next_token_embedding = self.token_embedding(next_tokens[i]).unsqueeze(0)
-                token_embeddings[idx] = torch.cat((token_embeddings[idx], next_token_embedding), dim=0)      
-        return generated_sequences
+                token_embeddings[idx] = torch.cat((token_embeddings[idx], next_token_embedding), dim=0)
+        return generated_sequences, generated_orders, generated_paths
 
     def forward(self, x, attention_mask, seq_len_list, batch_g_list):
         embedded_tokens = self.embed_tokens(x, batch_g_list)  # Embeds each token (graph) using GNN or learnable embedding        

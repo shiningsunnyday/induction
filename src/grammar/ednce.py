@@ -18,7 +18,7 @@ from collections import Counter
 import sys
 import time
 
-sys.path.append(os.path.join(os.getcwd(), "../CktGNN/"))
+sys.path.append(os.path.join(os.getcwd(), "CktGNN/"))
 from utils import is_valid_Circuit, is_valid_DAG
 import igraph
 from tqdm import tqdm
