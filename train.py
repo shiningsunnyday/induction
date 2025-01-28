@@ -527,6 +527,7 @@ def train_sgp(args, save_file, X_train, X_test, y_train, y_test):
     sgp = SparseGP(X_train, 0 * X_train, y_train, M)
     sgp.train_via_ADAM(X_train, 0 * X_train, y_train, X_test, X_test * 0, y_test, minibatch_size = 2 * M, max_iterations = max_iter, learning_rate = lr)
     pred, uncert = sgp.predict(X_test, 0 * X_test)
+    breakpoint()
     logger.info(f"predictions: {pred.reshape(-1)}")
     logger.info(f"real values: {y_test.reshape(-1)}")
     error = np.sqrt(np.mean((pred - y_test)**2))
@@ -578,9 +579,10 @@ def bo(args, grammar, model, token2rule, y_train, y_test, target_mean, target_st
         evaluate_fn = lambda g: eva.eval(decode_igraph_to_BN_adj(nx_to_igraph(g)))
     else:
         raise NotImplementedError
-    for i in range(y_train.shape[1]): # evaluate latent space
-        save_file = os.path.join(save_dir, f'Prop_{i}_Test_RMSE_ll.txt')
-        sgp = train_sgp(args, save_file, X_train, X_test, y_train[:, i:i+1], y_test[:, i:i+1])
+    for _ in range(3):
+        for i in range(y_train.shape[1]): # evaluate latent space
+            save_file = os.path.join(save_dir, f'Prop_{i}_Test_RMSE_ll.txt')
+            sgp = train_sgp(args, save_file, X_train, X_test, y_train[:, i:i+1], y_test[:, i:i+1])
     y_train, y_test = y_train[:, -1:], y_test[:, -1:]
     save_file = os.path.join(save_dir, f'Test_RMSE_ll.txt')
     while iteration < args.BO_rounds:
