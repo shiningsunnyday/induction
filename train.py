@@ -621,6 +621,8 @@ def bo(args, grammar, model, token2rule, y_train, y_test, target_mean, target_st
                 # g_best, _ = decode_BN_to_igraph(row)
                 g_best = nx_to_igraph(best_arc)
                 plot_DAG(g_best, save_dir, 'best_arc_iter_{}'.format(iteration), data_type='BN', pdf=True)
+            elif args.dataset == "ckt":
+                breakpoint()
         #
         iteration += 1
 
@@ -1008,9 +1010,9 @@ def normalize_format(g):
                 main_path = path
     if num_stages not in [2, 3]:
         raise ValueError(f"op-amp has {num_stages} stages")
-    # if len(set(sum([[n]+list(g.predecessors(n)) for n in main_path], []))) < len(g):
-    #     # another unfortunate restriction of the converter
-    #     raise ValueError("every node needs to be on main path or flow into one")
+    if len(set(sum([[n]+list(g.predecessors(n)) for n in main_path], []))) < len(g):
+        # another unfortunate restriction of the converter
+        raise ValueError("every node needs to be on main path or flow into one")
     # relabel main path from 0,2,...len(main_path)-1,1
     rename = {}
     for i, n in enumerate(main_path):
@@ -1180,8 +1182,9 @@ def evaluate_ckt(args, g):
     path = os.path.join(f'cache/api_{args.dataset}_ednce/{folder}')
     # write converter:
     fname = os.path.join(path, f"{hash_object(g)}.txt")
-    convert_ckt(g, fname)
+    convert_ckt(g, fname)    
     fom = cktgraph_to_fom(fname)
+    os.remove(fname)
     return fom
 
 
