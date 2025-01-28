@@ -311,6 +311,26 @@ def sample(model, num_samples=5, max_seq_len=10):
     return uniq_sequences[:num_samples]
 
 
+def standardize_enas(g, path=None):
+    if path is None:
+        path = TransformerVAE.path_init(g)[0] # could be done if not valid        
+    g = nx.relabel_nodes(g, dict(zip(path, list(range(len(g))))))
+    g = copy_graph(nx.DiGraph(g), list(range(len(g))))
+    for n in g:
+        g.nodes[n]['type'] = list(LOOKUP).index(g.nodes[n]['type'])    
+    return g
+
+
+def standardize_bn(g):
+    for n in g:
+        g.nodes[n]['type'] = list(LOOKUP).index(g.nodes[n]['type'])
+    s = get_node_by_label(g, 0, attr='type')
+    t = get_node_by_label(g, 1, attr='type')
+    path = [s] + list([n for n in g if n not in [s,t]]) + [t]
+    g = nx.relabel_nodes(g, dict(zip(path, range(len(g)))))
+    return g
+
+
 def decode_from_latent_space(z, grammar, model, token2rule, max_seq_len):
     generated_dags = [None for _ in range(z.shape[0])]
     generated_derivs = [None for _ in range(z.shape[0])]
@@ -320,7 +340,10 @@ def decode_from_latent_space(z, grammar, model, token2rule, max_seq_len):
             generated_sequences, generated_orders, generated_paths = model.autoregressive_interactive_inference(z, grammar, token2rule, max_seq_len, decode='softmax')
             new_idxes = []
             mask = []
-            for idx, deriv, order, path in zip(idxes, generated_sequences, generated_orders, generated_paths):
+            for idx, deriv, order, paths in zip(idxes, generated_sequences, generated_orders, generated_paths):
+                if DATASET == "enas":
+                    assert len(paths) > 0
+                    path = paths[0]
                 g = grammar.derive(deriv, token2rule)
                 for n in g:
                     g.nodes[n]['type'] = INVERSE_LOOKUP[g.nodes[n]['label']]
@@ -332,14 +355,9 @@ def decode_from_latent_space(z, grammar, model, token2rule, max_seq_len):
                         mask.append(True) 
                         continue
                 elif DATASET == "enas":
-                    # relabel
-                    g = nx.relabel_nodes(g, dict(zip(path, range(len(g)))))
-                    g = copy_graph(nx.DiGraph(g), list(range(len(g))))
-                    for n in g:
-                        g.nodes[n]['type'] = list(LOOKUP).index(g.nodes[n]['type'])
+                    g = standardize_enas(g, path)
                 else:
-                    for n in g:
-                        g.nodes[n]['type'] = list(LOOKUP).index(g.nodes[n]['type'])
+                    g = standardize_bn(g)
                 generated_dags[idx] = g
                 generated_derivs[idx] = deriv
                 mask.append(False)          
@@ -553,7 +571,7 @@ def bo(args, grammar, model, token2rule, y_train, y_test, target_mean, target_st
         trainll = np.mean(sps.norm.logpdf(pred - y_train, scale = np.sqrt(uncert)))
         logger.info(f'Train RMSE: {error}')
         logger.info(f'Train ll: {trainll}')        
-        next_inputs = sgp.batched_greedy_ei(args.BO_batch_size, np.min(X_train, 0), np.max(X_train, 0), np.mean(X_train, 0), np.std(X_train, 0), sample=args.sample_dist, max_iter=args.max_ei_iter)
+        next_inputs = sgp.batched_greedy_ei(args.BO_batch_size, np.min(X_train, 0), np.max(X_train, 0), np.mean(X_train, 0), np.std(X_train, 0), sample=args.sample_dist, max_iter=args.max_ei_iter, factr=args.factr)
         valid_arcs_final, generated_sequences = decode_from_latent_space(torch.FloatTensor(next_inputs).to(args.cuda), grammar, model, token2rule, MAX_SEQ_LEN)
         new_features = next_inputs
         logger.info("Evaluating selected points")
@@ -597,8 +615,9 @@ def bo(args, grammar, model, token2rule, y_train, y_test, target_mean, target_st
                 g_best = nx_to_igraph(best_arc)
                 plot_DAG(g_best, save_dir, 'best_arc_iter_{}'.format(iteration), data_type='ENAS', pdf=True)
             elif args.dataset == 'bn':
-                row = adjstr_to_BN(best_arc)
-                g_best, _ = decode_BN_to_igraph(row)
+                # row = adjstr_to_BN(best_arc)
+                # g_best, _ = decode_BN_to_igraph(row)
+                g_best = nx_to_igraph(best_arc)
                 plot_DAG(g_best, save_dir, 'best_arc_iter_{}'.format(iteration), data_type='BN', pdf=True)
         #
         iteration += 1
@@ -641,11 +660,17 @@ def interactive_sample_sequences(args, model, grammar, token2rule, num_samples=5
             while len(uniq_sequences if unique else sequences) < num_samples:
                 z = torch.randn(sample_batch_size, args.latent_dim)  
                 z = z.to(args.cuda)            
-                generated_sequences, _ = model.autoregressive_interactive_inference(z, grammar, token2rule, max_seq_len=max_seq_len)    
+                generated_sequences, _, _ = model.autoregressive_interactive_inference(z, grammar, token2rule, max_seq_len=max_seq_len, decode='softmax')
+                # generated_dags, generated_sequences = decode_from_latent_space(z, grammar, model, token2rule, max_seq_len=max_seq_len)
                 if unique:
-                    uniq_sequences = uniq_sequences | set(map(tuple, generated_sequences))                
+                    for seq in generated_sequences:
+                        if tuple(seq) not in uniqe_sequences:
+                            uniqe_sequences.add(tuple(seq))
+                            logger.info(f"generated {seq}")
                     pbar.update(len(uniq_sequences)-pbar.n)
                 else:
+                    for seq in generated_sequences:
+                        logger.info(f"generated {seq}")
                     sequences += generated_sequences
                     pbar.update(len(sequences)-pbar.n)
     if unique:
@@ -854,6 +879,10 @@ def hash_args(args, use_keys=['dataset', 'encoder']):
 
 def is_novel(g, orig_graphs):
     for o in orig_graphs:
+        if len(o) != len(g):
+            continue
+        if len(o.edges) != len(g.edges):
+            continue
         if nx.is_isomorphic(g, o, node_match=node_match):
             return False
     return True
@@ -883,21 +912,22 @@ def is_valid_circuit(g):
     return good              
 
 
-def evaluate(orig_graphs, graphs):
-    ckt_valid, dag_valid, novel = [], [], []
-    for g in tqdm(graphs, desc="evaluating"):
-        if not is_valid_circuit(g):
-            print("not valid circuit")
-            #breakpoint()
-        is_valid_ckt = is_valid_circuit(g)
-        ckt_valid.append(is_valid_ckt)
-        dag_valid.append(is_valid_DAG(nx_to_igraph(g), subg=False))
-        novel.append(is_novel(g, orig_graphs))
-    return {"valid_dag": np.mean(dag_valid), "valid_ckt": np.mean(ckt_valid), "novel": np.mean(novel), "n": len(graphs)}
+def evaluate(orig, graphs):
+    valid, novel, unique = [], [], []
+    for i, g in tqdm(enumerate(graphs), desc="evaluating"):
+        if DATASET == "ckt":
+            is_valid_ckt = is_valid_circuit(g)
+            valid.append(is_valid_ckt)
+        elif DATASET == "enas":
+            valid.append(is_valid_ENAS(nx_to_igraph(standardize_enas(g))))
+        elif DATASET == "bn":
+            valid.append(is_valid_BN(nx_to_igraph(standardize_bn(g))))
+        novel.append(is_novel(g, orig))
+        unique.append(is_novel(g, graphs[:i]+graphs[i+1:]))
+    return {"valid": np.mean(valid), "novel": np.mean(novel), "unique": np.mean(unique), "n": len(graphs)}
 
 
-def evaluate_nn(args, g, default_val=0.0):
-    breakpoint()
+def evaluate_nn(args, g, default_val=0.0):    
     # if args.dataset == "enas":
     #     from evaluation import *
     #     eva = Eval_NN()
@@ -1175,7 +1205,8 @@ def main(args):
         orig = load_bn(args)
     elif args.dataset == "enas":   
         num_graphs = 19020
-        orig = load_enas(args)                
+        orig = load_enas(args)  
+           
     else:
         raise NotImplementedError        
     train_data, test_data, token2rule = load_data(args, anno, grammar, orig, cache_dir, num_graphs)
@@ -1197,11 +1228,9 @@ def main(args):
     test_y = y[test_indices]
     train_y = (train_y-mean_train_y)/std_train_y
     test_y = (test_y-mean_train_y)/std_train_y
-    bo(args, grammar, model, token2rule, train_y, test_y, mean_train_y[-1], std_train_y[-1])
-    breakpoint()
-    graphs = interactive_sample_sequences(args, model, grammar, token2rule, max_seq_len=MAX_SEQ_LEN, unique=False, visualize=False)
-    orig_graphs = [nx.induced_subgraph(orig, orig.comps[i]) for i in range(num_graphs)]
-    metrics = evaluate(orig_graphs, graphs)
+    bo(args, grammar, model, token2rule, train_y, test_y, mean_train_y[-1], std_train_y[-1])     
+    graphs = interactive_sample_sequences(args, model, grammar, token2rule, max_seq_len=MAX_SEQ_LEN, unique=False, visualize=False)    
+    metrics = evaluate(orig, graphs)
     print(metrics)
 
 
@@ -1229,6 +1258,7 @@ if __name__ == "__main__":
     # eval
     parser.add_argument("--max-iter", type=int, default=500)
     parser.add_argument("--max-ei-iter", type=int, default=150)
+    parser.add_argument("--factr", type=float, default=1e7)
     parser.add_argument('--BO-rounds', type=int, default=10, help="how many rounds of BO to perform")    
     # parser.add_argument('--bo',type=int, default=0, choices=[0, 1], help='whether to do BO')
     parser.add_argument('--predictor', action='store_true', default=False, help='if True, use the performance predictor instead of SGP')    

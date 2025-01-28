@@ -131,8 +131,8 @@ def check_input_xor_output(subgraph):
     return sum(inp_outp) == 1
 
 
-def get_node_by_label(g, label):
-    return next(filter(lambda n: INVERSE_LOOKUP.get(g.nodes[n]['label'], '') == label, g))
+def get_node_by_label(g, label, attr='label'):
+    return next(filter(lambda n: g.nodes[n][attr] == label, g))
 
 
 def nx_to_igraph(g):
