@@ -31,6 +31,9 @@ import hashlib
 import shutil
 from tqdm import tqdm
 import matplotlib.pyplot as plt
+from matplotlib import rcParams
+# Set the font to Arial
+rcParams['font.family'] = 'Arial'
 from src.model import *
 if DATASET == "enas":
     sys.path.append('/home/msun415/induction/dagnn/dvae/software/enas/src/cifar10')    
@@ -526,8 +529,7 @@ def train_sgp(args, save_file, X_train, X_test, y_train, y_test):
     max_iter = args.max_iter  # how many iterations to optimize the SGP each time
     sgp = SparseGP(X_train, 0 * X_train, y_train, M)
     sgp.train_via_ADAM(X_train, 0 * X_train, y_train, X_test, X_test * 0, y_test, minibatch_size = 2 * M, max_iterations = max_iter, learning_rate = lr)
-    pred, uncert = sgp.predict(X_test, 0 * X_test)
-    breakpoint()
+    pred, uncert = sgp.predict(X_test, 0 * X_test)    
     logger.info(f"predictions: {pred.reshape(-1)}")
     logger.info(f"real values: {y_test.reshape(-1)}")
     error = np.sqrt(np.mean((pred - y_test)**2))
@@ -536,6 +538,24 @@ def train_sgp(args, save_file, X_train, X_test, y_train, y_test):
     logger.info(f'Test ll: {testll}')
     pearson = float(pearsonr(pred.flatten(), y_test.flatten())[0])
     logger.info(f'Pearson r: {pearson}')
+    # Plot
+def test(y_test,y_pred,pearson,error,save_file):
+    fig, ax = plt.subplots(figsize=(8, 8))
+    ax.scatter(y_test.flatten(), y_pred.flatten(), color="blue", alpha=0.6, label="Predictions")
+    ax.plot(y_test.flatten(), y_test.flatten(), color="red", linestyle="--", label="Perfect Prediction (y=x)")
+    # Add annotations
+    ax.text(0.7, 0.10, f"Pearson R = {pearson:.2f}", transform=fig.gca().transAxes, fontsize=12)
+    ax.text(0.7, 0.05, f"RMSE = {error:.2f}", transform=fig.gca().transAxes, fontsize=12)
+    # Labels and legend
+    ax.set_xlabel("Standardized True Values")
+    ax.set_ylabel("Standardized Predicted Values")
+    ax.set_title("Sparse GP Predictions on Test Set")
+    ax.legend()
+    ax.grid(alpha=0.3)
+    path = Path(save_file)
+    now = time.time()
+    fig.savefig(os.path.join(path.parent, path.stem+f'_{now}.png'))
+    print(os.path.abspath(os.path.join(path.parent, path.stem+f'_{now}.png')))
     with open(save_file, 'a+') as test_file:
         test_file.write('Test RMSE: {:.4f}, ll: {:.4f}, Pearson r: {:.4f}\n'.format(error, testll, pearson))
     error_if_predict_mean = np.sqrt(np.mean((np.mean(y_train, 0) - y_test)**2))
