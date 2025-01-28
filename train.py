@@ -39,7 +39,7 @@ else:
 import glob
 import re
 sys.path.append('dagnn/dvae')
-from util import save_object, plot_DAG, flat_ENAS_to_nested, adjstr_to_BN, decode_igraph_to_ENAS, is_valid_ENAS, is_valid_BN, is_valid_DAG, decode_igraph_to_BN_adj
+from util import save_object, load_object, plot_DAG, flat_ENAS_to_nested, adjstr_to_BN, decode_igraph_to_ENAS, is_valid_ENAS, is_valid_BN, is_valid_DAG, decode_igraph_to_BN_adj
 from evaluate_BN import Eval_BN
 
 from sparse_gp import SparseGP
@@ -328,6 +328,7 @@ def standardize_bn(g):
     t = get_node_by_label(g, 1, attr='type')
     path = [s] + list([n for n in g if n not in [s,t]]) + [t]
     g = nx.relabel_nodes(g, dict(zip(path, range(len(g)))))
+    g = copy_graph(nx.DiGraph(g), list(range(len(g))))
     return g
 
 
@@ -579,6 +580,7 @@ def bo(args, grammar, model, token2rule, y_train, y_test, target_mean, target_st
         if args.dataset == "enas":
             # Prepare data
             scores = send_enas_listener(valid_arcs_final)
+            scores = [-score for score in scores]
             for i, score in enumerate(scores):
                 if score > best_score:
                     best_score = score
@@ -586,7 +588,7 @@ def bo(args, grammar, model, token2rule, y_train, y_test, target_mean, target_st
                     best_arc = valid_arcs_final[i]
         else:
             for i in range(len(valid_arcs_final)):
-                score = evaluate_fn(valid_arcs_final[i])
+                score = -evaluate_fn(valid_arcs_final[i])
                 if score > best_score:
                     best_score = score
                     best_deriv = '->'.join(map(str, generated_sequences[i]))
@@ -706,7 +708,7 @@ def load_y(g, num_graphs, target):
         label = []
         for t in target:
             label.append(g.graph[f'{pre}:{t}'])
-        y.append(label)
+        y.append(-label) # loss
     return y
 
 
@@ -1199,16 +1201,15 @@ def main(args):
     grammar, anno, g = pickle.load(open(os.path.join(cache_dir, f'{version}.pkl'),'rb'))
     if args.dataset == "ckt":
         num_graphs = 10000
-        orig = load_ckt(args, load_all=True)
+        orig = load_ckt(args, load_all=True)        
     elif args.dataset == "bn":        
         num_graphs = 200000
         orig = load_bn(args)
     elif args.dataset == "enas":   
         num_graphs = 19020
-        orig = load_enas(args)  
-           
+        orig = load_enas(args)             
     else:
-        raise NotImplementedError        
+        raise NotImplementedError            
     train_data, test_data, token2rule = load_data(args, anno, grammar, orig, cache_dir, num_graphs)
     if args.datapkl:
         print(f'The folder being written to is: {args.datapkl}')

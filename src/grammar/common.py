@@ -155,7 +155,7 @@ def copy_graph(g, nodes, copy_attrs=True):
         for k in g.graph:
             g_copy.graph[k] = g.graph[k]
     for n in nodes:
-        g_copy.add_node(n, **g.nodes[n])    
+        g_copy.add_node(n, **g.nodes[n])
     if isinstance(g, nx.DiGraph):
         for e in g.in_edges(nodes, data=True):
             if e[0] in nodes:
