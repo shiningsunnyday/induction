@@ -601,7 +601,7 @@ def bo(args, grammar, model, token2rule, y_train, y_test, target_mean, target_st
             scores = send_enas_listener(valid_arcs_final)
             scores = [-score for score in scores]
             for i, score in enumerate(scores):
-                if score > best_score:
+                if score < best_score:
                     best_score = score
                     best_deriv = '->'.join(map(str, generated_sequences[i]))
                     best_arc = valid_arcs_final[i]
@@ -610,7 +610,7 @@ def bo(args, grammar, model, token2rule, y_train, y_test, target_mean, target_st
                 score = -evaluate_fn(valid_arcs_final[i])
                 if score == float("inf") or score != score:
                     score = y_train[:keep].max()
-                if score > best_score:
+                if score < best_score:
                     best_score = score
                     best_deriv = '->'.join(map(str, generated_sequences[i]))
                     best_arc = valid_arcs_final[i]
