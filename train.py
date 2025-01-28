@@ -45,6 +45,7 @@ from evaluate_BN import Eval_BN
 from sparse_gp import SparseGP
 from utils import is_valid_DAG, is_valid_Circuit
 from OCB.src.simulator.graph_to_fom import cktgraph_to_fom
+from OCB.src.utils_src import plot_circuits
 # Logging
 logger = create_logger("train", f"cache/api_{DATASET}_ednce/train.log")
 
@@ -320,6 +321,22 @@ def standardize_enas(g, path=None):
         g.nodes[n]['type'] = list(LOOKUP).index(g.nodes[n]['type'])    
     return g
 
+def standardize_ckt(g):
+    subg_type = {
+        "input": 0,
+        "output": 1,
+        "R": 2,
+        "C": 3,
+        "+gm+": 6,
+        "-gm+": 7,
+        "+gm-": 8,
+        "-gm-": 9
+    }   
+    g = deepcopy(g)
+    for n in g:
+        g.nodes[n]['type'] = subg_type[g.nodes[n]['type']]
+    return g    
+
 
 def standardize_bn(g):
     for n in g:
@@ -541,6 +558,8 @@ def bo(args, grammar, model, token2rule, y_train, y_test, target_mean, target_st
         keep = 5000
         X_train = X_train[random_shuffle[:keep]]
         y_train = y_train[random_shuffle[:keep]]    
+    else:
+        keep = y_train.shape[0]
     X_train_mean = X_train.mean(axis=0)
     X_train_std = X_train.std(axis=0)
     X_train = (X_train-X_train_mean)/X_train_std
@@ -589,6 +608,8 @@ def bo(args, grammar, model, token2rule, y_train, y_test, target_mean, target_st
         else:
             for i in range(len(valid_arcs_final)):
                 score = -evaluate_fn(valid_arcs_final[i])
+                if score == float("inf") or score != score:
+                    score = y_train[:keep].max()
                 if score > best_score:
                     best_score = score
                     best_deriv = '->'.join(map(str, generated_sequences[i]))
@@ -622,7 +643,8 @@ def bo(args, grammar, model, token2rule, y_train, y_test, target_mean, target_st
                 g_best = nx_to_igraph(best_arc)
                 plot_DAG(g_best, save_dir, 'best_arc_iter_{}'.format(iteration), data_type='BN', pdf=True)
             elif args.dataset == "ckt":
-                breakpoint()
+                g_best = nx_to_igraph(standardize_ckt(best_arc))
+                plot_circuits((g_best,), save_dir, 'best_arc_iter_{}'.format(iteration), pdf=True)                                
         #
         iteration += 1
 
@@ -1013,6 +1035,9 @@ def normalize_format(g):
     if len(set(sum([[n]+list(g.predecessors(n)) for n in main_path], []))) < len(g):
         # another unfortunate restriction of the converter
         raise ValueError("every node needs to be on main path or flow into one")
+    if len(main_path) != num_stages+2:
+        # another unfortunate restriction of the converter
+        raise ValueError("only gm cells allowed on main path")
     # relabel main path from 0,2,...len(main_path)-1,1
     rename = {}
     for i, n in enumerate(main_path):
