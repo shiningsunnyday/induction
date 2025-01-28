@@ -539,7 +539,6 @@ def train_sgp(args, save_file, X_train, X_test, y_train, y_test):
     pearson = float(pearsonr(pred.flatten(), y_test.flatten())[0])
     logger.info(f'Pearson r: {pearson}')
     # Plot
-def test(y_test,y_pred,pearson,error,save_file):
     fig, ax = plt.subplots(figsize=(8, 8))
     ax.scatter(y_test.flatten(), y_pred.flatten(), color="blue", alpha=0.6, label="Predictions")
     ax.plot(y_test.flatten(), y_test.flatten(), color="red", linestyle="--", label="Perfect Prediction (y=x)")
