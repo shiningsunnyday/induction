@@ -8,6 +8,8 @@ from argparse import ArgumentParser
 import pickle
 from src.grammar.common import get_args
 from src.grammar.utils import *
+import os
+# from src.model import graph_regression, transformer_regression
 
 
 def load_data(args):
@@ -47,7 +49,7 @@ def main(args):
         samples = gr.induce(model)
         for i in range(len(samples)):
             draw_graph(samples[i], os.path.join(IMG_DIR, f"{i}_model.png"))
-        graph_regression(samples)
+        # graph_regression(samples)
         # transformer_regression(samples)
     
     if 'generate' in args.task:

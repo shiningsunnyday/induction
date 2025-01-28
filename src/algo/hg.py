@@ -122,7 +122,7 @@ def create_chat_completion(return_logprobs=False, **kwargs):
         res = completion.choices[0].message.content
         if return_logprobs:
             logprobs = completion['choices'][0]['logprobs']
-            return logprobs['content'][0]['top_logprobs']
+            return logprobs['content'][0]['top_logprobs'], res
         if CACHE:
             with open(cache_path, "w+") as f:
                 f.write(res)
@@ -184,10 +184,13 @@ def llm_call(img_paths, prompt_path, optional_prompts=[], prompt=None, return_lo
         return_logprobs=return_logprobs,
         **settings,
     )
-    if return_logprobs:
+    if return_logprobs: 
+        logprobs, res = res
         if VERBOSE:
+            logger.info("===RESPONSE===")
+            logger.info(res + "\n")
             logger.info("=====END LLM call=====")
-        return res
+        return logprobs
     if VERBOSE:
         logger.info("===PROMPT===")
         logger.info(prompt)
