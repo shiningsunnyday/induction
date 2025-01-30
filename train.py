@@ -927,14 +927,32 @@ def hash_args(args, use_keys=['dataset', 'encoder']):
     return hashlib.md5(json.dumps(arg_dict, sort_keys=True).encode()).hexdigest()
 
 def is_novel(g, orig_graphs):
-    for o in orig_graphs:
-        if len(o) != len(g):
-            continue
-        if len(o.edges) != len(g.edges):
-            continue
-        if nx.is_isomorphic(g, o, node_match=node_match):
+    if isinstance(orig_graphs, nx.DiGraph): # already a graph:
+        matcher = DiGraphMatcher(orig_graphs, g, node_match)
+        try:
+            next(matcher.subgraph_isomorphisms_iter())
             return False
-    return True
+        except:
+            print("novel")
+            return True
+    else:
+        for o in orig_graphs:
+            if len(o) != len(g):
+                continue
+            if len(o.edges) != len(g.edges):
+                continue
+            if nx.is_isomorphic(g, o, node_match=node_match):
+                return False
+        return True
+
+def str_to_graph(arch):
+    delim = ',' if ',' in arch else ' '
+    row = list(map(int, arch.split(delim)))
+    g_best, _ = decode_ENAS_to_igraph(flat_ENAS_to_nested(row, 8-2))
+    g_best = g_best.to_networkx()
+    for n in g_best: 
+        g_best.nodes[n]['label']=list(LOOKUP.values())[g_best.nodes[n]['type']]    
+    return g_best
 
 
 def str_to_graph(arch):
@@ -1269,9 +1287,10 @@ def main(args):
         orig = load_bn(args)
     elif args.dataset == "enas":   
         num_graphs = 19020
-        orig = load_enas(args)             
+        orig = load_enas(args)
     else:
         raise NotImplementedError            
+    breakpoint()
     train_data, test_data, token2rule = load_data(args, anno, grammar, orig, cache_dir, num_graphs)
     if args.datapkl:
         print(f'The folder being written to is: {args.datapkl}')
