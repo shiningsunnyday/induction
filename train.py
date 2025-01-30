@@ -642,6 +642,7 @@ def bo(args, grammar, model, token2rule, y_train, y_test, target_mean, target_st
         # logger.info(scores, np.mean(scores))
         save_object(scores, "{}scores{}.dat".format(save_dir, iteration))
         save_object(valid_arcs_final, "{}valid_arcs_final{}.dat".format(save_dir, iteration))
+        save_object(generated_sequences, "{}generated_sequences{}.dat".format(save_dir, iteration))
 
         if len(new_features) > 0:
             scores = np.array(scores)[:, None]
@@ -666,7 +667,7 @@ def bo(args, grammar, model, token2rule, y_train, y_test, target_mean, target_st
                 plot_DAG(g_best, save_dir, 'best_arc_iter_{}'.format(iteration), data_type='BN', pdf=True)
             elif args.dataset == "ckt":
                 g_best = nx_to_igraph(standardize_ckt(best_arc))
-                plot_circuits((g_best,), save_dir, 'best_arc_iter_{}'.format(iteration), pdf=True)                                
+                plot_circuits((g_best,), save_dir, 'best_arc_iter_{}'.format(iteration), pdf=True)
         #
         iteration += 1
 
@@ -991,7 +992,8 @@ def is_valid_circuit(g):
 
 
 def evaluate(orig, graphs):
-    valid, novel, unique = [], [], []
+    orig_graphs = [nx.induced_subgraph(orig, nodes) for nodes in orig.comps.values()]
+    valid, novel, unique = [], [], []    
     for i, g in tqdm(enumerate(graphs), desc="evaluating"):
         if DATASET == "ckt":
             is_valid_ckt = is_valid_circuit(g)
@@ -1000,7 +1002,7 @@ def evaluate(orig, graphs):
             valid.append(is_valid_ENAS(nx_to_igraph(standardize_enas(g))))
         elif DATASET == "bn":
             valid.append(is_valid_BN(nx_to_igraph(standardize_bn(g))))
-        novel.append(is_novel(g, orig))
+        novel.append(is_novel(g, orig_graphs))
         unique.append(is_novel(g, graphs[:i]+graphs[i+1:]))
     return {"valid": np.mean(valid), "novel": np.mean(novel), "unique": np.mean(unique), "n": len(graphs)}
 
@@ -1301,7 +1303,7 @@ def main(args):
     # TODO: remove this later
     indices = list(range(num_graphs))
     # random.Random(0).shuffle(indices)
-    train_indices, test_indices = indices[:int(num_graphs*0.9)], indices[int(num_graphs*0.9):]    
+    train_indices, test_indices = indices[:int(num_graphs*0.9)], indices[int(num_graphs*0.9):]
     y = load_y(orig, num_graphs, target={"ckt": ["gain", "bw", "pm", "fom"],"bn": ["bic"],"enas": ["acc"]}[args.dataset])
     y = np.array(y)
     train_y = y[train_indices]
@@ -1310,8 +1312,8 @@ def main(args):
     test_y = y[test_indices]
     train_y = (train_y-mean_train_y)/std_train_y
     test_y = (test_y-mean_train_y)/std_train_y
-    bo(args, grammar, model, token2rule, train_y, test_y, mean_train_y[-1], std_train_y[-1])     
-    graphs = interactive_sample_sequences(args, model, grammar, token2rule, max_seq_len=MAX_SEQ_LEN, unique=False, visualize=False)    
+    bo(args, grammar, model, token2rule, train_y, test_y, mean_train_y[-1], std_train_y[-1])
+    graphs = interactive_sample_sequences(args, model, grammar, token2rule,max_seq_len=MAX_SEQ_LEN, unique=False, visualize=False)
     metrics = evaluate(orig, graphs)
     print(metrics)
 
