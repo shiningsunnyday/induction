@@ -563,7 +563,7 @@ def train_sgp(args, save_file, X_train, X_test, y_train, y_test):
 
 
 
-def bo(args, grammar, model, token2rule, y_train, y_test, target_mean, target_std):
+def bo(args, orig, grammar, model, token2rule, y_train, y_test, target_mean, target_std):
     ### IMPORTANT: y_train and y_test are 2D numpys, where the last column is the BO property
     folder = args.datapkl if args.datapkl else args.folder
     ckpt_dir = f'ckpts/api_{args.dataset}_ednce/{folder}'    
@@ -585,7 +585,8 @@ def bo(args, grammar, model, token2rule, y_train, y_test, target_mean, target_st
     X_train = (X_train-X_train_mean)/X_train_std
     X_test = (X_test-X_train_mean)/X_train_std    
     best_score = float("-inf")
-    best_arc = None    
+    best_arc = None
+    novel_arcs = []
     iteration = 0
     logger.info("Average pairwise distance between train points = {}".format(np.mean(pdist(X_train))))
     logger.info("Average pairwise distance between test points = {}".format(np.mean(pdist(X_test))))    
@@ -623,15 +624,19 @@ def bo(args, grammar, model, token2rule, y_train, y_test, target_mean, target_st
             scores = send_enas_listener(valid_arcs_final)
             scores = [-score for score in scores]
             for i, score in enumerate(scores):
+                if is_novel(valid_arcs_final[i], orig):
+                    novel_arcs.append((valid_arcs_final[i], score, iteration*args.BO_batch_size+i))                
                 if score < best_score:
                     best_score = score
                     best_deriv = '->'.join(map(str, generated_sequences[i]))
-                    best_arc = valid_arcs_final[i]
+                    best_arc = valid_arcs_final[i]                    
         else:
             for i in range(len(valid_arcs_final)):
                 score = -evaluate_fn(valid_arcs_final[i])
                 if score == float("inf") or score != score:
                     score = y_train[:keep].max()
+                if is_novel(valid_arcs_final[i], orig):
+                    novel_arcs.append((valid_arcs_final[i], score, iteration*args.BO_batch_size+i))
                 if score < best_score:
                     best_score = score
                     best_deriv = '->'.join(map(str, generated_sequences[i]))
@@ -643,7 +648,7 @@ def bo(args, grammar, model, token2rule, y_train, y_test, target_mean, target_st
         save_object(scores, "{}scores{}.dat".format(save_dir, iteration))
         save_object(valid_arcs_final, "{}valid_arcs_final{}.dat".format(save_dir, iteration))
         save_object(generated_sequences, "{}generated_sequences{}.dat".format(save_dir, iteration))
-
+        save_object(novel_arcs, "{}novel_arcs.dat".format(save_dir))
         if len(new_features) > 0:
             scores = np.array(scores)[:, None]
             X_train = np.concatenate([X_train, new_features], 0)
@@ -1312,7 +1317,7 @@ def main(args):
     test_y = y[test_indices]
     train_y = (train_y-mean_train_y)/std_train_y
     test_y = (test_y-mean_train_y)/std_train_y
-    bo(args, grammar, model, token2rule, train_y, test_y, mean_train_y[-1], std_train_y[-1])
+    bo(args, orig, grammar, model, token2rule, train_y, test_y, mean_train_y[-1], std_train_y[-1])
     graphs = interactive_sample_sequences(args, model, grammar, token2rule,max_seq_len=MAX_SEQ_LEN, unique=False, visualize=False)
     metrics = evaluate(orig, graphs)
     print(metrics)
