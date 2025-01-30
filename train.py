@@ -540,7 +540,7 @@ def train_sgp(args, save_file, X_train, X_test, y_train, y_test):
     logger.info(f'Pearson r: {pearson}')
     # Plot
     fig, ax = plt.subplots(figsize=(8, 8))
-    ax.scatter(y_test.flatten(), y_pred.flatten(), color="blue", alpha=0.6, label="Predictions")
+    ax.scatter(y_test.flatten(), pred.flatten(), color="blue", alpha=0.6, label="Predictions")
     ax.plot(y_test.flatten(), y_test.flatten(), color="red", linestyle="--", label="Perfect Prediction (y=x)")
     # Add annotations
     ax.text(0.7, 0.10, f"Pearson R = {pearson:.2f}", transform=fig.gca().transAxes, fontsize=12)
@@ -553,7 +553,7 @@ def train_sgp(args, save_file, X_train, X_test, y_train, y_test):
     ax.grid(alpha=0.3)
     path = Path(save_file)
     now = time.time()
-    fig.savefig(os.path.join(path.parent, path.stem+f'_{now}.png'))
+    fig.savefig(os.path.join(path.parent, path.stem+f'_{now}.png'), bbox_inches='tight')
     print(os.path.abspath(os.path.join(path.parent, path.stem+f'_{now}.png')))
     with open(save_file, 'a+') as test_file:
         test_file.write('Test RMSE: {:.4f}, ll: {:.4f}, Pearson r: {:.4f}\n'.format(error, testll, pearson))
@@ -598,10 +598,11 @@ def bo(args, grammar, model, token2rule, y_train, y_test, target_mean, target_st
         evaluate_fn = lambda g: eva.eval(decode_igraph_to_BN_adj(nx_to_igraph(g)))
     else:
         raise NotImplementedError
-    for _ in range(3):
+    for _ in range(10):
         for i in range(y_train.shape[1]): # evaluate latent space
             save_file = os.path.join(save_dir, f'Prop_{i}_Test_RMSE_ll.txt')
             sgp = train_sgp(args, save_file, X_train, X_test, y_train[:, i:i+1], y_test[:, i:i+1])
+    breakpoint()
     y_train, y_test = y_train[:, -1:], y_test[:, -1:]
     save_file = os.path.join(save_dir, f'Test_RMSE_ll.txt')
     while iteration < args.BO_rounds:
@@ -934,6 +935,17 @@ def is_novel(g, orig_graphs):
         if nx.is_isomorphic(g, o, node_match=node_match):
             return False
     return True
+
+
+def str_to_graph(arch):
+    delim = ',' if ',' in arch else ' '
+    row = list(map(int, arch.split(delim)))
+    g_best, _ = decode_ENAS_to_igraph(flat_ENAS_to_nested(row, 8-2))
+    g_best = g_best.to_networkx()
+    for n in g_best: 
+        g_best.nodes[n]['label']=list(LOOKUP.values())[g_best.nodes[n]['type']]    
+    return g_best
+
 
 
 def is_valid_circuit(g):    

@@ -273,29 +273,19 @@ def wl_hash_node(g, n, colors):
     return colors[n]
 
 
-
 def wl_hash(g):    
     g = deepcopy(g)
-    tmp_path = f"{uuid.uuid4()}.txt"
     g = nx.relabel_nodes(g, dict(zip(sorted(g.nodes()), range(len(g)))))        
     m = len(g.edges)
     edge_index = np.empty((2, m))
     edge_index[:, :m] = np.array(g.edges).T
-    roots = np.setdiff1d(np.arange(len(g)), edge_index[1])
-    # order = compute_canon_order(g, tmp_path)
-    # order = list(map(int, order.strip().rstrip().split()))
-    # g = nx.relabel_nodes(g, {o: f"{j}:{g.nodes[o]['label']}" for j, o in enumerate(order)})    
-    # adj_list = nx.to_dict_of_lists(g)    
-    # adj_list_str = str(sorted(adj_list.items()))
-    # hash_value = hashlib.sha256(adj_list_str.encode()).hexdigest()
-    # os.remove(tmp_path)
+    roots = np.setdiff1d(np.arange(len(g)), edge_index[1]) # nodes without predecessor
     colors = {}
     for r in roots:
         wl_hash_node(g, r, colors)
     ans = '|'.join(sorted([colors[r] for r in roots]))
     hash_value = hashlib.sha256(ans.encode()).hexdigest()
     return hash_value
-    # return nx.weisfeiler_lehman_graph_hash(g)
 
 
 def recurse_rules(cur, target, grammar, mem, st, timeout=100):
