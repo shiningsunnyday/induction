@@ -14,6 +14,7 @@ from random import shuffle
 from scipy.spatial.distance import pdist
 import scipy.stats as sps
 from scipy.stats import pearsonr
+from sklearn.metrics import r2_score
 import hashlib
 import fcntl
 from functools import partial
@@ -1270,6 +1271,151 @@ def evaluate_ckt(args, g):
     fom = cktgraph_to_fom(fname)
     os.remove(fname)
     return fom
+
+
+def main_sgp(args):
+    """
+    loads checkpoints and latent data for three encoders (GNN, TOKEN, TOKEN_GNN),
+    assigns args.datapkl path for each encoder to load data.pkl,
+    runs train_sgp three times per encoder, and prints mean and std for RMSE and R^2.
+    """
+
+    ckpt_paths = {
+        "GNN": "/home/ofoo/induction/cache/models/CKT/GNN/epoch-33_loss-3.8809502124786377.pth",
+        "TOKEN": "/home/ofoo/induction/cache/models/CKT/TOKEN/epoch-35_loss-3.8443312644958496.pth",
+        "TOKEN_GNN": "/home/ofoo/induction/cache/models/BN/TOKEN_GNN/epoch=0_loss=6.534396348571778.pth"
+    }
+
+    latent_paths = {
+        "GNN": {
+            "train_latent": "/home/ofoo/induction/cache/models/CKT/GNN/train_latent_33.npy",
+            "test_latent": "/home/ofoo/induction/cache/models/CKT/GNN/test_latent_33.npy"
+        },
+        "TOKEN": {
+            "train_latent": "/home/ofoo/induction/cache/models/CKT/TOKEN/train_latent_35.npy",
+            "test_latent": "/home/ofoo/induction/cache/models/CKT/TOKEN/test_latent_35.npy"
+        },
+        "TOKEN_GNN": {
+            "train_latent": "/home/ofoo/induction/cache/models/CKT/TOKEN_GNN/train_latent_8.npy",
+            "test_latent": "/home/ofoo/induction/cache/models/CKT/TOKEN_GNN/test_latent_8.npy"
+        }
+    }
+
+    datapkl_paths = {
+        "GNN": "/home/ofoo/induction/cache/models/CKT/GNN/data.pkl",         
+        "TOKEN": "/home/ofoo/induction/cache/models/CKT/TOKEN/data.pkl",     
+        "TOKEN_GNN": "/home/ofoo/induction/cache/models/CKT/TOKEN_GNN/data.pkl"  
+    }
+
+    results = {}
+    encoder_name = args.encoder
+    ckpt_path = ckpt_paths[encoder_name]
+   
+    # for encoder_name, ckpt_path in ckpt_paths.items():
+    print(f"ENCODER: {encoder_name}")
+    # use unique data.pkl folder for current encoder
+    args.datapkl = datapkl_paths[encoder_name]
+    print(args.datapkl)
+
+    cache_dir = f'cache/api_{args.dataset}_ednce/'
+    folder = hash_args(args)
+    print(f"folder: {folder}")
+    setattr(args, "folder", folder)
+    #os.makedirs(f'ckpts/api_{args.dataset}_ednce/{folder}', exist_ok=True)
+    #os.makedirs(f'cache/api_{args.dataset}_ednce/{folder}', exist_ok=True)
+    version = get_next_version(cache_dir) - 1
+    logger.info(f"loading version {version}")
+    grammar, anno, g = pickle.load(open(os.path.join(cache_dir, f'{version}.pkl'), 'rb'))
+    if args.dataset == "ckt":
+        num_graphs = 10000
+        orig = load_ckt(args, load_all=True)
+    elif args.dataset == "bn":
+        num_graphs = 200000
+        orig = load_bn(args)
+    elif args.dataset == "enas":
+        num_graphs = 19020
+        orig = load_enas(args)
+    else:
+        raise NotImplementedError
+    train_data, test_data, token2rule = load_data(args, anno, grammar, orig, cache_dir, num_graphs)
+    print(f"Processing encoder: {encoder_name}")
+
+    #args.encoder = encoder_name
+    model = TransformerVAE(args.encoder, args.encoder_layers, args.decoder_layers, VOCAB_SIZE, vocabulary_init, vocabulary_terminate, args.embed_dim, args.latent_dim, MAX_SEQ_LEN, args.cuda)    
+    model = model.to(args.cuda)
+    
+    print("loading model")
+    #checkpoint = torch.load(ckpt_path, map_location=args.cuda)
+    model.load_state_dict(torch.load(ckpt_path, map_location=args.cuda))
+    
+
+    X_train = np.load(latent_paths[encoder_name]["train_latent"])
+    X_test = np.load(latent_paths[encoder_name]["test_latent"])
+
+    indices = list(range(num_graphs))
+    train_indices = indices[:int(num_graphs * 0.9)]
+    test_indices = indices[int(num_graphs * 0.9):]
+    y = load_y(orig, num_graphs, target={"ckt": ["gain", "bw", "pm", "fom"],
+                                            "bn": ["bic"],
+                                            "enas": ["acc"]}[args.dataset])
+    y = np.array(y)
+    train_y = y[train_indices]
+    mean_train_y = np.mean(train_y, axis=0)
+    std_train_y = np.std(train_y, axis=0)
+    test_y = y[test_indices]
+    train_y = (train_y - mean_train_y) / std_train_y
+    test_y = (test_y - mean_train_y) / std_train_y
+
+    if args.dataset == "bn":
+        X_train, unique_idxs = np.unique(X_train, axis=0, return_index=True)
+        y_train = train_y[unique_idxs]
+        random_shuffle = np.random.permutation(range(len(X_train)))
+        keep = 5000
+        X_train = X_train[random_shuffle[:keep]]
+        y_train = y_train[random_shuffle[:keep]]
+    else:
+        y_train = train_y
+        keep = y_train.shape[0]
+
+    X_train_mean = X_train.mean(axis=0)
+    X_train_std = X_train.std(axis=0)
+    X_train = (X_train - X_train_mean) / X_train_std
+    X_test = (X_test - X_train_mean) / X_train_std
+    logger.info("Average pairwise distance (train) = {}".format(np.mean(pdist(X_train))))
+    logger.info("Average pairwise distance (test) = {}".format(np.mean(pdist(X_test))))
+    y_train, y_test = y_train[:, -1:], test_y[:, -1:]
+    print(X_train.shape)
+
+
+    # run train_sgp three times, track RMSE and R^2
+    rmse_list = []
+    r2_list = []
+
+    for run_i in range(3):
+        logger.info(f"Run {run_i + 1} for {encoder_name}")
+        save_file = f"{encoder_name}_sgp_run{run_i + 1}.txt"
+        sgp_model = train_sgp(args, save_file, X_train, X_test, y_train, y_test)
+        print("train sgp completed")
+        pred, _ = sgp_model.predict(X_test, 0 * X_test)
+        rmse = np.sqrt(np.mean((pred - y_test)**2))
+        r2 = r2_score(y_test, pred)
+        rmse_list.append(rmse)
+        r2_list.append(r2)
+
+    rmse_mean, rmse_std = np.mean(rmse_list), np.std(rmse_list)
+    r2_mean, r2_std = np.mean(r2_list), np.std(r2_list)
+    results[encoder_name] = {
+        "rmse_mean": rmse_mean,
+        "rmse_std": rmse_std,
+        "r2_mean": r2_mean,
+        "r2_std": r2_std
+    }
+
+    for enc, vals in results.items():
+        print(f"\nEncoder: {enc}")
+        print(f"RMSE: {vals['rmse_mean']:.4f} ± {vals['rmse_std']:.4f}")
+        print(f"R^2: {vals['r2_mean']:.4f} ± {vals['r2_std']:.4f}")
+    logger.info("Done with main_sgp.")
 
 
 def main(args):
