@@ -342,13 +342,14 @@ def standardize_ckt(g):
 
 
 def standardize_bn(g):
+    g = deepcopy(g)
+    label_lookup = {'input': 0, 'output': 1, 'A': 2, 'S': 3, 'T': 4, 'L': 5, 'B': 6, 'E': 7, 'X': 8, 'D': 9}    
     for n in g:
-        g.nodes[n]['type'] = list(LOOKUP).index(g.nodes[n]['type'])
+        g.nodes[n]['type'] = label_lookup[INVERSE_LOOKUP[g.nodes[n]['label']]]
     s = get_node_by_label(g, 0, attr='type')
     t = get_node_by_label(g, 1, attr='type')
-    path = [s] + list([n for n in g if n not in [s,t]]) + [t]
+    path = [s] + [n for n in g if n not in [s, t]] + [t]
     g = nx.relabel_nodes(g, dict(zip(path, range(len(g)))))
-    g = copy_graph(nx.DiGraph(g), list(range(len(g))))
     return g
 
 

@@ -98,14 +98,14 @@ class EDNCEGrammar(NLCGrammar):
         return cur
 
     
-    def derive(self, seq, token2rule=None, return_applied=False, visualize=False):
+    def derive(self, seq, token2rule=None, return_applied=False, visualize=False, **vis_kwargs):
         if visualize:                        
             fig, axes = plt.subplots(len(seq), figsize=(5, 5*(len(seq))))
             if len(seq) == 1:
                 axes = [axes]
             for idx, j in enumerate(map(int, seq)):
                 r = self.rules[j]
-                draw_graph(r.subgraph, ax=axes[idx], scale=5, label_feats=True)
+                draw_graph(r.subgraph, ax=axes[idx], scale=5, label_feats=True, **vis_kwargs)
             return fig           
         if return_applied:
             all_applied = []
