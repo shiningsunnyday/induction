@@ -157,9 +157,6 @@ def enumerate_rules_mp(graphs, grammar):
 def worker_single(stack, grammar, graph, init_hash, mem, lock):
     while True:
         with lock:
-            if '' in mem:
-                print("DONE")
-                return
             if len(stack) == 0:            
                 if init_hash in mem and mem[init_hash] != 0:
                     print("process done")
@@ -180,8 +177,6 @@ def worker_single(stack, grammar, graph, init_hash, mem, lock):
             if nx.is_isomorphic(cur, graph, node_match=node_match):
                 with lock: 
                     mem[val] = [[]]
-                    print("DONE")
-                    mem[''] = True
             else:
                 with lock:
                     mem[val] = []
@@ -208,19 +203,18 @@ def worker_single(stack, grammar, graph, init_hash, mem, lock):
                             if done:
                                 stack.append((cur, val))
                                 done = False
-                            stack.append((c, hash_val))
-                            mem[hash_val] = 0
+                            stack.append((c, hash_val))                            
                         else:
                             if mem[hash_val] == 0:
-                                if done:
-                                    stack.append((cur, val)) # only do once
+                                if done:                                
+                                    stack.append((cur, val))                            
                                     done = False
                             else:
                                 for seq in mem[hash_val]: # res
                                     res.append([i]+deepcopy(seq))
         with lock:
             if done:        
-                mem[val] = res
+                mem[val] = res    
 
 
 def enumerate_rules_single_mp(graph, grammar):
@@ -1011,13 +1005,12 @@ def learn_grammar(g, args):
         #     breakpoint()
         passed = True
     else:
-        model.generate(grammar) # verify logic is correct    
-    breakpoint()    
+        model.generate(grammar) # verify logic is correct        
     if args.ambiguous_file:
         if passed: # ONLY if sanity check passes
             graphs = [copy_graph(orig, orig.comps[get_prefix(m.seq[0])]) for m in model]
         else:
             graphs = derive_mp(model, grammar) # derive whatever is yielded
         resolve_ambiguous(graphs, model, grammar, args.ambiguous_file)
-    ## Debug
+    ## Debug    
     return grammar, model
