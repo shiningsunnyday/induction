@@ -154,8 +154,10 @@ def enumerate_rules_mp(graphs, grammar):
     return found
 
 
-def worker_single(stack, grammar, graph, init_hash, mem, lock):
+def worker_single(stack, grammar, graph, init_hash, mem, lock, st, timeout):
     while True:
+        if time.time()-st > timeout:
+            break
         with lock:
             if len(stack) == 0:            
                 if init_hash in mem and mem[init_hash] != 0:
@@ -504,14 +506,20 @@ def try_disambiguate(grammar, derivs):
     elim_rule_sets = set()
     for key in counts:
         if len(counts[key]) == 1:
-            keep_deriv = counts[key][0]
+            keep_deriv = counts[key][0] # try to keep this
             elim_sets = set()
+            can_elim = True
             for deriv in derivs:
                 if deriv == keep_deriv:
                     continue
-                elim_sets.add(set_to_key(set(deriv)-set(keep_deriv)))
-            elim_rule_set = hitting(elim_sets)
-            elim_rule_sets.add(set_to_key(elim_rule_set))
+                rules_to_elim = set_to_key(set(deriv)-set(keep_deriv))
+                if len(rules_to_elim) == 0: # cannot keep this
+                    can_elim = False
+                    break
+                elim_sets.add(rules_to_elim)
+            if can_elim:
+                elim_rule_set = hitting(elim_sets)
+                elim_rule_sets.add(set_to_key(elim_rule_set))
     # elim rule set
     min_num_remove = len(grammar.rules)
     min_remove = None
@@ -524,11 +532,11 @@ def try_disambiguate(grammar, derivs):
             min_num_remove = num_remove
             min_remove = rule_set
     if min_remove is None:
-        min_remove = hitting(counts.keys())            
+        min_remove = hitting(counts.keys()) # nothing survives, just remove a minimal set of rules
     return min_remove
 
 
-def resolve_ambiguous(graphs, model, grammar, save_path):
+def resolve_ambiguous(graphs, model, grammar, save_path, timeout=1000):
     logger = logging.getLogger('global_logger')    
 
     # if NUM_PROCS > 1:
@@ -541,29 +549,45 @@ def resolve_ambiguous(graphs, model, grammar, save_path):
     cache_path = save_path.replace(".json", "_derivs.json")
     if os.path.exists(cache_path):
         all_derivs = json.load(open(cache_path))
+        for k in list(all_derivs): # convert all to int keys
+            assert isinstance(k, str) and k.isdigit()
+            all_derivs[int(k)] = all_derivs[k]
+            all_derivs.pop(k)
     for (index, graph) in sorted_graphs:
-        manager = mp.Manager()
-        stack = manager.list()
-        mem = manager.dict()
-        lock = manager.Lock()        
         if index in all_derivs:
             logger.info(f"{index} enumerated")
             derivs = all_derivs[index]
         else:
+            continue
+            manager = mp.Manager()
+            stack = manager.list()
+            mem = manager.dict()
+            lock = manager.Lock()                    
             g = nx.DiGraph()
             g.add_node('0', label='black')    
             init_hash = wl_hash(g)
             stack.append((deepcopy(g), init_hash))
             processes = []
             for _ in range(NUM_PROCS):
-                p = mp.Process(target=worker_single, args=(stack, grammar, graph, init_hash, mem, lock))
+                st = time.time()
+                p = mp.Process(target=worker_single, args=(stack, 
+                                                           grammar, 
+                                                           graph, 
+                                                           init_hash, 
+                                                           mem, 
+                                                           lock,
+                                                           st,
+                                                           timeout))
                 p.start()
                 processes.append(p)
             for p in processes:
                 p.join()    
-            derivs = mem[init_hash]
-            all_derivs[index] = derivs
-            json.dump(all_derivs, open(cache_path, 'w+'))
+            if init_hash in mem:
+                derivs = mem[init_hash]
+                all_derivs[index] = derivs
+                json.dump(all_derivs, open(cache_path, 'w+'))
+            else:
+                continue
         rule_set = try_disambiguate(grammar, derivs)
         n = len(list(filter(None, grammar.rules)))
         logger.info(f"removing rules {rule_set}: {n}->{n-len(rule_set)}")
@@ -573,6 +597,8 @@ def resolve_ambiguous(graphs, model, grammar, save_path):
     e = set(best_e)
     best_counter = []
     for i in range(len(graphs)):
+        if i not in all_derivs:
+            continue
         derivs = all_derivs[i]
         inters = [bool(set(derivs[j]) & e) for j in range(len(derivs))]
         if np.all(inters): # all derivs for this graph requires a rule from e
@@ -939,7 +965,8 @@ def learn_grammar(g, args):
         "global_logger",
         f"data/{METHOD}_{DATASET}_{GRAMMAR}{SUFFIX}.log",
     )
-    cache_iter, cache_path = setup()
+    suffix = ('_' + Path(args.ambiguous_file).stem) if args.ambiguous_file is not None and os.path.exists(args.ambiguous_file) else  ''
+    cache_iter, cache_path = setup(suffix)
     g, grammar, anno, iter = init_grammar(g, cache_iter, cache_path, EDNCEGrammar)
     path = os.path.join(IMG_DIR, f"{METHOD}_{iter}.png")
     logger.info(f"graph at iter {iter} has {len(g)} nodes")
@@ -973,15 +1000,13 @@ def learn_grammar(g, args):
         path = os.path.join(IMG_DIR, f"{METHOD}_{iter}.png")
         logger.info(f"graph at iter {iter} has {len(g)} nodes")        
         if VISUALIZE:
-            draw_graph(g, path)
-        suffix = ('_' + Path(args.ambiguous_file).stem) if args.ambiguous_file is not None and os.path.exists(args.ambiguous_file) else  ''
+            draw_graph(g, path)        
         cache_path = os.path.join(CACHE_DIR, f"{iter}{suffix}.pkl")
         pickle.dump((grammar, anno, g), open(cache_path, "wb+"))
 
     num_anno = len(anno)
     grammar, model, anno, g = terminate(g, grammar, anno, iter)
-    logger.info(f"anno size: {num_anno}->{len(anno)}")
-    suffix = ('_' + Path(args.ambiguous_file).stem) if args.ambiguous_file is not None and os.path.exists(args.ambiguous_file) else  ''
+    logger.info(f"anno size: {num_anno}->{len(anno)}")    
     cache_path = os.path.join(CACHE_DIR, f"{iter}{suffix}.pkl")
     pickle.dump((grammar, anno, g), open(cache_path, "wb+"))        
     if isinstance(model, list):

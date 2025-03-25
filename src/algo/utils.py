@@ -127,17 +127,21 @@ def run_subdue(tmp_path, subdue_call="../subdue-5.2.2/bin/subdue"):
     return out
 
 
-def setup():
+def setup(suffix):
     logger = logging.getLogger('global_logger')
     os.makedirs(IMG_DIR, exist_ok=True)
     os.makedirs(CACHE_DIR, exist_ok=True)
     cache_path = None
     cache_iter = 0
     for f in os.listdir(CACHE_DIR):
-        if not f.split(".pkl")[0].isdigit():
+        stem = Path(f).stem
+        if suffix not in stem:
             continue
-        if int(f.split(".pkl")[0]) > cache_iter:
-            cache_iter = int(f.split(".pkl")[0])
+        suffix_stem = stem.split(suffix)[0]
+        if not suffix_stem.isdigit():
+            continue
+        if int(suffix_stem) > cache_iter:
+            cache_iter = int(suffix_stem)
             cache_path = os.path.join(CACHE_DIR, f"{cache_iter}.pkl")
     if cache_iter == 0:
         logger.info(f"init grammar")

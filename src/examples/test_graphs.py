@@ -423,13 +423,14 @@ def load_ckt(args, load_all=False):
     # print(best_i)
     gs = []
     gs_dict = {}
-    if ambiguous_file is None or not os.path.exists(ambiguous_file):
+    normal = ambiguous_file is None or not os.path.exists(ambiguous_file)
+    if normal:
         graph_no_iter = range(num_graphs)
     else:
         assert GRAMMAR == "ednce"
         graph_no_iter = json.load(open(ambiguous_file))['redo']
     i = 0
-    for i in tqdm(graph_no_iter, desc="loading graphs"):
+    for idx, i in tqdm(enumerate(graph_no_iter), desc="loading graphs"):
         expr = i if load_all else 2*i
         fpath = os.path.join(data_dir, f"{expr}.json")
         data = json.load(open(fpath))
@@ -439,6 +440,11 @@ def load_ckt(args, load_all=False):
             g.nodes[n]["label"] = LOOKUP[g.nodes[n]["type"]]
         for e in g.edges:
             g.edges[e]["label"] = "black"
+        # if graph_no_iter, reindex i
+        if normal:
+            assert idx == i        
+        else:
+            i = idx
         for attr in g.graph:
             if attr == "index":
                 continue

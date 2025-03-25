@@ -601,11 +601,11 @@ def bo(args, orig, grammar, model, token2rule, y_train, y_test, target_mean, tar
         evaluate_fn = lambda g: eva.eval(decode_igraph_to_BN_adj(nx_to_igraph(g)))
     else:
         raise NotImplementedError
-    for _ in range(10):
-        for i in range(y_train.shape[1]): # evaluate latent space
-            save_file = os.path.join(save_dir, f'Prop_{i}_Test_RMSE_ll.txt')
-            sgp = train_sgp(args, save_file, X_train, X_test, y_train[:, i:i+1], y_test[:, i:i+1])
-    breakpoint()
+    # for _ in range(10):
+    #     for i in range(y_train.shape[1]): # evaluate latent space
+    #         save_file = os.path.join(save_dir, f'Prop_{i}_Test_RMSE_ll.txt')
+    #         sgp = train_sgp(args, save_file, X_train, X_test, y_train[:, i:i+1], y_test[:, i:i+1])
+    # breakpoint()
     y_train, y_test = y_train[:, -1:], y_test[:, -1:]
     save_file = os.path.join(save_dir, f'Test_RMSE_ll.txt')
     while iteration < args.BO_rounds:
@@ -1444,7 +1444,7 @@ def main(args):
         orig = load_enas(args)
     else:
         raise NotImplementedError            
-    breakpoint()
+
     train_data, test_data, token2rule = load_data(args, anno, grammar, orig, cache_dir, num_graphs)
     if args.datapkl:
         print(f'The folder being written to is: {args.datapkl}')

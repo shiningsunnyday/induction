@@ -195,7 +195,6 @@ def init_grammar(g, cache_iter, cache_path, grammar_class):
         anno = {}  # annotation for model
         iter = 0
     else:
-        breakpoint()
         grammar, anno, g = pickle.load(open(cache_path, "rb"))
         # TODO: Remove this
         for i, r in enumerate(grammar.rules):
