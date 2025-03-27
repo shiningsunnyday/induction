@@ -858,7 +858,8 @@ class TransformerVAE(nn.Module):
                     new_type = torch.multinomial(type_probs, 1)
                     type_score = self._one_hot(new_type.reshape(-1).tolist(), self.nvt).to(new_type.device)
                     # ns_row = (logits[i] > 0.5).int()
-                    edge_score = torch.rand((1, len(edge_probs)), device=edge_probs.device) < edge_probs
+                    # edge_score = torch.rand((1, len(edge_probs)), device=edge_probs.device) < edge_probs
+                    edge_score = (edge_probs > 0.5).unsqueeze(0)
                     ns_row = torch.cat((type_score, edge_score), dim=-1)
                     generated_sequences[i].append(ns_row.view(-1,).cpu())
                     next_token_embedding = ns_row.float()

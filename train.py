@@ -2,6 +2,7 @@ import os
 # os.environ["CUDA_VISIBLE_DEVICES"] = ""
 import sys
 sys.path.append('dagnn/dvae/bayesian_optimization')
+import tempfile
 import torch
 import torch.nn as nn
 import torch.optim as optim
@@ -19,6 +20,7 @@ import hashlib
 import fcntl
 from functools import partial
 from collections import deque
+from concurrent.futures import ProcessPoolExecutor, as_completed
 # import gpflow
 # from gpflow.models import SVGP
 # from gpflow.optimizers import NaturalGradient
@@ -267,7 +269,6 @@ def vae_loss(args, recon_logits, mask, x, mu, logvar):
         binary_y = x_flat[:, graph_args.num_vertex_type:]
         binary_y_flat = binary_y.reshape(-1,).float()
         recon_loss = F.binary_cross_entropy(binary_logits.reshape(-1,), binary_y_flat, reduction="sum")
-        assert (one_hot_y_indices > 0).all()
         recon_loss += F.cross_entropy(one_hot_logits, one_hot_y_indices, reduction="sum")        
     else:
         x_flat = x.view(-1)
@@ -331,6 +332,40 @@ def collate_batch_gnn_ns(batch):
         attention_mask[i, :seq.shape[0], :seq.shape[1]] = 1
         graphs.append(graph)         
     return padded_batch, attention_mask, seq_len_list, graphs, idxes     
+
+
+def process_ns(orig, arg_list):
+    res = []
+    for pre in arg_list:
+        g_orig = nx.induced_subgraph(orig, orig.comps[pre])
+        g_orig = g_orig.copy()
+        node_str = stringify(g_orig)
+        if args.order == "bfs":
+            node_str = torch.tensor([node_str])
+            adj, feat = G_to_adjfeat(node_str, graph_args.max_n, graph_args.num_vertex_type)
+            node_str = adjfeat_to_G(*bfs(adj, feat))  # 1 * n_vertex * (n_types + n_vertex)
+            # if g_orig.shape[1] < max_n:
+            #     padding = torch.zeros(1, max_n-g.shape[1], g.shape[2]).to(get_device())
+            #     padding[0, :, START_TYPE] = 1  # treat padding nodes as start_type
+            #     g = torch.cat([g, padding], 1)  # 1 * max_n * (n_types + n_vertex)
+            # if g.shape[2] < xs:
+            #     padding = torch.zeros(1, g.shape[1], xs-g.shape[2]).to(get_device())
+            #     g = torch.cat([g, padding], 2)  # pad zeros to indicate no connections to padding 
+            #                                     # nodes, g: 1 * max_n * xs
+            node_str = node_str[0]
+        elif args.order == "random":
+            node_str = torch.tensor([node_str])
+            adj, feat = G_to_adjfeat(node_str, graph_args.max_n, graph_args.num_vertex_type)
+            order = np.random.permutation(len(adj))
+            adj, feat = adj[order, :][:, order], feat[order]
+            node_str = adjfeat_to_G(adj, feat)  # 1 * n_vertex * (n_types + n_vertex)             
+            node_str = node_str[0]
+        res.append((node_str, g_orig))
+    with tempfile.NamedTemporaryFile(delete=False) as tmp_file:
+        tmp_path = tmp_file.name+'.pkl'
+        pickle.dump(res, open(tmp_path, 'wb+'))
+    print("done")
+    return tmp_path
 
 
 # Sampling new sequences
@@ -821,7 +856,10 @@ def ns_sample_sequences(args, model, max_seq_len=10, unique=False, visualize=Fal
                 # generated_dags, generated_sequences = decode_from_latent_space(z, grammar, model, token2rule, max_seq_len=max_seq_len)
                 for seq in generated_ns:      
                     adj = torch.stack(seq, dim=0).int()
-                    g = construct_graph(adj)
+                    if args.order == "default":
+                        g = construct_graph(adj)
+                    else:
+                        g = construct_graph_full(adj)
                     G.append(g)
                     pbar.update(len(G)-pbar.n)
     logger.info("===SAMPLED GRAPHS===")
@@ -981,9 +1019,30 @@ def construct_graph(adj):
         g.nodes[n]['type'] = list(LOOKUP)[g.nodes[n]['type']]
         g.nodes[n]['label'] = LOOKUP[g.nodes[n]['type']]
     return g
+
+def construct_graph_full(adj):
+    g = nx.DiGraph()
+    for vj in range(graph_args.max_n):
+        if vj == graph_args.max_n - 1:
+            new_type = graph_args.END_TYPE
+        else:
+            new_type = torch.argmax(adj[vj], 0).item()
+        g.add_node(vj, type=new_type)
+
+    for vj in range(graph_args.max_n):
+        for ek in range(graph_args.max_n):
+            ek_score = adj[vj][graph_args.num_vertex_type+ek].item()
+            if ek_score > 0.5:
+                g.add_edge(ek, vj, label='black')
+    
+    for n in g:
+        g.nodes[n]['type'] = list(LOOKUP)[g.nodes[n]['type']]
+        g.nodes[n]['label'] = LOOKUP[g.nodes[n]['type']]
+    return g
 ### end copying from D-VAE/models.py
 
 def load_data(args, anno, grammar, orig, cache_dir, num_graphs, graph_args):
+    globals()['graph_args'] = graph_args
     loaded = False
     if args.datapkl:
         save_path = os.path.join(cache_dir, args.datapkl, 'data.pkl')
@@ -1058,34 +1117,36 @@ def load_data(args, anno, grammar, orig, cache_dir, num_graphs, graph_args):
                 # with mp.Pool(20) as p:
                 #     data = p.starmap(process_single, tqdm(pargs, "processing data mp"))
             pickle.dump((data, rule2token), open(save_path, 'wb+'))
-        else:
-            assert args.encoder == "GNN"
-            data = []
-            for pre in tqdm(range(num_graphs), "gathering node strings"):
-                g_orig = nx.induced_subgraph(orig, orig.comps[pre])
-                g_orig = g_orig.copy()
-                node_str = stringify(g_orig)
-                if args.order == "bfs":
-                    node_str = torch.tensor([node_str])
-                    adj, feat = G_to_adjfeat(node_str, graph_args.max_n, graph_args.num_vertex_type)
-                    node_str = adjfeat_to_G(*bfs(adj, feat))  # 1 * n_vertex * (n_types + n_vertex)
-                    # if g_orig.shape[1] < max_n:
-                    #     padding = torch.zeros(1, max_n-g.shape[1], g.shape[2]).to(get_device())
-                    #     padding[0, :, START_TYPE] = 1  # treat padding nodes as start_type
-                    #     g = torch.cat([g, padding], 1)  # 1 * max_n * (n_types + n_vertex)
-                    # if g.shape[2] < xs:
-                    #     padding = torch.zeros(1, g.shape[1], xs-g.shape[2]).to(get_device())
-                    #     g = torch.cat([g, padding], 2)  # pad zeros to indicate no connections to padding 
-                    #                                     # nodes, g: 1 * max_n * xs
-                    node_str = node_str[0]
-                elif args.order == "random":
-                    node_str = torch.tensor([node_str])
-                    adj, feat = G_to_adjfeat(node_str, graph_args.max_n, graph_args.num_vertex_type)
-                    order = np.random.permutation(len(adj))
-                    adj, feat = adj[order, :][:, order], feat[order]
-                    node_str = adjfeat_to_G(adj, feat)  # 1 * n_vertex * (n_types + n_vertex)             
-                    node_str = node_str[0]
-                data.append((node_str, g_orig))
+        else:            
+            assert args.encoder == "GNN"            
+            # pargs = []
+            # for pre in tqdm(range(num_graphs), "preparing node strings"):
+            #     parg = nx.induced_subgraph(orig, orig.comps[pre])
+            #     pargs.append(parg)
+            with mp.Pool(100) as p:
+                batch_size = 1000
+                num_batches = (num_graphs + batch_size - 1) // batch_size
+                futures = []
+                # Prepare and submit each batch asynchronously.
+                for i in tqdm(range(num_batches), desc="prepare args"):
+                    # Compute indices for this batch.
+                    start = batch_size * i
+                    end = min(batch_size * (i + 1), num_graphs)
+                    indices = range(start, end)
+                    # Sum over the comps for this batch and create the induced subgraph.
+                    batch_nodes = sum([orig.comps[j] for j in indices], [])
+                    batch_g = nx.induced_subgraph(orig, batch_nodes).copy()
+                    # If your worker needs the comps, attach them (or pass separately).
+                    batch_g.comps = orig.comps                    
+                    # Submit the batch to process_ns asynchronously.
+                    futures.append(p.apply_async(process_ns, args=(batch_g, indices)))                
+                # Collect results as soon as they are ready.
+                data = [None for _ in range(num_graphs)]
+                for future in tqdm(futures, desc="gathering node string batches"):
+                    tmp_path = future.get()
+                    for (node_str, g) in pickle.load(open(tmp_path, 'rb')):
+                        data[get_prefix(list(g)[0])] = (node_str, g)
+                    os.remove(tmp_path)
             pickle.dump(data, open(save_path, 'wb+'))
     if args.repr == "digged":
         relabel = dict(zip(list(sorted(rule2token)), range(len(rule2token))))    
@@ -1112,8 +1173,7 @@ def load_data(args, anno, grammar, orig, cache_dir, num_graphs, graph_args):
         globals()['VOCAB_SIZE'] = len(rule2token)
     else:
         globals()['MAX_SEQ_LEN'] = max([len(seq) for seq, _ in data])
-        globals()['VOCAB_SIZE'] = max([len(seq[0]) for seq, _ in data])
-        globals()['graph_args'] = graph_args
+        globals()['VOCAB_SIZE'] = max([len(seq[0]) for seq, _ in data])        
     # split here
     indices = list(range(num_graphs))
     # random.Random(0).shuffle(indices)
@@ -1205,6 +1265,7 @@ def evaluate(orig, graphs):
             try:
                 valid.append(is_valid_ENAS(nx_to_igraph(standardize_enas(g))))
             except: # not valid
+                valid.append(False)
                 continue
         elif DATASET == "bn":
             valid.append(is_valid_BN(nx_to_igraph(standardize_bn(g))))
@@ -1530,7 +1591,7 @@ def main_sgp(args):
         orig = load_ckt(args, load_all=True)
     elif args.dataset == "bn":
         num_graphs = 200000
-        orig = load_bn(args)
+        orig = load_bn(args)        
     elif args.dataset == "enas":
         num_graphs = 19020
         orig = load_enas(args)
@@ -1639,6 +1700,7 @@ def main(args):
     elif args.dataset == "bn":        
         num_graphs = 200000
         orig, graph_args = load_bn(args)
+        num_graphs = len(orig.comps)
     elif args.dataset == "enas":   
         num_graphs = 19020
         orig, graph_args = load_enas(args)
@@ -1670,7 +1732,7 @@ def main(args):
     if args.repr == "digged":
         graphs = interactive_sample_sequences(args, model, grammar, token2rule,max_seq_len=MAX_SEQ_LEN, unique=False, visualize=False)
     else:
-        graphs = ns_sample_sequences(args, model, max_seq_len=MAX_SEQ_LEN, unique=False, visualize=False)
+        graphs = ns_sample_sequences(args, model, max_seq_len=MAX_SEQ_LEN, unique=False, visualize=True)
     metrics = evaluate(orig, graphs)
     print(metrics)
 
