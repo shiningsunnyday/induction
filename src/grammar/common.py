@@ -15,6 +15,8 @@ import json
 
 def get_parser():
     parser = ArgumentParser()
+    # folder params
+    parser.add_argument("--cache_root", help="if given, save/load all cached data from here")
     # global args
     parser.add_argument("--visualize", dest="global_visualize", action='store_true')
     parser.add_argument("--cache", dest="global_cache", action='store_true')    
@@ -38,7 +40,7 @@ def get_parser():
     parser.add_argument(
         "--num-data-samples", type=int
     )
-    parser.add_argument("--ambiguous-file", help='if given and exists, load data from this file to learn grammar; if given and not exist, save ambiguous data to this file after learn grammar')
+    parser.add_argument("--ambiguous-file", help='if given and exists, load data from this file to learn grammar and save any ambiguity to the next version; if given and not exist, save ambiguous data to this file after learn grammar')
     # bo args
     parser.add_argument("--checkpoint", help="which ckpt to load", type=int)                     
     return parser    

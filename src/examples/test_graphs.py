@@ -353,7 +353,7 @@ def load_enas(args):
         gs.append(g)
     whole_g = union(gs, gs_dict)
     whole_g = MyGraph(whole_g)
-    return whole_g
+    return whole_g, graph_args
 
 
 def load_bn(args):
@@ -376,7 +376,7 @@ def load_bn(args):
         gs.append(g)
     whole_g = union(gs, gs_dict)    
     whole_g = MyGraph(whole_g)
-    return whole_g   
+    return whole_g, graph_args
 
 
 def load_ast(args):    

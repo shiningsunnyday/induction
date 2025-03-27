@@ -158,22 +158,25 @@ def worker_single(stack, grammar, graph, init_hash, mem, lock, st, timeout):
     while True:
         if time.time()-st > timeout:
             break
+        empty = False
         with lock:
             if len(stack) == 0:            
                 if init_hash in mem and mem[init_hash] != 0:
                     print("process done")
                     break
                 else:
-                    time.sleep(0.1)
-                    continue
+                    empty = True
             else:
                 print(len(stack))
                 cur, val = stack.pop(-1)
-            if val in mem:
-                if mem[val] != 0:
-                    continue
-            else:
-                mem[val] = 0
+                if val in mem:
+                    if mem[val] != 0:
+                        continue
+                else:
+                    mem[val] = 0
+        if empty: # wait a bit
+            time.sleep(0.1)
+            continue
         nts = grammar.search_nts(cur, NONTERMS)
         if len(nts) == 0:
             if nx.is_isomorphic(cur, graph, node_match=node_match):
@@ -546,6 +549,10 @@ def resolve_ambiguous(graphs, model, grammar, save_path, timeout=1000):
     index_graphs = [(i, graph) for i, graph in enumerate(graphs)]
     sorted_graphs = sorted(index_graphs, key=lambda x:len(x[1]))
     all_derivs = {}
+    if os.path.exists(save_path):
+        path = Path(save_path)
+        version = next_n(re.match("ambig_(\d+)", path.stem).groups()[0])
+        save_path = os.path.join(path.parent, f"ambig_{version}.json")
     cache_path = save_path.replace(".json", "_derivs.json")
     if os.path.exists(cache_path):
         all_derivs = json.load(open(cache_path))
@@ -558,7 +565,6 @@ def resolve_ambiguous(graphs, model, grammar, save_path, timeout=1000):
             logger.info(f"{index} enumerated")
             derivs = all_derivs[index]
         else:
-            continue
             manager = mp.Manager()
             stack = manager.list()
             mem = manager.dict()
@@ -582,13 +588,16 @@ def resolve_ambiguous(graphs, model, grammar, save_path, timeout=1000):
                 processes.append(p)
             for p in processes:
                 p.join()    
-            if init_hash in mem:
+            if init_hash in mem and isinstance(mem[init_hash], list):
                 derivs = mem[init_hash]
                 all_derivs[index] = derivs
                 json.dump(all_derivs, open(cache_path, 'w+'))
             else:
-                continue
-        rule_set = try_disambiguate(grammar, derivs)
+                continue        
+        try:
+            rule_set = try_disambiguate(grammar, derivs)
+        except:
+            breakpoint()
         n = len(list(filter(None, grammar.rules)))
         logger.info(f"removing rules {rule_set}: {n}->{n-len(rule_set)}")
         for r in rule_set:        
@@ -966,7 +975,9 @@ def learn_grammar(g, args):
         f"data/{METHOD}_{DATASET}_{GRAMMAR}{SUFFIX}.log",
     )
     suffix = ('_' + Path(args.ambiguous_file).stem) if args.ambiguous_file is not None and os.path.exists(args.ambiguous_file) else  ''
-    cache_iter, cache_path = setup(suffix)
+    cache_iter, cache_path = setup(suffix, args.cache_root)
+    if args.cache_root:
+        cache_root = os.path.join(args.cache_root, CACHE_DIR)
     g, grammar, anno, iter = init_grammar(g, cache_iter, cache_path, EDNCEGrammar)
     path = os.path.join(IMG_DIR, f"{METHOD}_{iter}.png")
     logger.info(f"graph at iter {iter} has {len(g)} nodes")
@@ -1001,13 +1012,13 @@ def learn_grammar(g, args):
         logger.info(f"graph at iter {iter} has {len(g)} nodes")        
         if VISUALIZE:
             draw_graph(g, path)        
-        cache_path = os.path.join(CACHE_DIR, f"{iter}{suffix}.pkl")
+        cache_path = os.path.join(cache_root, f"{iter}{suffix}.pkl")
         pickle.dump((grammar, anno, g), open(cache_path, "wb+"))
 
     num_anno = len(anno)
     grammar, model, anno, g = terminate(g, grammar, anno, iter)
     logger.info(f"anno size: {num_anno}->{len(anno)}")    
-    cache_path = os.path.join(CACHE_DIR, f"{iter}{suffix}.pkl")
+    cache_path = os.path.join(cache_root, f"{iter}{suffix}.pkl")
     pickle.dump((grammar, anno, g), open(cache_path, "wb+"))        
     if isinstance(model, list):
         for j, m in enumerate(model):
@@ -1035,7 +1046,11 @@ def learn_grammar(g, args):
         if passed: # ONLY if sanity check passes
             graphs = [copy_graph(orig, orig.comps[get_prefix(m.seq[0])]) for m in model]
         else:
-            graphs = derive_mp(model, grammar) # derive whatever is yielded
-        resolve_ambiguous(graphs, model, grammar, args.ambiguous_file)
+            graphs = derive_mp(model, grammar) # derive whatever is yielded        
+        if args.cache_root:
+            save_path = os.path.join(args.cache_root, args.ambiguous_file)
+        else:
+            save_path = args.ambiguous_file
+        resolve_ambiguous(graphs, model, grammar, save_path)
     ## Debug    
     return grammar, model

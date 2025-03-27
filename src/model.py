@@ -10,6 +10,8 @@ from src.grammar.utils import get_next_version
 from src.grammar.ednce import *
 from src.grammar.common import *
 from src.examples.test_graphs import *
+from torch.nn import functional as F
+
 from src.draw.graph import draw_graph
 dagnn = importlib.import_module('dagnn.ogbg-code.model.dagnn')
 utils_dag = importlib.import_module('dagnn.src.utils_dag')
@@ -31,39 +33,56 @@ class TransformerEncoder(nn.Module):
 
 # Define VAE
 class TransformerVAE(nn.Module):
-    def __init__(self, encoder, encoder_layers, decoder_layers, vocab_size, vocabulary_init, vocabulary_terminate, embed_dim, latent_dim, seq_len, cuda):
+    def __init__(self, encoder, repr, encoder_layers, decoder_layers, output_dims, vocabulary_init, vocabulary_terminate, embed_dim, latent_dim, seq_len, cuda):
         super(TransformerVAE, self).__init__()        
         # self.token_gnn = TokenGNN(embed_dim)
         self.cuda = cuda
         self.encoder = encoder
+        self.repr = repr
         self.encoder_layers = encoder_layers
         self.decoder_layers = decoder_layers
         self.embed_dim = embed_dim
         self.latent_dim = latent_dim
         self.seq_len = seq_len
-        self.vocab_size = vocab_size
+        if repr == "digged":
+            self.vocab_size = output_dims
+        else:
+            self.vocab_size, graph_args = output_dims
+            self.nvt = graph_args.num_vertex_type
+            self.max_n = graph_args.max_n
+            
         if encoder == "TOKEN_GNN":
             self.gnn = DAGNN(None, None, len(TERMS+NONTERMS)+1, latent_dim, None, w_edge_attr=False, bidirectional=False, num_class=embed_dim)        
             self.transformer_encoder = TransformerEncoder(embed_dim, num_layers=encoder_layers)            
         elif encoder == "GNN":
-            self.token_embedding = nn.Embedding(vocab_size, embed_dim)
+            self.token_embedding = nn.Embedding(self.vocab_size, embed_dim)
             self.gnn = DAGNN(None, None, len(TERMS+NONTERMS)+1, latent_dim, None, w_edge_attr=False, bidirectional=False, num_class=embed_dim)
         else:
-            self.token_embedding = nn.Embedding(vocab_size, embed_dim)
+            self.token_embedding = nn.Embedding(self.vocab_size, embed_dim)
             self.transformer_encoder = TransformerEncoder(embed_dim, num_layers=encoder_layers)
         self.fc_mu = nn.Linear(embed_dim, latent_dim)
-        self.fc_logvar = nn.Linear(embed_dim, latent_dim)
-        
+        self.fc_logvar = nn.Linear(embed_dim, latent_dim)        
         self.fc_decode = nn.Linear(latent_dim, latent_dim)
         self.transformer_decoder = TransformerEncoder(embed_dim + latent_dim, num_layers=decoder_layers)
-        self.output_layer = nn.Linear(embed_dim + latent_dim, vocab_size)
         self.start_token_embedding = nn.Parameter(torch.randn(1, 1, embed_dim))
-        self.terminate_mask = torch.zeros((len(vocabulary_terminate),)).bool()
-        for i in range(len(vocabulary_terminate)):
-            self.terminate_mask[i] = vocabulary_terminate[i]
-        self.init_mask = torch.zeros((len(vocabulary_init),)).bool()
-        for i in range(len(vocabulary_init)):
-            self.init_mask[i] = vocabulary_init[i]
+        if repr == "digged":
+            self.output_layer = nn.Linear(embed_dim + latent_dim, self.vocab_size)
+        else:
+            self.fc_ns = nn.Linear(self.vocab_size, embed_dim)
+            self.add_vertex = nn.Linear(embed_dim + latent_dim, self.nvt)
+            if self.vocab_size == self.nvt+self.max_n:
+                out_dim = self.max_n 
+            else:
+                out_dim = self.max_n-1
+            self.add_edge = nn.Linear(embed_dim + latent_dim, out_dim)
+        self.sigmoid = nn.Sigmoid()
+        if repr == "digged":
+            self.terminate_mask = torch.zeros((len(vocabulary_terminate),)).bool()
+            for i in range(len(vocabulary_terminate)):
+                self.terminate_mask[i] = vocabulary_terminate[i]
+            self.init_mask = torch.zeros((len(vocabulary_init),)).bool()
+            for i in range(len(vocabulary_init)):
+                self.init_mask[i] = vocabulary_init[i]
 
 
     def visualize_tokens(self):
@@ -124,7 +143,10 @@ class TransformerVAE(nn.Module):
         token_embeddings = list(torch.unbind(self.start_token_embedding.expand(batch_size, -1, -1), dim=0))  # Shape (batch, 1, embed_dim)
         generated_logits = [[] for _ in range(batch_size)]  # Store logits for each sequence
 
-        max_seq_len = max(max_seq_len_list)
+        if self.repr == "ns":                    
+            max_seq_len_list = max_seq_len_list[:, 0]
+
+        max_seq_len = max(max_seq_len_list)            
 
         # Process each sequence individually, applying teacher forcing
         for t in range(max_seq_len):
@@ -162,9 +184,15 @@ class TransformerVAE(nn.Module):
                 mask=causal_mask
             ).permute(1, 0, 2)
             
-
             # Predict logits for the next token
-            logits = self.output_layer(output[:, -1, :])  # Only the last token's output
+            if self.repr == "ns":
+                n_types = self.add_vertex(output[:, -1, :])
+                # n_types = F.softmax(n_types, 1)
+                edge_logits = self.add_edge(output[:, -1, :])
+                edge_logits = self.sigmoid(edge_logits)
+                logits = torch.cat((n_types, edge_logits), dim=-1)
+            else:
+                logits = self.output_layer(output[:, -1, :])  # Only the last token's output
             for i, idx in enumerate(active_indices):
                 generated_logits[idx].append(logits[i].unsqueeze(0))  # Collect logits for each sequence
 
@@ -176,6 +204,8 @@ class TransformerVAE(nn.Module):
                     next_token_embedding = x[idx][t].unsqueeze(0)
                     # next_token_embedding = self.gnn(graph_data_vocabulary[next_token_id.item()]).unsqueeze(0)                    
                     # next_token_embedding = batch_g_list[idx][t]
+                    if self.repr == "ns":
+                        next_token_embedding = self.fc_ns(next_token_embedding)
                     # Append the embedded token to this sequence’s token_embeddings list
                     token_embeddings[idx] = torch.cat((token_embeddings[idx], next_token_embedding), dim=0)
 
@@ -187,10 +217,19 @@ class TransformerVAE(nn.Module):
             recon_logits = torch.cat((seq_logits_cat, padding), dim=0)
             recon_logits_list.append(recon_logits)
         padded_logits = torch.stack(recon_logits_list, dim=0)
-        mask = torch.zeros((padded_logits.shape[0], max_seq_len), dtype=torch.bool, device=padded_logits.device)
+        if self.repr == "ns":
+            mask = torch.zeros_like(padded_logits, dtype=torch.bool, device=padded_logits.device)
+        else:
+            mask = torch.zeros((padded_logits.shape[0], max_seq_len), dtype=torch.bool, device=padded_logits.device)
         for i, logits in enumerate(generated_logits):
             mask[i, :len(logits)] = 1  # Mark valid positions up to the length of each sequence
-        return padded_logits.view(-1, self.vocab_size), mask
+        if self.repr == "ns":
+            padded_logits = padded_logits.view(-1,)
+            mask = mask.view(-1,)
+        else:
+            padded_logits = padded_logits.view(-1, self.vocab_size)
+
+        return padded_logits, mask
     
 
     def _autoregressive_inference_active_indices(self, z_context, generated_sequences, token_embeddings, max_seq_len):
@@ -740,9 +779,102 @@ class TransformerVAE(nn.Module):
                     next_token_embedding = self.token_embedding(next_tokens[i]).unsqueeze(0)
                 token_embeddings[idx] = torch.cat((token_embeddings[idx], next_token_embedding), dim=0)
         return generated_sequences, generated_orders, generated_paths
+    
+    def _one_hot(self, idx, length):
+        if type(idx) in [list, range]:
+            if idx == []:
+                return None
+            idx = torch.LongTensor(idx).unsqueeze(0).t()
+            x = torch.zeros((len(idx), length)).scatter_(1, idx, 1)
+        else:
+            idx = torch.LongTensor([idx]).unsqueeze(0)
+            x = torch.zeros((1, length)).scatter_(1, idx, 1)
+        return x    
+
+
+    def ns_decode(self, z, max_seq_len=10):
+        # decode is greedy or softmax
+        batch_size = z.size(0)
+        z_context = self.fc_decode(z)     
+        # Initialize embeddings for each sequence using the start token
+        token_embeddings = list(torch.unbind(self.start_token_embedding.expand(batch_size, -1, -1), dim=0))  # Shape (batch, 1, embed_dim)
+        generated_logits = [[] for _ in range(batch_size)]  # Store logits for each sequence
+        # Process each sequence individually, applying teacher forcing
+        generated_sequences = [[] for _ in range(batch_size)]
+        for t in range(max_seq_len):
+            # Prepare a temporary batch of active sequences at the current timestep
+            temp_batch_embeddings = []
+            temp_z_context = []
+            active_indices = []
+
+            for idx in range(batch_size):
+                # Check if the current sequence needs more tokens (based on its max_seq_len)
+                if t < max_seq_len:
+                    # Get accumulated embeddings up to this step
+                    accumulated_embeddings = token_embeddings[idx]  # Concatenate embeddings so far
+                    temp_batch_embeddings.append(accumulated_embeddings)
+                    temp_z_context.append(z_context[idx].unsqueeze(0).expand(accumulated_embeddings.size(0), -1))
+                    active_indices.append(idx)
+
+            # If there are no active sequences, we’re done
+            if not active_indices:
+                break
+            
+            # Convert lists to tensors for batched transformer input
+            temp_batch_embeddings = torch.stack(temp_batch_embeddings)
+            temp_z_context = torch.stack(temp_z_context)
+
+            # Concatenate accumulated embeddings with z_context
+            transformer_input = torch.cat([temp_batch_embeddings, temp_z_context], dim=-1)
+
+            # Apply causal mask for autoregressive decoding on the current batch
+            seq_len = transformer_input.size(1)
+            causal_mask = torch.triu(torch.ones((seq_len, seq_len), dtype=torch.bool), diagonal=1).to(z.device)
+
+            output = self.transformer_decoder(
+                transformer_input.permute(1, 0, 2),  # Shape (seq_len, batch, embed_dim + latent_dim)
+                mask=causal_mask
+            ).permute(1, 0, 2)
+            
+            # Predict logits for the next token
+            if self.repr == "ns":
+                breakpoint()
+                n_types = self.add_vertex(output[:, -1, :])                
+                edge_logits = self.add_edge(output[:, -1, :])
+                edge_probs = self.sigmoid(edge_logits)
+                logits = torch.cat((n_types, edge_probs), dim=-1)
+            else:
+                logits = self.output_layer(output[:, -1, :])  # Only the last token's output
+            for i, idx in enumerate(active_indices):
+                generated_logits[idx].append(logits[i].unsqueeze(0))  # Collect logits for each sequence
+
+            # Use ground-truth tokens from x as the next input (teacher forcing)
+            for i, idx in enumerate(active_indices):
+                if t < max_seq_len:  # Ensure there are more ground-truth tokens to process
+                    # Get the ground-truth token from x and embed it using the GNN
+                    # .unsqueeze(0)  # Ground truth for next token                    
+                    type_probs = logits[i, :self.nvt]
+                    edge_probs = logits[i, self.nvt:]
+                    breakpoint()
+                    type_probs = F.softmax(type_probs)
+                    new_type = torch.multinomial(type_probs, 1)
+                    type_score = self._one_hot(new_type.reshape(-1).tolist(), self.nvt).to(new_type.device)
+                    # ns_row = (logits[i] > 0.5).int()
+                    edge_score = torch.rand((1, len(edge_probs)), device=edge_probs.device) < edge_probs
+                    ns_row = torch.cat((type_score, edge_score), dim=-1)
+                    generated_sequences[i].append(ns_row.view(-1,).cpu())
+                    next_token_embedding = ns_row.float()
+                    next_token_embedding = self.fc_ns(next_token_embedding)
+                    # Append the embedded token to this sequence’s token_embeddings list
+                    token_embeddings[idx] = torch.cat((token_embeddings[idx], next_token_embedding), dim=0)        
+        return generated_sequences
+
 
     def forward(self, x, attention_mask, seq_len_list, batch_g_list):
-        embedded_tokens = self.embed_tokens(x, batch_g_list)  # Embeds each token (graph) using GNN or learnable embedding        
+        if self.repr == "digged":
+            embedded_tokens = self.embed_tokens(x, batch_g_list)  # Embeds each token (graph) using GNN or learnable embedding   
+        else:
+            embedded_tokens = torch.tensor(x, dtype=torch.float32)
         if self.encoder == "GNN":
             mu, logvar = self.encode(batch_g_list, attention_mask)
         else:

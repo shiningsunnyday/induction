@@ -95,15 +95,19 @@ def run_subdue(tmp_path, subdue_call="../subdue-5.2.2/bin/subdue"):
     command = [
         subdue_call,
         "-out",
-        out_path,
-        "-minsize",
-        f"{MOTIF_MIN_SIZE}",
-        "-maxsize",
-        f"{MOTIF_MAX_SIZE}",
-        "-nsubs",
-        f"{NUM_MOTIFS}",
-        tmp_path,
+        out_path
     ]
+    # subdue motif params
+    if "MOTIF_MIN_SIZE" in globals():
+        command += ["-minsize", f"{MOTIF_MIN_SIZE}"]
+    if "MOTIF_MAX_SIZE" in globals():
+        command += ["-maxsize", f"{MOTIF_MAX_SIZE}"]
+    if "NUM_MOTIFS" in globals():
+        command += ["-nsubs", f"{NUM_MOTIFS}"]
+    if "MOTIF_NUM_BEAMS" in globals():
+        command += ["-beam", f"{MOTIF_NUM_BEAMS}"]
+    command += [tmp_path]
+    
     result = subprocess.run(command, capture_output=True, text=True)
     if is_directed == 'd':
         pat = r"((?:\s{4}v \w+ \S+\n)+(?:\s{4}d \w+ \w+ on\n)+)"
@@ -127,24 +131,33 @@ def run_subdue(tmp_path, subdue_call="../subdue-5.2.2/bin/subdue"):
     return out
 
 
-def setup(suffix):
+def setup(suffix, cache_root=None):
     logger = logging.getLogger('global_logger')
-    os.makedirs(IMG_DIR, exist_ok=True)
-    os.makedirs(CACHE_DIR, exist_ok=True)
+    if cache_root is not None:
+        img_dir = os.path.join(cache_root, IMG_DIR)
+        cache_dir = os.path.join(cache_root, CACHE_DIR)
+    else:
+        img_dir = IMG_DIR
+        cache_dir = CACHE_DIR
+    os.makedirs(img_dir, exist_ok=True)
+    os.makedirs(cache_dir, exist_ok=True)
     cache_path = None
     cache_iter = 0
-    for f in os.listdir(CACHE_DIR):
+    for f in os.listdir(cache_dir):
         stem = Path(f).stem
         if suffix not in stem:
             continue
-        suffix_stem = stem.split(suffix)[0]
+        if suffix:
+            suffix_stem = stem.split(suffix)[0]
+        else:
+            suffix_stem = stem
         if not suffix_stem.isdigit():
             continue
         if int(suffix_stem) > cache_iter:
             cache_iter = int(suffix_stem)
-            cache_path = os.path.join(CACHE_DIR, f"{cache_iter}.pkl")
+            cache_path = os.path.join(cache_dir, f"{cache_iter}{suffix}.pkl")
     if cache_iter == 0:
         logger.info(f"init grammar")
     else:
-        logger.info(f"loading grammar from iter {cache_iter} from {cache_path}")
+        logger.info(f"loading grammar from iter {cache_iter}{suffix} from {cache_path}")
     return cache_iter, cache_path
