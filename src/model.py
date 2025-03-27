@@ -838,7 +838,6 @@ class TransformerVAE(nn.Module):
             
             # Predict logits for the next token
             if self.repr == "ns":
-                breakpoint()
                 n_types = self.add_vertex(output[:, -1, :])                
                 edge_logits = self.add_edge(output[:, -1, :])
                 edge_probs = self.sigmoid(edge_logits)
@@ -855,7 +854,6 @@ class TransformerVAE(nn.Module):
                     # .unsqueeze(0)  # Ground truth for next token                    
                     type_probs = logits[i, :self.nvt]
                     edge_probs = logits[i, self.nvt:]
-                    breakpoint()
                     type_probs = F.softmax(type_probs)
                     new_type = torch.multinomial(type_probs, 1)
                     type_score = self._one_hot(new_type.reshape(-1).tolist(), self.nvt).to(new_type.device)

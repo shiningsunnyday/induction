@@ -52,7 +52,7 @@ from utils import is_valid_DAG, is_valid_Circuit
 from OCB.src.simulator.graph_to_fom import cktgraph_to_fom
 from OCB.src.utils_src import plot_circuits
 # Logging
-logger = create_logger("train", f"cache/api_{DATASET}_ednce/train.log")
+logger = create_logger("train", f"data/api_{DATASET}_ednce/train.log")
 
 # Generate a random vocabulary of small graphs using NetworkX
 def generate_random_graphs(vocab_size):
@@ -349,7 +349,7 @@ def sample(model, num_samples=5, max_seq_len=10):
 
 def standardize_enas(g, path=None):
     if path is None:
-        path = TransformerVAE.path_init(g)[0] # could be done if not valid        
+        path = TransformerVAE.path_init(g)[0] # could be done if valid        
     g = nx.relabel_nodes(g, dict(zip(path, list(range(len(g))))))
     g = copy_graph(nx.DiGraph(g), list(range(len(g))))
     for n in g:
@@ -807,7 +807,7 @@ def interactive_sample_sequences(args, model, grammar, token2rule, num_samples=5
     return gs
 
 
-def ns_sample_sequences(args, model, num_samples=5, max_seq_len=10, unique=False, visualize=False):
+def ns_sample_sequences(args, model, max_seq_len=10, unique=False, visualize=False):
     num_samples = args.num_samples
     sample_batch_size = args.sample_batch_size
     model.eval()
@@ -974,7 +974,7 @@ def construct_graph(adj):
             break
         else:
             for ek in range(vj):
-                ek_score = adj[vj-1][ek].item()
+                ek_score = adj[vj-1][graph_args.num_vertex_type+ek].item()
                 if ek_score > 0.5:
                     g.add_edge(ek, vj, label='black')
     for n in g:
@@ -1202,7 +1202,10 @@ def evaluate(orig, graphs):
             is_valid_ckt = is_valid_circuit(g)
             valid.append(is_valid_ckt)
         elif DATASET == "enas":
-            valid.append(is_valid_ENAS(nx_to_igraph(standardize_enas(g))))
+            try:
+                valid.append(is_valid_ENAS(nx_to_igraph(standardize_enas(g))))
+            except: # not valid
+                continue
         elif DATASET == "bn":
             valid.append(is_valid_BN(nx_to_igraph(standardize_bn(g))))
         novel.append(is_novel(g, orig_graphs))
@@ -1460,7 +1463,7 @@ def convert_ckt(g, fname):
 
 def evaluate_ckt(args, g):    
     folder = args.datapkl if args.datapkl else args.folder
-    path = os.path.join(f'cache/api_{args.dataset}_ednce/{folder}')
+    path = os.path.join(f'{args.cache_root}/cache/api_{args.dataset}_ednce/{folder}')
     # write converter:
     fname = os.path.join(path, f"{hash_object(g)}.txt")
     convert_ckt(g, fname)    
@@ -1477,30 +1480,30 @@ def main_sgp(args):
     """
 
     ckpt_paths = {
-        "GNN": "/home/ofoo/induction/cache/models/CKT/GNN/epoch-33_loss-3.8809502124786377.pth",
-        "TOKEN": "/home/ofoo/induction/cache/models/CKT/TOKEN/epoch-35_loss-3.8443312644958496.pth",
-        "TOKEN_GNN": "/home/ofoo/induction/cache/models/BN/TOKEN_GNN/epoch=0_loss=6.534396348571778.pth"
+        "GNN": f"{args.cache_root}/cache/models/CKT/GNN/epoch-33_loss-3.8809502124786377.pth",
+        "TOKEN": f"{args.cache_root}/cache/models/CKT/TOKEN/epoch-35_loss-3.8443312644958496.pth",
+        "TOKEN_GNN": f"{args.cache_root}/cache/models/BN/TOKEN_GNN/epoch=0_loss=6.534396348571778.pth"
     }
 
     latent_paths = {
         "GNN": {
-            "train_latent": "/home/ofoo/induction/cache/models/CKT/GNN/train_latent_33.npy",
-            "test_latent": "/home/ofoo/induction/cache/models/CKT/GNN/test_latent_33.npy"
+            "train_latent": f"{args.cache_root}/cache/models/CKT/GNN/train_latent_33.npy",
+            "test_latent": f"{args.cache_root}/cache/models/CKT/GNN/test_latent_33.npy"
         },
         "TOKEN": {
-            "train_latent": "/home/ofoo/induction/cache/models/CKT/TOKEN/train_latent_35.npy",
-            "test_latent": "/home/ofoo/induction/cache/models/CKT/TOKEN/test_latent_35.npy"
+            "train_latent": f"{args.cache_root}/cache/models/CKT/TOKEN/train_latent_35.npy",
+            "test_latent": f"{args.cache_root}/cache/models/CKT/TOKEN/test_latent_35.npy"
         },
         "TOKEN_GNN": {
-            "train_latent": "/home/ofoo/induction/cache/models/CKT/TOKEN_GNN/train_latent_8.npy",
-            "test_latent": "/home/ofoo/induction/cache/models/CKT/TOKEN_GNN/test_latent_8.npy"
+            "train_latent": f"{args.cache_root}/cache/models/CKT/TOKEN_GNN/train_latent_8.npy",
+            "test_latent": f"{args.cache_root}/cache/models/CKT/TOKEN_GNN/test_latent_8.npy"
         }
     }
 
     datapkl_paths = {
-        "GNN": "/home/ofoo/induction/cache/models/CKT/GNN/data.pkl",         
-        "TOKEN": "/home/ofoo/induction/cache/models/CKT/TOKEN/data.pkl",     
-        "TOKEN_GNN": "/home/ofoo/induction/cache/models/CKT/TOKEN_GNN/data.pkl"  
+        "GNN": f"{args.cache_root}/cache/models/CKT/GNN/data.pkl",         
+        "TOKEN": f"{args.cache_root}/cache/models/CKT/TOKEN/data.pkl",     
+        "TOKEN_GNN": f"{args.cache_root}/cache/models/CKT/TOKEN_GNN/data.pkl"  
     }
 
     results = {}
@@ -1513,7 +1516,7 @@ def main_sgp(args):
     args.datapkl = datapkl_paths[encoder_name]
     print(args.datapkl)
 
-    cache_dir = f'cache/api_{args.dataset}_ednce/'
+    cache_dir = f'{args.cache_root}/cache/api_{args.dataset}_ednce/'
     folder = hash_args(args)
     print(f"folder: {folder}")
     setattr(args, "folder", folder)
@@ -1615,12 +1618,12 @@ def main_sgp(args):
 
 
 def main(args):
-    cache_dir = f'cache/api_{args.dataset}_ednce/'
+    cache_dir = f'{args.cache_root}/cache/api_{args.dataset}_ednce/'
     folder = hash_args(args)
     print(f"folder: {folder}")
     setattr(args, "folder", folder)
     os.makedirs(f'{args.ckpt_dir}/ckpts/api_{args.dataset}_ednce/{folder}', exist_ok=True)
-    os.makedirs(f'cache/api_{args.dataset}_ednce/{folder}', exist_ok=True)
+    os.makedirs(f'{args.cache_root}/cache/api_{args.dataset}_ednce/{folder}', exist_ok=True)
     #json.dumps(args.__dict__, folder)
     args_path = os.path.join(f'{args.ckpt_dir}/ckpts/api_{args.dataset}_ednce/{folder}', "args.txt")
     with open(args_path, "w") as f:
