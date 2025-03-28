@@ -1120,33 +1120,58 @@ def load_data(args, anno, grammar, orig, cache_dir, num_graphs, graph_args):
         else:            
             assert args.encoder == "GNN"            
             # pargs = []
-            # for pre in tqdm(range(num_graphs), "preparing node strings"):
+            data = []
+            for pre in tqdm(range(num_graphs), "gathering node strings"):
+                g_orig = nx.induced_subgraph(orig, orig.comps[pre])
+                g_orig = g_orig.copy()
+                node_str = stringify(g_orig)
+                if args.order == "bfs":
+                    node_str = torch.tensor([node_str])
+                    adj, feat = G_to_adjfeat(node_str, graph_args.max_n, graph_args.num_vertex_type)
+                    node_str = adjfeat_to_G(*bfs(adj, feat))  # 1 * n_vertex * (n_types + n_vertex)
+                    # if g_orig.shape[1] < max_n:
+                    #     padding = torch.zeros(1, max_n-g.shape[1], g.shape[2]).to(get_device())
+                    #     padding[0, :, START_TYPE] = 1  # treat padding nodes as start_type
+                    #     g = torch.cat([g, padding], 1)  # 1 * max_n * (n_types + n_vertex)
+                    # if g.shape[2] < xs:
+                    #     padding = torch.zeros(1, g.shape[1], xs-g.shape[2]).to(get_device())
+                    #     g = torch.cat([g, padding], 2)  # pad zeros to indicate no connections to padding 
+                    #                                     # nodes, g: 1 * max_n * xs
+                    node_str = node_str[0]
+                elif args.order == "random":
+                    node_str = torch.tensor([node_str])
+                    adj, feat = G_to_adjfeat(node_str, graph_args.max_n, graph_args.num_vertex_type)
+                    order = np.random.permutation(len(adj))
+                    adj, feat = adj[order, :][:, order], feat[order]
+                    node_str = adjfeat_to_G(adj, feat)  # 1 * n_vertex * (n_types + n_vertex)             
+                    node_str = node_str[0]
+                data.append((node_str, g_orig))
             #     parg = nx.induced_subgraph(orig, orig.comps[pre])
             #     pargs.append(parg)
-            with mp.Pool(100) as p:
-                batch_size = 1000
-                num_batches = (num_graphs + batch_size - 1) // batch_size
-                futures = []
-                # Prepare and submit each batch asynchronously.
-                for i in tqdm(range(num_batches), desc="prepare args"):
-                    # Compute indices for this batch.
-                    start = batch_size * i
-                    end = min(batch_size * (i + 1), num_graphs)
-                    indices = range(start, end)
-                    # Sum over the comps for this batch and create the induced subgraph.
-                    batch_nodes = sum([orig.comps[j] for j in indices], [])
-                    batch_g = nx.induced_subgraph(orig, batch_nodes).copy()
-                    # If your worker needs the comps, attach them (or pass separately).
-                    batch_g.comps = orig.comps                    
-                    # Submit the batch to process_ns asynchronously.
-                    futures.append(p.apply_async(process_ns, args=(batch_g, indices)))                
-                # Collect results as soon as they are ready.
-                data = [None for _ in range(num_graphs)]
-                for future in tqdm(futures, desc="gathering node string batches"):
-                    tmp_path = future.get()
-                    for (node_str, g) in pickle.load(open(tmp_path, 'rb')):
-                        data[get_prefix(list(g)[0])] = (node_str, g)
-                    os.remove(tmp_path)
+            # with mp.Pool(100) as p:
+            #     batch_size = 1000
+            #     num_batches = (num_graphs + batch_size - 1) // batch_size
+            #     futures = []
+            #     # Prepare and submit each batch asynchronously.
+            #     for i in tqdm(range(num_batches), desc="prepare args"):
+            #         # Compute indices for this batch.
+            #         start = batch_size * i
+            #         end = min(batch_size * (i + 1), num_graphs)
+            #         indices = range(start, end)
+            #         # Sum over the comps for this batch and create the induced subgraph.
+            #         batch_nodes = sum([orig.comps[j] for j in indices], [])
+            #         batch_g = nx.induced_subgraph(orig, batch_nodes).copy()
+            #         # If your worker needs the comps, attach them (or pass separately).
+            #         batch_g.comps = orig.comps                    
+            #         # Submit the batch to process_ns asynchronously.
+            #         futures.append(p.apply_async(process_ns, args=(batch_g, indices)))                
+            #     # Collect results as soon as they are ready.
+            #     data = [None for _ in range(num_graphs)]
+            #     for future in tqdm(futures, desc="gathering node string batches"):
+            #         tmp_path = future.get()
+            #         for (node_str, g) in pickle.load(open(tmp_path, 'rb')):
+            #             data[get_prefix(list(g)[0])] = (node_str, g)
+            #         os.remove(tmp_path)
             pickle.dump(data, open(save_path, 'wb+'))
     if args.repr == "digged":
         relabel = dict(zip(list(sorted(rule2token)), range(len(rule2token))))    
