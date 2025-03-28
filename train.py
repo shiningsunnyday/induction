@@ -224,6 +224,9 @@ class GraphDataset(Dataset):
         self.data = data
         for idx in range(len(data)):
             seq, graph = self.data[idx]
+            if isinstance(graph, list):
+                assert 'orig' in globals()
+                graph = nx.induced_subgraph(orig, graph)
             graph, _ = convert_graph_to_data(graph)
             self.dataset.append((torch.tensor(seq), graph, idx))
         self.perm = np.arange(len(data))
@@ -485,7 +488,7 @@ def train(args, train_data, test_data):
     if best_ckpt_path is not None:
         logger.info(f"loaded {best_ckpt_path} loss {best_loss} start_epoch {start_epoch}")
         model.load_state_dict(torch.load(best_ckpt_path, map_location=args.cuda))
-
+    breakpoint()
     if start_epoch >= args.epochs:
         return model
 
@@ -1117,13 +1120,14 @@ def load_data(args, anno, grammar, orig, cache_dir, num_graphs, graph_args):
                 # with mp.Pool(20) as p:
                 #     data = p.starmap(process_single, tqdm(pargs, "processing data mp"))
             pickle.dump((data, rule2token), open(save_path, 'wb+'))
-        else:            
+        else:        
+            globals()['orig'] = orig
             assert args.encoder == "GNN"            
             # pargs = []
             data = []
             for pre in tqdm(range(num_graphs), "gathering node strings"):
                 g_orig = nx.induced_subgraph(orig, orig.comps[pre])
-                g_orig = g_orig.copy()
+                # g_orig = g_orig.copy()
                 node_str = stringify(g_orig)
                 if args.order == "bfs":
                     node_str = torch.tensor([node_str])
@@ -1145,7 +1149,7 @@ def load_data(args, anno, grammar, orig, cache_dir, num_graphs, graph_args):
                     adj, feat = adj[order, :][:, order], feat[order]
                     node_str = adjfeat_to_G(adj, feat)  # 1 * n_vertex * (n_types + n_vertex)             
                     node_str = node_str[0]
-                data.append((node_str, g_orig))
+                data.append((node_str, orig.comps[pre]))
             #     parg = nx.induced_subgraph(orig, orig.comps[pre])
             #     pargs.append(parg)
             # with mp.Pool(100) as p:
@@ -1768,7 +1772,7 @@ if __name__ == "__main__":
     from src.grammar.common import get_parser
     parser = get_parser()
     # folder
-    parser.add_argument("--ckpt_dir", default="/ssd/msun415/induction/ckpts")
+    parser.add_argument("--ckpt_dir", default="/ssd/msun415/induction")
     # data hparams
     parser.add_argument("--dataset", choices=["ckt", "bn", "enas"], default="ckt")
     parser.add_argument("--num-samples", type=int, default=100)
