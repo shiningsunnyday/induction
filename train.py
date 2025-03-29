@@ -488,7 +488,6 @@ def train(args, train_data, test_data):
     if best_ckpt_path is not None:
         logger.info(f"loaded {best_ckpt_path} loss {best_loss} start_epoch {start_epoch}")
         model.load_state_dict(torch.load(best_ckpt_path, map_location=args.cuda))
-    breakpoint()
     if start_epoch >= args.epochs:
         return model
 
@@ -1046,6 +1045,7 @@ def construct_graph_full(adj):
 
 def load_data(args, anno, grammar, orig, cache_dir, num_graphs, graph_args):
     globals()['graph_args'] = graph_args
+    globals()['orig'] = orig
     loaded = False
     if args.datapkl:
         save_path = os.path.join(cache_dir, args.datapkl, 'data.pkl')
@@ -1120,8 +1120,7 @@ def load_data(args, anno, grammar, orig, cache_dir, num_graphs, graph_args):
                 # with mp.Pool(20) as p:
                 #     data = p.starmap(process_single, tqdm(pargs, "processing data mp"))
             pickle.dump((data, rule2token), open(save_path, 'wb+'))
-        else:        
-            globals()['orig'] = orig
+        else:                    
             assert args.encoder == "GNN"            
             # pargs = []
             data = []
@@ -1757,7 +1756,7 @@ def main(args):
     test_y = y[test_indices]
     train_y = (train_y-mean_train_y)/std_train_y
     test_y = (test_y-mean_train_y)/std_train_y
-    # bo(args, orig, grammar, model, token2rule, train_y, test_y, mean_train_y[-1], std_train_y[-1])
+    bo(args, orig, grammar, model, token2rule, train_y, test_y, mean_train_y[-1], std_train_y[-1])
     if args.repr == "digged":
         graphs = interactive_sample_sequences(args, model, grammar, token2rule,max_seq_len=MAX_SEQ_LEN, unique=False, visualize=False)
     else:
@@ -1805,5 +1804,4 @@ if __name__ == "__main__":
                         help='from which distrbiution to sample random points in the latent \
                         space as candidates to select; uniform or normal')       
     args = parser.parse_args()  
-    breakpoint()
     main(args)
