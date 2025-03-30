@@ -40,16 +40,16 @@ from matplotlib import rcParams
 rcParams['font.family'] = 'Arial'
 from src.model import *
 if DATASET == "enas":
-    sys.path.append('/home/msun415/induction/dagnn/dvae/software/enas/src/cifar10')    
+    sys.path.append(os.path.join(os.path.dirname(__file__), 'dagnn/dvae/software/enas/src/cifar10'))   
 else:
-    sys.path.append('CktGNN')
+    sys.path.append(os.path.join(os.path.dirname(__file__), 'CktGNN'))
 import glob
 import re
-sys.path.append('dagnn/dvae')
+sys.path.append(os.path.join(os.path.dirname(__file__), 'dagnn/dvae'))
 from util import save_object, load_object, plot_DAG, flat_ENAS_to_nested, adjstr_to_BN, decode_igraph_to_ENAS, is_valid_ENAS, is_valid_BN, is_valid_DAG, decode_igraph_to_BN_adj
 from evaluate_BN import Eval_BN
 
-# from sparse_gp import SparseGP
+from sparse_gp import SparseGP
 from utils import is_valid_DAG, is_valid_Circuit
 from OCB.src.simulator.graph_to_fom import cktgraph_to_fom
 from OCB.src.utils_src import plot_circuits
@@ -459,6 +459,64 @@ def decode_from_latent_space(z, grammar, model, token2rule, max_seq_len):
     return generated_dags, generated_derivs
     
 
+def decode_from_latent_space_ns(z, model, max_seq_len):
+    G = [None for _ in range(z.shape[0])]
+    valid_ns_final = [None for _ in range(z.shape[0])]
+    idxes = list(range(z.shape[0]))
+    total_decode_attempts = [0 for _ in range(z.shape[0])]
+    with tqdm(total=z.shape[0], desc="decoding") as pbar:
+        while idxes:
+            generated_ns = model.ns_decode(z, max_seq_len=max_seq_len)
+            # generated_dags, generated_sequences = decode_from_latent_space(z, grammar, model, token2rule, max_seq_len=max_seq_len)
+            new_idxes = []
+            mask = []
+            for idx, seq in zip(idxes, generated_ns):
+                adj = torch.stack(seq, dim=0).int()
+                if args.order == "default":
+                    g = construct_graph(adj)
+                else:
+                    g = construct_graph_full(adj)                
+                if total_decode_attempts[idx] == 10: # failed 10 times
+                    G[idx] = None
+                    valid_ns_final[idx] = None
+                    mask.append(False)
+                    continue
+                if DATASET == 'ckt':
+                    try: # not our fault, but due to the converter assuming 2 or 3-stage op-amps, we'll keep sampling until we satisfy that restriction
+                        normalize_format(g)
+                    except ValueError:
+                        mask.append(True)
+                        new_idxes.append(idx)  
+                        total_decode_attempts[idx] += 1
+                        continue
+                elif DATASET == "enas":
+                    try:
+                        g = standardize_enas(g)
+                        assert len(g) == 8
+                        assert is_valid_ENAS(nx_to_igraph(g))
+                    except:
+                        mask.append(True)
+                        new_idxes.append(idx)
+                        total_decode_attempts[idx] += 1
+                        continue
+                else:
+                    try:
+                        g = standardize_bn(g)
+                        assert is_valid_BN(nx_to_igraph(g))        
+                    except:
+                        mask.append(True)
+                        new_idxes.append(idx)
+                        total_decode_attempts[idx] += 1
+                        continue
+                G[idx] = g
+                valid_ns_final[idx] = seq
+                mask.append(False)
+            idxes = new_idxes
+            z = z[mask]  
+            pbar.update(len(idxes)-pbar.n)
+    return G, valid_ns_final
+
+
 def train(args, train_data, test_data):
     if len(os.listdir(f"{args.ckpt_dir}/ckpts/api_{args.dataset}_ednce/{args.folder}")) == 0: # add necc. ckpts
         breakpoint()
@@ -659,6 +717,7 @@ def bo(args, orig, grammar, model, token2rule, y_train, y_test, target_mean, tar
     folder = args.datapkl if args.datapkl else args.folder
     ckpt_dir = f'{args.ckpt_dir}/ckpts/api_{args.dataset}_ednce/{folder}'    
     save_dir = f'results/api_{args.dataset}_ednce/'
+    os.makedirs(save_dir, exist_ok=True)
     X_train = np.load(os.path.join(ckpt_dir, f"train_latent_{args.checkpoint}.npy"))
     X_test = np.load(os.path.join(ckpt_dir, f"test_latent_{args.checkpoint}.npy"))
     if args.dataset == "bn":
@@ -711,7 +770,7 @@ def bo(args, orig, grammar, model, token2rule, y_train, y_test, target_mean, tar
         logger.info("Evaluating selected points")
         scores = []
         if args.dataset == "enas":
-            # Prepare data
+            # Prepare data            
             scores = send_enas_listener(valid_arcs_final)
             scores = [-score for score in scores]
             for i, score in enumerate(scores):
@@ -766,6 +825,131 @@ def bo(args, orig, grammar, model, token2rule, y_train, y_test, target_mean, tar
                 plot_circuits((g_best,), save_dir, 'best_arc_iter_{}'.format(iteration), pdf=True)
         #
         iteration += 1
+
+
+def bo_ns(args, model, y_train, y_test, target_mean, target_std):
+    ### IMPORTANT: y_train and y_test are 2D numpys, where the last column is the BO property
+    folder = args.datapkl if args.datapkl else args.folder
+    ckpt_dir = f'{args.ckpt_dir}/ckpts/api_{args.dataset}_ednce/{folder}'    
+    save_dir = f'results/api_{args.dataset}_ednce/'
+    os.makedirs(save_dir, exist_ok=True)
+    X_train = np.load(os.path.join(ckpt_dir, f"train_latent_{args.checkpoint}.npy"))
+    X_test = np.load(os.path.join(ckpt_dir, f"test_latent_{args.checkpoint}.npy"))
+    if args.dataset == "bn":
+        # remove duplicates, otherwise SGP ill-conditioned
+        X_train, unique_idxs = np.unique(X_train, axis=0, return_index=True)
+        y_train = y_train[unique_idxs]
+        random_shuffle = np.random.permutation(range(len(X_train)))
+        keep = 5000
+        X_train = X_train[random_shuffle[:keep]]
+        y_train = y_train[random_shuffle[:keep]]    
+    else:
+        keep = y_train.shape[0]
+    X_train_mean = X_train.mean(axis=0)
+    X_train_std = X_train.std(axis=0)
+    X_train = (X_train-X_train_mean)/X_train_std
+    X_test = (X_test-X_train_mean)/X_train_std    
+    best_score = float("-inf")
+    best_arc = None
+    novel_arcs = []
+    iteration = 0
+    logger.info("Average pairwise distance between train points = {}".format(np.mean(pdist(X_train))))
+    logger.info("Average pairwise distance between test points = {}".format(np.mean(pdist(X_test))))    
+    if DATASET == "ckt":
+        evaluate_fn = partial(evaluate_ckt, args)
+    elif DATASET == "enas":
+        evaluate_fn = partial(evaluate_nn, default_val=min(y_train)*target_std+target_mean)
+    elif DATASET == "bn":
+        eva = Eval_BN(save_dir)
+        evaluate_fn = lambda g: eva.eval(decode_igraph_to_BN_adj(nx_to_igraph(g)))
+    else:
+        raise NotImplementedError
+    # for _ in range(10):
+    #     for i in range(y_train.shape[1]): # evaluate latent space
+    #         save_file = os.path.join(save_dir, f'Prop_{i}_Test_RMSE_ll.txt')
+    #         sgp = train_sgp(args, save_file, X_train, X_test, y_train[:, i:i+1], y_test[:, i:i+1])
+    # breakpoint()
+    y_train, y_test = y_train[:, -1:], y_test[:, -1:]
+    save_file = os.path.join(save_dir, f'Test_RMSE_ll.txt')
+    while iteration < args.BO_rounds:
+        logger.info(f"Iteration: {iteration}")
+        sgp = train_sgp(args, save_file, X_train, X_test, y_train, y_test)
+        pred, uncert = sgp.predict(X_train, 0 * X_train)
+        error = np.sqrt(np.mean((pred - y_train)**2))
+        trainll = np.mean(sps.norm.logpdf(pred - y_train, scale = np.sqrt(uncert)))
+        logger.info(f'Train RMSE: {error}')
+        logger.info(f'Train ll: {trainll}')        
+        next_inputs = sgp.batched_greedy_ei(args.BO_batch_size, np.min(X_train, 0), np.max(X_train, 0), np.mean(X_train, 0), np.std(X_train, 0), sample=args.sample_dist, max_iter=args.max_ei_iter, factr=args.factr)
+        valid_arcs_final, valid_ns_final = decode_from_latent_space_ns(torch.FloatTensor(next_inputs).to(args.cuda), model, MAX_SEQ_LEN)
+        new_features = next_inputs
+        logger.info("Evaluating selected points")
+        scores = []
+        if args.dataset == "enas":
+            # Prepare data
+            mask = np.array([arc is not None for arc in valid_arcs_final])
+            scores = np.zeros((len(valid_arcs_final,)))
+            scores[mask] = send_enas_listener(list(filter(None, valid_arcs_final)))                        
+            scores[~mask] = y_train.max()
+            scores = [-score for score in scores]
+            for i, score in enumerate(scores):
+                if valid_arcs_final[i] is None:
+                    continue
+                if is_novel(valid_arcs_final[i], orig):
+                    novel_arcs.append((valid_arcs_final[i], score, iteration*args.BO_batch_size+i))                
+                if score < best_score:
+                    best_score = score
+                    best_ns = valid_ns_final[i]
+                    best_arc = valid_arcs_final[i]                    
+        else:
+            for i in range(len(valid_arcs_final)):
+                if valid_arcs_final[i] is not None:
+                    score = -evaluate_fn(valid_arcs_final[i])
+                else:
+                    score = float("inf")
+                if score == float("inf") or score != score:
+                    score = y_train[:keep].max()
+                if valid_arcs_final[i] is None:
+                    continue                    
+                if is_novel(valid_arcs_final[i], orig):
+                    novel_arcs.append((valid_arcs_final[i], score, iteration*args.BO_batch_size+i))
+                if score < best_score:
+                    best_score = score
+                    best_ns = valid_ns_final[i]
+                    best_arc = valid_arcs_final[i]
+                scores.append(score)
+            # logger.info(i, score)
+        # logger.info("Iteration {}'s selected arcs' scores:".format(iteration))
+        # logger.info(scores, np.mean(scores))
+        save_object(scores, "{}scores{}.dat".format(save_dir, iteration))
+        save_object(valid_arcs_final, "{}valid_arcs_final{}.dat".format(save_dir, iteration))
+        save_object(novel_arcs, "{}novel_arcs.dat".format(save_dir))
+        if len(new_features) > 0:
+            scores = np.array(scores)[:, None]
+            X_train = np.concatenate([X_train, new_features], 0)
+            std_scores = (scores-target_mean)/target_std
+            y_train = np.concatenate([y_train, std_scores], 0)
+        #
+        # logger.info("Current iteration {}'s best score: {}".format(iteration, - best_score * std_y_train - mean_y_train))
+        if best_arc is not None: # and iteration == 10:
+            logger.info(f"Best ns: {best_ns}")
+            with open(save_dir + 'best_ns_scores.txt', 'a') as score_file:
+                score_file.write(best_ns + ',{:.4f}\n'.format(best_score))
+            if args.dataset == 'enas':
+                # row = [int(x) for x in best_arc.split()]
+                # g_best, _ = decode_ENAS_to_igraph(flat_ENAS_to_nested(row, 8-2))
+                g_best = nx_to_igraph(best_arc)
+                plot_DAG(g_best, save_dir, 'best_arc_iter_{}'.format(iteration), data_type='ENAS', pdf=True)
+            elif args.dataset == 'bn':
+                # row = adjstr_to_BN(best_arc)
+                # g_best, _ = decode_BN_to_igraph(row)
+                g_best = nx_to_igraph(best_arc)
+                plot_DAG(g_best, save_dir, 'best_arc_iter_{}'.format(iteration), data_type='BN', pdf=True)
+            elif args.dataset == "ckt":
+                g_best = nx_to_igraph(standardize_ckt(best_arc))
+                plot_circuits((g_best,), save_dir, 'best_arc_iter_{}'.format(iteration), pdf=True)
+        #
+        iteration += 1
+
 
 
 def visualize_sequences(sampled_sequences, grammar, token2rule):
@@ -1756,7 +1940,10 @@ def main(args):
     test_y = y[test_indices]
     train_y = (train_y-mean_train_y)/std_train_y
     test_y = (test_y-mean_train_y)/std_train_y
-    bo(args, orig, grammar, model, token2rule, train_y, test_y, mean_train_y[-1], std_train_y[-1])
+    if args.repr == "digged":
+        bo(args, orig, grammar, model, token2rule, train_y, test_y, mean_train_y[-1], std_train_y[-1])
+    else:
+        bo_ns(args, model, train_y, test_y, mean_train_y[-1], std_train_y[-1])
     if args.repr == "digged":
         graphs = interactive_sample_sequences(args, model, grammar, token2rule,max_seq_len=MAX_SEQ_LEN, unique=False, visualize=False)
     else:

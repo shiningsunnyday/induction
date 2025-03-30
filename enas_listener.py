@@ -8,7 +8,7 @@ import time
 import os
 os.environ["CUDA_VISIBLE_DEVICES"] = ""
 import sys
-sys.path.append('/home/msun415/induction/dagnn/dvae/software/enas/src/cifar10')    
+sys.path.append(os.path.join(os.path.dirname(__file__), 'dagnn/dvae/software/enas/src/cifar10'))
 from evaluation import *
 eva = Eval_NN()
 
