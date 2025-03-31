@@ -2009,4 +2009,5 @@ if __name__ == "__main__":
                         help='from which distrbiution to sample random points in the latent \
                         space as candidates to select; uniform or normal')       
     args = parser.parse_args()  
+    breakpoint()
     main(args)
