@@ -519,7 +519,9 @@ def decode_from_latent_space_ns(z, model, max_seq_len):
     return G, valid_ns_final
 
 
-def train(args, train_data, test_data):
+def train(args, train_data, test_data):    
+    if DATASET == "enas":
+        breakpoint()
     ckpt_dir = f'{args.ckpt_dir}/ckpts/{Path(CACHE_DIR).stem}/{args.folder}'
     if len(os.listdir(f"{ckpt_dir}")) == 0: # add necc. ckpts
         breakpoint()
@@ -747,7 +749,7 @@ def bo(args, orig, grammar, model, token2rule, y_train, y_test, target_mean, tar
     X_train_std = X_train.std(axis=0)
     X_train = (X_train-X_train_mean)/X_train_std
     X_test = (X_test-X_train_mean)/X_train_std    
-    best_score = float("-inf")
+    best_score = float("inf")
     best_arc = None
     novel_arcs = []
     iteration = 0
@@ -797,7 +799,7 @@ def bo(args, orig, grammar, model, token2rule, y_train, y_test, target_mean, tar
             for i in range(len(valid_arcs_final)):
                 score = -evaluate_fn(valid_arcs_final[i])
                 if score == float("inf") or score != score:
-                    score = y_train[:keep].max()
+                    score = y_train[:keep].max()*target_std+target_mean
                 if is_novel(valid_arcs_final[i], orig):
                     novel_arcs.append((valid_arcs_final[i], score, iteration*args.BO_batch_size+i))
                 if score < best_score:
@@ -862,7 +864,7 @@ def bo_ns(args, model, y_train, y_test, target_mean, target_std):
     X_train_std = X_train.std(axis=0)
     X_train = (X_train-X_train_mean)/X_train_std
     X_test = (X_test-X_train_mean)/X_train_std    
-    best_score = float("-inf")
+    best_score = float("inf")
     best_arc = None
     novel_arcs = []
     iteration = 0
@@ -902,7 +904,7 @@ def bo_ns(args, model, y_train, y_test, target_mean, target_std):
             mask = np.array([arc is not None for arc in valid_arcs_final])
             scores = np.zeros((len(valid_arcs_final,)))
             scores[mask] = send_enas_listener(list(filter(None, valid_arcs_final)))                        
-            scores[~mask] = y_train.max()
+            scores[~mask] = max(y_train)*target_std+target_mean
             scores = [-score for score in scores]
             for i, score in enumerate(scores):
                 if valid_arcs_final[i] is None:
@@ -920,7 +922,7 @@ def bo_ns(args, model, y_train, y_test, target_mean, target_std):
                 else:
                     score = float("inf")
                 if score == float("inf") or score != score:
-                    score = y_train[:keep].max()
+                    score = y_train[:keep].max()*target_std+target_mean
                 if valid_arcs_final[i] is None:
                     continue                    
                 if is_novel(valid_arcs_final[i], orig):
@@ -1959,16 +1961,15 @@ def main(args):
     train_y = (train_y-mean_train_y)/std_train_y
     test_y = (test_y-mean_train_y)/std_train_y
     if args.repr == "digged":
+        bo(args, orig, grammar, model, token2rule, train_y, test_y, mean_train_y[-1], std_train_y[-1])
+    else:
+        bo_ns(args, model, train_y, test_y, mean_train_y[-1], std_train_y[-1])
+    if args.repr == "digged":
         graphs = interactive_sample_sequences(args, model, grammar, token2rule,max_seq_len=MAX_SEQ_LEN, unique=False, visualize=False)
     else:
         graphs = ns_sample_sequences(args, model, max_seq_len=MAX_SEQ_LEN, unique=False, visualize=True)
     metrics = evaluate(orig, graphs)
     print(metrics)
-    if args.repr == "digged":
-        bo(args, orig, grammar, model, token2rule, train_y, test_y, mean_train_y[-1], std_train_y[-1])
-    else:
-        bo_ns(args, model, train_y, test_y, mean_train_y[-1], std_train_y[-1])
-
 
 
 if __name__ == "__main__":
