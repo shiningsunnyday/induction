@@ -614,8 +614,8 @@ def train(args, train_data, test_data):
                         gs = [construct_graph(adj) for adj in rll.unbind(0)]
                     else:
                         gs = [construct_graph_full(adj) for adj in rll.unbind(0)]
-                    os = [nx.induced_subgraph(orig, orig.comps[g[-1]]) for g in g_batch]
-                    rec_acc_sum = sum([nx.is_isomorphic(g, o, node_match=node_match) for (g, o) in zip(gs, os)])
+                    origs = [nx.induced_subgraph(orig, orig.comps[g[-1]]) for g in g_batch]
+                    rec_acc_sum = sum([nx.is_isomorphic(g, o, node_match=node_match) for (g, o) in zip(gs, origs)])
                 optimizer.step()
                 train_latent[batch_idxes] = mu.detach().cpu().numpy()
                 g_batch = []
