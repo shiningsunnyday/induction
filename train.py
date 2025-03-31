@@ -48,8 +48,10 @@ import re
 sys.path.append(os.path.join(os.path.dirname(__file__), 'dagnn/dvae'))
 from util import save_object, load_object, plot_DAG, flat_ENAS_to_nested, adjstr_to_BN, decode_igraph_to_ENAS, is_valid_ENAS, is_valid_BN, is_valid_DAG, decode_igraph_to_BN_adj
 from evaluate_BN import Eval_BN
-
-from sparse_gp import SparseGP
+try:
+    from sparse_gp import SparseGP
+except:
+    print("sparsegp import failed")
 from utils import is_valid_DAG, is_valid_Circuit
 from OCB.src.simulator.graph_to_fom import cktgraph_to_fom
 from OCB.src.utils_src import plot_circuits
@@ -222,14 +224,14 @@ class GraphDataset(Dataset):
     def __init__(self, data):
         self.dataset = []
         self.data = data
-        for idx in range(len(data)):
+        for idx in range(len(self.data)):
             seq, graph = self.data[idx]
             if isinstance(graph, list):
                 assert 'orig' in globals()
                 graph = nx.induced_subgraph(orig, graph)
             graph, _ = convert_graph_to_data(graph)
             self.dataset.append((torch.tensor(seq), graph, idx))
-        self.perm = np.arange(len(data))
+        self.perm = np.arange(len(self.data))
     
     def __len__(self):
         return len(self.data)
@@ -518,7 +520,8 @@ def decode_from_latent_space_ns(z, model, max_seq_len):
 
 
 def train(args, train_data, test_data):
-    if len(os.listdir(f"{args.ckpt_dir}/ckpts/api_{args.dataset}_ednce/{args.folder}")) == 0: # add necc. ckpts
+    ckpt_dir = f'{args.ckpt_dir}/ckpts/{Path(CACHE_DIR).stem}/{args.folder}'
+    if len(os.listdir(f"{ckpt_dir}")) == 0: # add necc. ckpts
         breakpoint()
     # Initialize model
     if args.repr == "digged":
@@ -530,8 +533,8 @@ def train(args, train_data, test_data):
     model = model.to(args.cuda)
 
     # Load ckpts   
-    ckpts = glob.glob(f'{args.ckpt_dir}/ckpts/api_{args.dataset}_ednce/{args.folder}/*.pth')
-    logger.info(f'{args.ckpt_dir}/ckpts/api_{args.dataset}_ednce/{args.folder}/*.pth')
+    ckpts = glob.glob(f'{ckpt_dir}/*.pth')
+    logger.info(f'{ckpt_dir}/*.pth')
     start_epoch = 0
     best_loss = float("inf")
     best_ckpt_path = None
@@ -594,15 +597,25 @@ def train(args, train_data, test_data):
                 recon_logits, mask, mu, logvar = model(x, attention_mask, seq_len_list, batch_g_list)                           
                 loss = vae_loss(args, recon_logits, mask, x, mu, logvar)
                 loss.backward()            
-                train_loss += loss.item()*len(batch_idxes)
+                train_loss += loss.item()*len(batch_idxes)                
                 if args.repr == "digged":
                     rll = recon_logits.argmax(axis=-1).reshape(x.shape)
                     rec_acc = (rll == x).all(axis=-1)
                     rec_acc_sum += rec_acc.sum()
                 else:
-                    rll = recon_logits.reshape(x.shape)
-                    rec_acc = ((rll > 0.5) == x).all(axis=[1,2])
-                    rec_acc_sum += rec_acc.sum()
+                    rll = recon_logits.detach().clone().reshape(x.shape)
+                    type_probs = rll[:, :, :graph_args.num_vertex_type]
+                    type_probs = F.softmax(type_probs)
+                    type_probs = type_probs.reshape(-1, graph_args.num_vertex_type)
+                    new_type = torch.multinomial(type_probs, 1)
+                    rll[:, :, :graph_args.num_vertex_type] = model._one_hot(new_type.reshape(-1).tolist(), model.nvt).reshape(x.shape[:2]+(graph_args.num_vertex_type,))
+                    rll[:, :, graph_args.num_vertex_type:] = rll[:, :, graph_args.num_vertex_type:] > 0.5
+                    if args.order == "default":
+                        gs = [construct_graph(adj) for adj in rll.unbind(0)]
+                    else:
+                        gs = [construct_graph_full(adj) for adj in rll.unbind(0)]
+                    os = [nx.induced_subgraph(orig, orig.comps[g[-1]]) for g in g_batch]
+                    rec_acc_sum = sum([nx.is_isomorphic(g, o, node_match=node_match) for (g, o) in zip(gs, os)])
                 optimizer.step()
                 train_latent[batch_idxes] = mu.detach().cpu().numpy()
                 g_batch = []
@@ -643,7 +656,7 @@ def train(args, train_data, test_data):
         if val_loss < best_loss:
             patience_counter = 0 # reset counter
             best_loss = val_loss
-            ckpt_path = f'{args.ckpt_dir}/ckpts/api_{args.dataset}_ednce/{args.folder}/epoch={epoch}_loss={best_loss}.pth'
+            ckpt_path = f'{ckpt_dir}/epoch={epoch}_loss={best_loss}.pth'
             torch.save(model.state_dict(), ckpt_path)
             logger.info(ckpt_path)
         else:
@@ -658,12 +671,12 @@ def train(args, train_data, test_data):
             f"  - Batch Size: {args.batch_size}"
             f"  - KL Divergence Coefficient: {args.klcoeff}")
         logger.info(f"Epoch {epoch}, Train Loss: {train_loss}, Val Loss: {val_loss}, Train Rec: {train_rec_acc_mean}, Val Rec: {valid_rec_acc_mean}")
-        np.save(f'{args.ckpt_dir}/ckpts/api_{args.dataset}_ednce/{args.folder}/train_latent_{epoch}.npy', train_latent)
-        np.save(f'{args.ckpt_dir}/ckpts/api_{args.dataset}_ednce/{args.folder}/test_latent_{epoch}.npy', test_latent)
+        np.save(f'{ckpt_dir}/train_latent_{epoch}.npy', train_latent)
+        np.save(f'{ckpt_dir}/test_latent_{epoch}.npy', test_latent)
         fig = model.visualize_tokens()
-        fig.savefig(f'{args.ckpt_dir}/ckpts/api_{args.dataset}_ednce/{args.folder}/{epoch}.png')        
+        fig.savefig(f'{ckpt_dir}/{epoch}.png')        
         embedding = model.token_embedding.weight.detach().cpu().numpy()
-        np.save(f'{args.ckpt_dir}/ckpts/api_{args.dataset}_ednce/{args.folder}/embedding_{epoch}.npy', embedding)
+        np.save(f'{ckpt_dir}/embedding_{epoch}.npy', embedding)
         if patience_counter > patience:
             logger.info(f"Early stopping triggered at epoch {epoch}. Best loss: {best_loss}")
             break
@@ -715,8 +728,8 @@ def train_sgp(args, save_file, X_train, X_test, y_train, y_test):
 def bo(args, orig, grammar, model, token2rule, y_train, y_test, target_mean, target_std):
     ### IMPORTANT: y_train and y_test are 2D numpys, where the last column is the BO property
     folder = args.datapkl if args.datapkl else args.folder
-    ckpt_dir = f'{args.ckpt_dir}/ckpts/api_{args.dataset}_ednce/{folder}'    
-    save_dir = f'results/api_{args.dataset}_ednce/'
+    ckpt_dir = f'{args.ckpt_dir}/ckpts/{Path(CACHE_DIR).stem}/{args.folder}'
+    save_dir = f'results/{Path(CACHE_DIR).stem}/{args.folder}/'
     os.makedirs(save_dir, exist_ok=True)
     X_train = np.load(os.path.join(ckpt_dir, f"train_latent_{args.checkpoint}.npy"))
     X_test = np.load(os.path.join(ckpt_dir, f"test_latent_{args.checkpoint}.npy"))
@@ -830,8 +843,8 @@ def bo(args, orig, grammar, model, token2rule, y_train, y_test, target_mean, tar
 def bo_ns(args, model, y_train, y_test, target_mean, target_std):
     ### IMPORTANT: y_train and y_test are 2D numpys, where the last column is the BO property
     folder = args.datapkl if args.datapkl else args.folder
-    ckpt_dir = f'{args.ckpt_dir}/ckpts/api_{args.dataset}_ednce/{folder}'    
-    save_dir = f'results/api_{args.dataset}_ednce/'
+    ckpt_dir = f'{args.ckpt_dir}/ckpts/{Path(CACHE_DIR).stem}/{args.folder}'
+    save_dir = f'results/{Path(CACHE_DIR).stem}/{args.folder}/'
     os.makedirs(save_dir, exist_ok=True)
     X_train = np.load(os.path.join(ckpt_dir, f"train_latent_{args.checkpoint}.npy"))
     X_test = np.load(os.path.join(ckpt_dir, f"test_latent_{args.checkpoint}.npy"))
@@ -1399,7 +1412,10 @@ def load_data(args, anno, grammar, orig, cache_dir, num_graphs, graph_args):
 
 
 def hash_args(args, use_keys=['dataset', 'encoder', 'repr', 'order']):
+    # if ablation
     arg_dict = {k: v for k, v in args.__dict__.items() if k in use_keys}
+    if 'ablation' in os.environ['config']: # for ablation exps
+        arg_dict['config'] = os.environ['config']    
     return hashlib.md5(json.dumps(arg_dict, sort_keys=True).encode()).hexdigest()
 
 def is_novel(g, orig_graphs):
@@ -1891,14 +1907,15 @@ def main_sgp(args):
 
 
 def main(args):
-    cache_dir = f'{args.cache_root}/cache/api_{args.dataset}_ednce/'
+    cache_dir = f'{args.cache_root}/{CACHE_DIR}'
     folder = hash_args(args)
+    ckpt_dir = f'{args.ckpt_dir}/ckpts/{Path(CACHE_DIR).stem}/{folder}'
     print(f"folder: {folder}")
     setattr(args, "folder", folder)
-    os.makedirs(f'{args.ckpt_dir}/ckpts/api_{args.dataset}_ednce/{folder}', exist_ok=True)
-    os.makedirs(f'{args.cache_root}/cache/api_{args.dataset}_ednce/{folder}', exist_ok=True)
+    os.makedirs(ckpt_dir, exist_ok=True)
+    os.makedirs(f'{args.cache_root}/{CACHE_DIR}{folder}', exist_ok=True)
     #json.dumps(args.__dict__, folder)
-    args_path = os.path.join(f'{args.ckpt_dir}/ckpts/api_{args.dataset}_ednce/{folder}', "args.txt")
+    args_path = os.path.join(ckpt_dir, "args.txt")
     with open(args_path, "w") as f:
         for arg_name, arg_value in sorted(args.__dict__.items()):
             f.write(f"{arg_name}: {arg_value}\n")
@@ -1909,6 +1926,7 @@ def main(args):
     if args.dataset == "ckt":
         num_graphs = 10000
         orig = load_ckt(args, load_all=True)
+        graph_args = None
     elif args.dataset == "bn":        
         num_graphs = 200000
         orig, graph_args = load_bn(args)
@@ -1919,7 +1937,7 @@ def main(args):
     else:
         raise NotImplementedError            
     if args.repr == "digged":
-        train_data, test_data, token2rule = load_data(args, anno, grammar, orig, cache_dir, num_graphs)
+        train_data, test_data, token2rule = load_data(args, anno, grammar, orig, cache_dir, num_graphs, graph_args)
     else:
         train_data, test_data = load_data(args, None, None, orig, cache_dir, num_graphs, graph_args)
     if args.datapkl:
@@ -1941,16 +1959,15 @@ def main(args):
     train_y = (train_y-mean_train_y)/std_train_y
     test_y = (test_y-mean_train_y)/std_train_y
     if args.repr == "digged":
-        bo(args, orig, grammar, model, token2rule, train_y, test_y, mean_train_y[-1], std_train_y[-1])
-    else:
-        bo_ns(args, model, train_y, test_y, mean_train_y[-1], std_train_y[-1])
-    if args.repr == "digged":
         graphs = interactive_sample_sequences(args, model, grammar, token2rule,max_seq_len=MAX_SEQ_LEN, unique=False, visualize=False)
     else:
         graphs = ns_sample_sequences(args, model, max_seq_len=MAX_SEQ_LEN, unique=False, visualize=True)
     metrics = evaluate(orig, graphs)
     print(metrics)
-
+    if args.repr == "digged":
+        bo(args, orig, grammar, model, token2rule, train_y, test_y, mean_train_y[-1], std_train_y[-1])
+    else:
+        bo_ns(args, model, train_y, test_y, mean_train_y[-1], std_train_y[-1])
 
 
 
