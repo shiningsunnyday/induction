@@ -581,7 +581,9 @@ def insets_and_outsets(graph, nodes):
         assert graph.nodes[f"{prefix}:0"]['type'] == 'input'
         equiv_dir = []
         for e in equiv:
-            if RESTRICT_POSS_DIRS:
+            if RANDOMIZE_POSS_DIRS:
+                d = ['in', 'out']            
+            elif RESTRICT_POSS_DIRS:
                 has_paths = np.array([[[nx.has_path(graph, n, ei), nx.has_path(graph, ei, n)] \
                     for n in nodes] \
                     for ei in e])
@@ -596,6 +598,9 @@ def insets_and_outsets(graph, nodes):
                 d = ['in', 'out']
             equiv_dir.append(d)
         poss_dirs = list(product(*equiv_dir))
+        if RANDOMIZE_POSS_DIRS: # ratio
+            num_dirs = max(1, int(len(poss_dirs)*RANDOMIZE_POSS_DIRS))
+            poss_dirs = random.sample(poss_dirs, num_dirs)
         ### acyclic constraint
         # for faster pruning when resolving ambiguity later, enforce acyclic constraint on poss_dirs
         # first, find partial order over out_ns        

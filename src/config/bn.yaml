@@ -22,6 +22,7 @@ MAX_TRIES: 10
 CACHE_SUBG: True
 LINEAR: True # at most 1 nt per comp, and subgraph must contain nt if present
 RESTRICT_POSS_DIRS: False # direction of neighbors limited (tradeoff expressivity vs efficiency)
+RANDOMIZE_POSS_DIRS: 0.0
 MIN_EMBEDDING: False # take the minimum or maximum embedding for each rule
 LIMIT_FOR_GREEDY: 1000
 NUM_RANDOM_SEARCH_TRIES: 10

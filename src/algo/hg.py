@@ -153,12 +153,12 @@ def llm_call(img_paths, prompt_path, optional_prompts=[], prompt=None, return_lo
         descr += f"\nPROMPT: {prompt}"
     if VERBOSE:
         logger.info(f"=====BEGIN LLM call=====\n{descr}\n")
-    # settings = {
-    #     "temperature": 0,
-    #     "seed": 42,
-    #     "top_p": 0,
-    #     "n": 1
-    # } # try to make deterministic
+    settings = {
+        "temperature": 0,
+        "seed": 42,
+        "top_p": 0,
+        "n": 1
+    } # try to make deterministic
     settings = {}
     if return_logprobs:
         settings['top_logprobs'] = 5

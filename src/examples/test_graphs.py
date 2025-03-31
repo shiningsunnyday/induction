@@ -397,7 +397,10 @@ def load_ckt(args, load_all=False):
 
     load_all: whether to load all ckts or just half
     """
-    ambiguous_file = args.ambiguous_file
+    if args.cache_root and args.ambiguous_file:
+        ambiguous_file = os.path.join(args.cache_root, args.ambiguous_file)
+    else:
+        ambiguous_file = args.ambiguous_file
     cwd = os.getcwd()
     data_dir = f"{cwd}/data/nx/ckt/"
     if args.num_data_samples is not None:

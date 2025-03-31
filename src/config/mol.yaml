@@ -8,7 +8,7 @@ IMG_DIR: "data/api_mol_hg/"
 CACHE_DIR: "cache/api_mol_hg/"
 
 NUM_THREADS: 1
-NUM_PROCS: 1
+NUM_PROCS: 100
 VISUALIZE: false
 VERBOSE: true
 CACHE: false

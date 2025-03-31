@@ -53,10 +53,10 @@ def main(args):
         # transformer_regression(samples)
     
     if 'generate' in args.task:
-        path = os.path.join(IMG_DIR, f"smiles-{args.dataset}-{args.seed}.txt")        
+        path = os.path.join(IMG_DIR, f"smiles-{args.mol_dataset}-{args.seed}.txt")        
         # gr, _, _ = pickle.load(open(f'{os.getcwd()}/cache/api_ckt_ednce/12.pkl', 'rb'))
         gr = pickle.load(
-            open(os.path.join(IMG_DIR, f"grammar-{args.dataset}-{args.seed}.pkl"), "rb")
+            open(os.path.join(IMG_DIR, f"grammar-{args.mol_dataset}-{args.seed}.pkl"), "rb")
         )
         samples = gr.generate(args)
         # path = f"{os.getcwd()}/data/api_ckt_ednce/samples.txt"

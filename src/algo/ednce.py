@@ -545,14 +545,27 @@ def resolve_ambiguous(graphs, model, grammar, save_path, timeout=1000):
     # if NUM_PROCS > 1:
     #     found = enumerate_rules_mp(graphs, grammar)
     # else:    
-    # found = enumerate_rules(graphs, grammar)    
+    # found = enumerate_rules(graphs, grammar)  
+
+    # first things first, re-index graphs so it's in order of data
+    new_graphs = [None for _ in range(len(graphs))]
+    prefixes = [get_prefix(m.seq[0]) for m in model]
+    for i, g in zip(prefixes, graphs):
+        new_graphs[i] = g
+    graphs = new_graphs
     index_graphs = [(i, graph) for i, graph in enumerate(graphs)]
     sorted_graphs = sorted(index_graphs, key=lambda x:len(x[1]))
     all_derivs = {}
-    if os.path.exists(save_path):
+    if os.path.exists(save_path): # proceed to next version
         path = Path(save_path)
-        version = next_n(re.match("ambig_(\d+)", path.stem).groups()[0])
+        cur_version = re.match("ambig_(\d+)", path.stem).groups()[0]
+        cur = json.load(open(save_path))
+        counter = cur['redo'] # todo graphs
+        version = next_n(cur_version)
         save_path = os.path.join(path.parent, f"ambig_{version}.json")
+    else:
+        cur_version = 0
+        counter = range(len(graphs)) # todo graphs    
     cache_path = save_path.replace(".json", "_derivs.json")
     if os.path.exists(cache_path):
         all_derivs = json.load(open(cache_path))
@@ -611,7 +624,7 @@ def resolve_ambiguous(graphs, model, grammar, save_path, timeout=1000):
         derivs = all_derivs[i]
         inters = [bool(set(derivs[j]) & e) for j in range(len(derivs))]
         if np.all(inters): # all derivs for this graph requires a rule from e
-            best_counter.append(i) # graph is no longer in language
+            best_counter.append(counter[i]) # graph is no longer in language
     data = {'rules': best_e,
             'redo': best_counter}
     json.dump(data, open(save_path, 'w+'))
@@ -974,7 +987,11 @@ def learn_grammar(g, args):
         "global_logger",
         f"data/{METHOD}_{DATASET}_{GRAMMAR}{SUFFIX}.log",
     )
-    suffix = ('_' + Path(args.ambiguous_file).stem) if args.ambiguous_file is not None and os.path.exists(args.ambiguous_file) else  ''
+    if args.cache_root and args.ambiguous_file:
+        ambiguous_file = os.path.join(args.cache_root, args.ambiguous_file)
+    else:
+        ambiguous_file = args.ambiguous_file    
+    suffix = ('_' + Path(ambiguous_file).stem) if ambiguous_file is not None and os.path.exists(ambiguous_file) else  ''
     cache_iter, cache_path = setup(suffix, args.cache_root)
     if args.cache_root:
         cache_root = os.path.join(args.cache_root, CACHE_DIR)

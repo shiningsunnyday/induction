@@ -864,12 +864,12 @@ class Grammar(HRG):
     def generate(self, args):
         logger = create_logger(
             "global_logger",
-            f"{wd}/data/{METHOD}_{DATASET}_{GRAMMAR}-{args.dataset}-{args.seed}.log",
+            f"{wd}/data/{METHOD}_{DATASET}_{GRAMMAR}-{args.mol_dataset}-{args.seed}.log",
         )
         globals()["logger"] = logger
         idx = 1
         while True:
-            path = f"data/{args.dataset}/api_mol_hg_{idx}.txt" 
+            path = f"data/{args.mol_dataset}/api_mol_hg_{idx}.txt" 
             if os.path.exists(path):
                 globals()[f'prompt_{idx}_path'] = path
                 idx += 1
