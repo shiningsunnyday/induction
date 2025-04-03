@@ -520,8 +520,6 @@ def decode_from_latent_space_ns(z, model, max_seq_len):
 
 
 def train(args, train_data, test_data):    
-    if DATASET == "enas":
-        breakpoint()
     ckpt_dir = f'{args.ckpt_dir}/ckpts/{Path(CACHE_DIR).stem}/{args.folder}'
     if len(os.listdir(f"{ckpt_dir}")) == 0: # add necc. ckpts
         breakpoint()
@@ -556,6 +554,7 @@ def train(args, train_data, test_data):
 
     # Prepare data
     if args.encoder == "GNN":
+
         train_dataset = GraphDataset(train_data)
         test_dataset = GraphDataset(test_data)            
     else:       
@@ -702,6 +701,7 @@ def train_sgp(args, save_file, X_train, X_test, y_train, y_test):
     logger.info(f'Test ll: {testll}')
     pearson = float(pearsonr(pred.flatten(), y_test.flatten())[0])
     logger.info(f'Pearson r: {pearson}')
+    breakpoint()
     # Plot
     fig, ax = plt.subplots(figsize=(8, 8))
     ax.scatter(y_test.flatten(), pred.flatten(), color="blue", alpha=0.6, label="Predictions")
@@ -800,8 +800,8 @@ def bo(args, orig, grammar, model, token2rule, y_train, y_test, target_mean, tar
                 score = -evaluate_fn(valid_arcs_final[i])
                 if score == float("inf") or score != score:
                     score = y_train[:keep].max()*target_std+target_mean
-                if is_novel(valid_arcs_final[i], orig):
-                    novel_arcs.append((valid_arcs_final[i], score, iteration*args.BO_batch_size+i))
+                # if is_novel(valid_arcs_final[i], orig):
+                #     novel_arcs.append((valid_arcs_final[i], score, iteration*args.BO_batch_size+i))
                 if score < best_score:
                     best_score = score
                     best_deriv = '->'.join(map(str, generated_sequences[i]))
@@ -813,7 +813,7 @@ def bo(args, orig, grammar, model, token2rule, y_train, y_test, target_mean, tar
         save_object(scores, "{}scores{}.dat".format(save_dir, iteration))
         save_object(valid_arcs_final, "{}valid_arcs_final{}.dat".format(save_dir, iteration))
         save_object(generated_sequences, "{}generated_sequences{}.dat".format(save_dir, iteration))
-        save_object(novel_arcs, "{}novel_arcs.dat".format(save_dir))
+        # save_object(novel_arcs, "{}novel_arcs.dat".format(save_dir))
         if len(new_features) > 0:
             scores = np.array(scores)[:, None]
             X_train = np.concatenate([X_train, new_features], 0)
@@ -925,8 +925,8 @@ def bo_ns(args, model, y_train, y_test, target_mean, target_std):
                     score = y_train[:keep].max()*target_std+target_mean
                 if valid_arcs_final[i] is None:
                     continue                    
-                if is_novel(valid_arcs_final[i], orig):
-                    novel_arcs.append((valid_arcs_final[i], score, iteration*args.BO_batch_size+i))
+                # if is_novel(valid_arcs_final[i], orig):
+                #     novel_arcs.append((valid_arcs_final[i], score, iteration*args.BO_batch_size+i))
                 if score < best_score:
                     best_score = score
                     best_ns = valid_ns_final[i]
@@ -937,7 +937,7 @@ def bo_ns(args, model, y_train, y_test, target_mean, target_std):
         # logger.info(scores, np.mean(scores))
         save_object(scores, "{}scores{}.dat".format(save_dir, iteration))
         save_object(valid_arcs_final, "{}valid_arcs_final{}.dat".format(save_dir, iteration))
-        save_object(novel_arcs, "{}novel_arcs.dat".format(save_dir))
+        # save_object(novel_arcs, "{}novel_arcs.dat".format(save_dir))
         if len(new_features) > 0:
             scores = np.array(scores)[:, None]
             X_train = np.concatenate([X_train, new_features], 0)
@@ -1157,6 +1157,13 @@ def stringify(g):
         i1 = get_suffix(a)
         i2 = get_suffix(b)
         arr[i2-1][len(LOOKUP)+i1] = 1
+    # use START_TYPE to pad
+    for i in range(len(arr), graph_args.max_n-1):
+        row = [0 for _ in range(len(LOOKUP)+len(g)-1)]
+        row[graph_args.START_TYPE] = 1
+        arr.append(row)
+    arr = [row+[0 for _ in range(len(arr[0]), graph_args.num_vertex_type+graph_args.max_n-1)] for row in arr]
+    # pad empty
     return arr
     
 ### the following functions are copied from D-VAE/models.py, should later import instead
@@ -1927,8 +1934,12 @@ def main(args):
         grammar, anno, g = pickle.load(open(os.path.join(cache_dir, f'{version}.pkl'),'rb'))
     if args.dataset == "ckt":
         num_graphs = 10000
-        orig = load_ckt(args, load_all=True)
-        graph_args = None
+        orig = load_ckt(args, load_all=True)        
+        graph_args = argparse.Namespace()
+        graph_args.num_vertex_type = len(LOOKUP)
+        graph_args.max_n = max(map(len, orig.comps.values()))
+        graph_args.START_TYPE = list(LOOKUP).index('input')
+        graph_args.END_TYPE = list(LOOKUP).index('output')
     elif args.dataset == "bn":        
         num_graphs = 200000
         orig, graph_args = load_bn(args)
@@ -1979,7 +1990,6 @@ if __name__ == "__main__":
     parser.add_argument("--ckpt_dir", default="/ssd/msun415/induction")
     # data hparams
     parser.add_argument("--dataset", choices=["ckt", "bn", "enas"], default="ckt")
-    parser.add_argument("--num-samples", type=int, default=100)
     parser.add_argument("--sample-batch-size", type=int, default=10)
     # repr
     parser.add_argument("--repr", choices=["digged", "ns"], default="digged", help="digged or node string (ns)")
