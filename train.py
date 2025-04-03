@@ -946,9 +946,9 @@ def bo_ns(args, model, y_train, y_test, target_mean, target_std):
         #
         # logger.info("Current iteration {}'s best score: {}".format(iteration, - best_score * std_y_train - mean_y_train))
         if best_arc is not None: # and iteration == 10:
-            logger.info(f"Best ns: {best_ns}")
-            with open(save_dir + 'best_ns_scores.txt', 'a') as score_file:
-                score_file.write(best_ns + ',{:.4f}\n'.format(best_score))
+            # logger.info(f"Best ns: {best_ns}")
+            # with open(save_dir + 'best_ns_scores.txt', 'a') as score_file:
+            #     score_file.write(best_ns + ',{:.4f}\n'.format(best_score))
             if args.dataset == 'enas':
                 # row = [int(x) for x in best_arc.split()]
                 # g_best, _ = decode_ENAS_to_igraph(flat_ENAS_to_nested(row, 8-2))
@@ -2009,5 +2009,4 @@ if __name__ == "__main__":
                         help='from which distrbiution to sample random points in the latent \
                         space as candidates to select; uniform or normal')       
     args = parser.parse_args()  
-    breakpoint()
     main(args)
