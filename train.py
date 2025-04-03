@@ -1333,6 +1333,7 @@ def load_data(args, anno, grammar, orig, cache_dir, num_graphs, graph_args):
             for pre in tqdm(range(num_graphs), "gathering node strings"):
                 g_orig = nx.induced_subgraph(orig, orig.comps[pre])
                 # g_orig = g_orig.copy()
+                breakpoint()
                 node_str = stringify(g_orig)
                 if args.order == "bfs":
                     node_str = torch.tensor([node_str])
@@ -2019,4 +2020,5 @@ if __name__ == "__main__":
                         help='from which distrbiution to sample random points in the latent \
                         space as candidates to select; uniform or normal')       
     args = parser.parse_args()  
+    breakpoint()
     main(args)
