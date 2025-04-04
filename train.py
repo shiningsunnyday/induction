@@ -1333,20 +1333,19 @@ def load_data(args, anno, grammar, orig, cache_dir, num_graphs, graph_args):
             for pre in tqdm(range(num_graphs), "gathering node strings"):
                 g_orig = nx.induced_subgraph(orig, orig.comps[pre])
                 # g_orig = g_orig.copy()
-                breakpoint()
                 node_str = stringify(g_orig)
                 if args.order == "bfs":
                     node_str = torch.tensor([node_str])
                     adj, feat = G_to_adjfeat(node_str, graph_args.max_n, graph_args.num_vertex_type)
                     node_str = adjfeat_to_G(*bfs(adj, feat))  # 1 * n_vertex * (n_types + n_vertex)
-                    # if g_orig.shape[1] < max_n:
-                    #     padding = torch.zeros(1, max_n-g.shape[1], g.shape[2]).to(get_device())
-                    #     padding[0, :, START_TYPE] = 1  # treat padding nodes as start_type
-                    #     g = torch.cat([g, padding], 1)  # 1 * max_n * (n_types + n_vertex)
-                    # if g.shape[2] < xs:
-                    #     padding = torch.zeros(1, g.shape[1], xs-g.shape[2]).to(get_device())
-                    #     g = torch.cat([g, padding], 2)  # pad zeros to indicate no connections to padding 
-                    #                                     # nodes, g: 1 * max_n * xs
+                    if node_str.shape[1] < graph_args.max_n:
+                        padding = torch.zeros(1, graph_args.max_n-node_str.shape[1], node_str.shape[2])
+                        padding[0, :, graph_args.START_TYPE] = 1  # treat padding nodes as start_type
+                        node_str = torch.cat([node_str, padding], 1)  # 1 * max_n * (n_types + n_vertex)
+                    if node_str.shape[2] < graph_args.num_vertex_type+graph_args.max_n:
+                        padding = torch.zeros(1, node_str.shape[1], graph_args.num_vertex_type+graph_args.max_n-node_str.shape[2])
+                        node_str = torch.cat([node_str, padding], 2)  # pad zeros to indicate no connections to padding 
+                                                        # nodes, g: 1 * max_n * xs
                     node_str = node_str[0]
                 elif args.order == "random":
                     node_str = torch.tensor([node_str])
