@@ -28,6 +28,7 @@ def get_parser():
     parser.add_argument("--ablate_tree", action='store_true') 
     parser.add_argument("--ablate_merge", action='store_true') 
     parser.add_argument("--ablate_root", action='store_true') 
+    parser.add_argument("--text_only", action='store_true') 
     # task params
     parser.add_argument("--task", nargs='+', choices=["learn","generate","prediction"])
     parser.add_argument("--seed")
@@ -35,7 +36,7 @@ def get_parser():
     # mol dataset args
     parser.add_argument(
         "--mol-dataset",
-        choices=["ptc","hopv","polymers_117", "isocyanates", "chain_extenders", "acrylates"],
+        choices=["ptc","hopv","polymers_117", "isocyanates", "chain_extenders", "acrylates","moses", "molqa"],
     )
     parser.add_argument(
         "--num-data-samples", type=int

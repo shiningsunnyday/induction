@@ -4,7 +4,15 @@ from src.draw.mol import *
 import hashlib
 import time
 from filelock import FileLock
+import threading
 
+def get_thread_logger():
+    """
+    Returns a logger whose name encodes the current thread.
+    """
+    thread_name = threading.current_thread().name
+    logger_name = f"global_logger.{thread_name}"
+    return logging.getLogger(logger_name)
 
 def hash_dict(d):
     # Convert the dictionary into a tuple of sorted key-value pairs
@@ -141,7 +149,8 @@ def llm_call(img_paths, prompt_path, optional_prompts=[], prompt=None, return_lo
     Output:
         Response of call
     """
-    logger = logging.getLogger("global_logger")
+    # logger = logging.getLogger("global_logger")
+    logger = get_thread_logger()
     descr = ""
     if len(img_paths):
         descr += "IMG PATHS:"
@@ -230,7 +239,7 @@ def llm_choose_edit(img_paths, prompt_path, prompt=None):
     return ans_heads[0], cot
 
 
-def llm_edit_cliques(cg, mol, prompt_path, folder, scheme='zero', ablate=False):
+def llm_edit_cliques(cg, mol, prompt_path, folder, scheme='zero', ablate=False, text_only=False):
     # if folder is None:
     #     d = get_next_version(IMG_DIR)
     #     dir_name = os.path.join(IMG_DIR, f"{d}")        
@@ -239,18 +248,26 @@ def llm_edit_cliques(cg, mol, prompt_path, folder, scheme='zero', ablate=False):
     os.makedirs(dir_name, exist_ok=True)
     cots = []
     while True:
-        i = get_next_version(dir_name, dir=False)
-        path = os.path.join(dir_name, f"{i}.png")
-        cliques = clique_drawing(cg, mol, path, scheme=scheme)
-        path_indv = os.path.join(dir_name, f"{i}_indv.png")
-        clique_drawing(cg, mol, path_indv, scheme=scheme, isolate=True)        
-        isolate_cot = llm_describe_cliques(cliques, [path_indv], prompt_6_path)        
+        if text_only:
+            path = None
+            path_indv = None
+        else:
+            i = get_next_version(dir_name, dir=False)
+            path = os.path.join(dir_name, f"{i}.png")
+            path_indv = os.path.join(dir_name, f"{i}_indv.png")
+        cliques = clique_drawing(cg, mol, path, scheme=scheme, text_only=text_only)        
+        clique_drawing(cg, mol, path_indv, scheme=scheme, isolate=True, text_only=text_only)
+        if text_only:
+            cliques, descr = cliques
+            isolate_cot = llm_describe_cliques(descr, [path_indv], prompt_6_path, text_only=text_only)
+        else:
+            isolate_cot = llm_describe_cliques(cliques, [path_indv], prompt_6_path, text_only=text_only)
         combined_prompt = ''.join(open(prompt_path).readlines())
         combined_prompt = combined_prompt.replace("<optional>", isolate_cot)
         if ablate:
             cots.append((isolate_cot, None))
             break
-        pair, cot = llm_choose_edit([path, path_indv], None, prompt=combined_prompt)
+        pair, cot = llm_choose_edit([] if text_only else [path, path_indv], None, prompt=combined_prompt)
         cots.append((isolate_cot, cot))
         match = re.match(f"(\d+),(\d+)", pair)
         if match:
@@ -273,37 +290,48 @@ def sanity_check_num_cliques(res):
     return num
 
 
-def llm_describe_cliques(cliques, paths, prompt_path):
-    logger = logging.getLogger("global_logger")
+def llm_describe_cliques(cliques, paths, prompt_path, text_only=False):
+    # logger = logging.getLogger("global_logger")
+    logger = get_thread_logger()
     # numbering_str = f'0 to {len(cliques)-1})'
     # post_prompt = (
     #     lambda res: f"I want you to do a simple check of the following response:\n{res}\n The input is a response from another language agent. I want you to sanity check if it contains descriptions for PRECISELY {len(cliques)} motifs, numbered from {numbering_str}. If there is an issue with the numbering, or the response is missing some motifs, the response fails the sanity check. Output YES if the response passes the sanity check, and NO otherwise."
     # )
     prompt = ''.join(open(prompt_path).readlines())
-    if len(cliques) > 1:
-        prompt = prompt.replace("<optional>", f"I will highlight for you {len(cliques)} of the substructures of a molecule. They are numbered one-by-one from Motif 0 to Motif {len(cliques)-1}, inclusive. I want you to explain, concisely, what each numbered motif is. Make sure to start from Motif 0 and go in order of the numbering. MAKE SURE you describe EVERY MOTIF!")
+    if text_only:
+        cliques_str = '\n'.join(cliques)
+        prompt = prompt.replace("<optional>", f"Here are {len(cliques)} substructures of a molecule.\n\n{cliques_str}.\n\nThey are numbered one-by-one from Motif 0 to Motif {len(cliques)-1}, inclusive. I want you to explain, concisely, what each numbered motif is. Make sure to start from Motif 0 and go in order of the numbering. MAKE SURE you describe EVERY MOTIF!")
     else:
-        prompt = prompt.replace("<optional>", "I will highlight for you ONE substructure of a molecule: Motif 0. I want you to explain, concisely, what this numbered motif is. For formatting reasons, make sure to answer in the format:\nMotif 0. [insert your description]")
+        if len(cliques) > 1:
+            prompt = prompt.replace("<optional>", f"I will highlight for you {len(cliques)} of the substructures of a molecule. They are numbered one-by-one from Motif 0 to Motif {len(cliques)-1}, inclusive. I want you to explain, concisely, what each numbered motif is. Make sure to start from Motif 0 and go in order of the numbering. MAKE SURE you describe EVERY MOTIF!")
+        else:
+            prompt = prompt.replace("<optional>", "I will highlight for you ONE substructure of a molecule: Motif 0. I want you to explain, concisely, what this numbered motif is. For formatting reasons, make sure to answer in the format:\nMotif 0. [insert your description]")
     tries = 0
     while True:
         if tries == MAX_TRIES:
             logger.error(f"{paths} exceeded max tries")
             sys.exit(1)
-        res = llm_call(paths, None, optional_prompts=[], prompt=prompt)
+        if text_only:
+            res = llm_call([], None, optional_prompts=[], prompt=prompt)
+        else:
+            res = llm_call(paths, None, optional_prompts=[], prompt=prompt)
         if sanity_check_num_cliques(res) == len(cliques):
             break                
         tries += 1
     return res
 
 
-def llm_choose_root(img_path, prompt_path, folder, scheme='zero'):
+def llm_choose_root(img_path, prompt_path, folder, scheme='zero', text_only=False):
     post_prompt = (
         lambda res: f"I want you to perform a simple data post-processing step of the following response:\n{res}\n The input is a response from another language agent. It may or may not contain an answer in the form of a single integer. If it does, output the integer and NOTHING ELSE. Don't include explanations or superlatives. Just output the answer. If it doesn't contain an answer in the form of a pair, output the single word NONE."
     )
     motif_cot = ''.join(open(os.path.join(folder, 'motifs_cot.txt')).readlines())    
     combined_prompt = ''.join(open(prompt_path).readlines())    
     combined_prompt = combined_prompt.replace("<optional>", motif_cot)    
-    ans_heads, cot = llm_call([img_path], None, optional_prompts=[post_prompt], prompt=combined_prompt)      
+    if text_only:
+        ans_heads, cot = llm_call([], None, optional_prompts=[post_prompt], prompt=combined_prompt)
+    else:
+        ans_heads, cot = llm_call([img_path], None, optional_prompts=[post_prompt], prompt=combined_prompt)      
     root = ans_heads[0]
     match = re.match("^\d+$", root)
     if match:
@@ -326,16 +354,20 @@ def init_tree(cg):
     return tree
 
 
-def llm_break_edge(img_path, prompt_path, prompt=None):
+def llm_break_edge(img_path, prompt_path, prompt=None, text_only=False):
     post_prompt = (
         lambda res: f"I want you to perform a simple data post-processing step of the following response:\n{res}\n The input is a response from another language agent. It may contain an answer in the form of a single integer for the LEAST important interaction. If it does, output the integer and NOTHING ELSE. Don't include explanations or superlatives. Just output the answer. If it doesn't contain an answer in the form of a pair, output the single word NONE."
     )
-    ans_heads, _ = llm_call([img_path], prompt_path, [post_prompt], prompt=prompt)
+    if text_only:
+        ans_heads, _ = llm_call([], prompt_path, [post_prompt], prompt=prompt)
+    else:
+        ans_heads, _ = llm_call([img_path], prompt_path, [post_prompt], prompt=prompt)
     return ans_heads[0]
 
 
-def llm_break_cycles(tree, mol, root, prompt_path, folder, scheme='zero'):
-    logger = logging.getLogger("global_logger")
+def llm_break_cycles(tree, mol, root, prompt_path, folder, scheme='zero', text_only=False):
+    # logger = logging.getLogger("global_logger")
+    logger = get_thread_logger()
     describe_post_prompt = (
         lambda res: f"I want you to perform a simple post-processing step of the following response:\n{res}\n The input is a response from another language agent. It describes motifs numbered from Motif 0 to Motif {len(tree)-1}, inclusive! I want you to rephrase each motif description by filling in X within the following sentence template: \nThis motif is X\n Be sure to condense the description and output a single PHRASE such that the sentence template is grammatically correct. Don't capitalize the first letter, since your answer should just be a phrase. Output your rephrasing for each motif on a SEPARATE line, using only a new line for delimiting different motifs. Don't output anything else. MAKE SURE you do it for EVERY MOTIF!"
     )
@@ -358,16 +390,22 @@ def llm_break_cycles(tree, mol, root, prompt_path, folder, scheme='zero'):
             break
         tries += 1
     while not nx.is_tree(tree):
-        i = get_next_version(dir_name, dir=False)
-        path = os.path.join(dir_name, f"{i}.png")
+        if text_only:
+            path = None
+        else:
+            i = get_next_version(dir_name, dir=False)
+            path = os.path.join(dir_name, f"{i}.png")
         cyc = nx.find_cycle(tree, root)
         if cyc:
-            path = draw_cycle(cyc, tree, mol, path)
+            if text_only:
+                path = None
+            else:
+                path = draw_cycle(cyc, tree, mol, path)
             combined_prompt = ''.join(open(prompt_path).readlines())
             interaction_descrs = [f"Interaction {i} features {describes[c[0]]} and {describes[c[1]]}." for i, c in enumerate(cyc)]
             interaction_descr = '\n'.join(interaction_descrs)
-            combined_prompt = combined_prompt.replace('<optional>', interaction_descr)
-            e = llm_break_edge(path, prompt_path, prompt=combined_prompt)
+            combined_prompt = combined_prompt.replace('<optional>', interaction_descr)            
+            e = llm_break_edge(path, prompt_path, prompt=combined_prompt, text_only=text_only)        
             match = re.match("^\d+$", e)
             if match:
                 e = int(e)-(scheme=='one')
@@ -458,9 +496,10 @@ def get_next_version(fig_dir, dir=True):
 
 
 def _learn_grammar(smiles, args):
-    logger = logging.getLogger("global_logger")
-    logger.info(f"begin learning grammar rules for {smiles}")
+    # logger = logging.getLogger("global_logger")    
+    logger = get_thread_logger()
     folder = f"data/api_mol_hg/learn-{time.time()}/"
+    logger.info(f"{folder} -- begin learning grammar rules for {smiles}")
     os.makedirs(folder, exist_ok=True)
     draw_smiles(smiles, path=os.path.join(folder, "smiles.png"), label_bonds=False)
     with open(os.path.join(folder, "smiles.txt"), "w+") as f:
@@ -470,7 +509,7 @@ def _learn_grammar(smiles, args):
     if VISUALIZE:
         base_motif_path = os.path.join(folder, "base_motifs.png")        
         clique_drawing(base_cg, mol, path=base_motif_path, scheme=args.scheme)
-    cg, path, cots = llm_edit_cliques(cg, mol, prompt_1_path, folder=folder, scheme=args.scheme, ablate=args.ablate_merge)
+    cg, path, cots = llm_edit_cliques(cg, mol, prompt_1_path, folder=folder, scheme=args.scheme, ablate=args.ablate_merge, text_only=args.text_only)
     with open(os.path.join(folder, 'motifs_cot.txt'), 'w+') as f:
         f.write(cots[-1][0])
     if not args.ablate_merge:
@@ -479,7 +518,7 @@ def _learn_grammar(smiles, args):
                 f.write(clique_cot)
     tree = init_tree(cg)
     if VERBOSE:
-        logger.info(f"Initialized tree is tree? {nx.is_tree(tree)}")
+        logger.info(f"{folder} -- Initialized tree is tree? {nx.is_tree(tree)}")
     motif_path = os.path.join(folder, "motifs.png")
     clique_drawing(cg, mol, path=motif_path, isolate=True, scheme=args.scheme)
     tries = 0
@@ -490,9 +529,9 @@ def _learn_grammar(smiles, args):
     else:
         while True:
             if tries == MAX_TRIES:
-                logger.error(f"choose root {folder} exceeded max tries")
+                logger.error(f"{folder} -- choose root {folder} exceeded max tries")
                 sys.exit(1)
-            root, cot = llm_choose_root(path, prompt_2_path, folder)
+            root, cot = llm_choose_root(path, prompt_2_path, folder, text_only=args.text_only)
             if root in tree:
                 break
             else:
@@ -502,7 +541,8 @@ def _learn_grammar(smiles, args):
     if args.ablate_tree:        
         tree = nx.maximum_spanning_tree(tree)
     else:
-        tree = llm_break_cycles(tree, mol, root, prompt_3_path, folder, scheme=args.scheme)
+        tree = llm_break_cycles(tree, mol, root, prompt_3_path, folder, scheme=args.scheme, text_only=args.text_only)
+    
     if VISUALIZE:
         try:
             cot = llm_describe_tree(tree, mol, root, prompt_4_path, folder)
@@ -532,13 +572,40 @@ def _learn_grammar(smiles, args):
             n = inv_labels_lookup[node_set]
             tree.nodes[n]["symbol"] = symbol
             tree.nodes[n]["rule"] = r
-    if VISUALIZE:
-        fig, ax = plt.subplots()
-        pos = hierarchy_pos(tree, root)
-        nx.draw_networkx(tree, pos, ax=ax, with_labels=True, labels=labels_lookup)
-        fig.savefig(os.path.join(folder, "tree.png"))
-        logger.info(os.path.abspath(os.path.join(folder, "tree.png")))
-        plt.close(fig)
+    # if VISUALIZE:
+    fig, ax = plt.subplots()
+    pos = hierarchy_pos(tree, root)
+    nx.draw_networkx(tree, pos, ax=ax, with_labels=True, labels=labels_lookup)
+    fig.savefig(os.path.join(folder, "tree.png"))
+    logger.info(os.path.abspath(os.path.join(folder, "tree.png")))
+    for n in tree:
+        tree.nodes[n]['atoms'] = []
+    order = []
+    visited = {}
+    def dfs(tree, cur, order, visited):
+        order.append(cur)
+        visited[cur] = True
+        for nei in tree[cur]:
+            if nei not in visited:
+                dfs(tree, nei, order, visited)
+    dfs(T, set_root, order, visited)
+    for a in mol.GetAtoms():            
+        b_idxes = set([b.GetIdx() for b in a.GetBonds()])
+        for n in order:
+            cond = len(b_idxes-n) == 0
+            if cond:
+                tree.nodes[inv_labels_lookup[n]]['atoms'].append(a.GetIdx())
+                break
+    if len(sum([tree.nodes[n]['atoms'] for n in tree], [])) != mol.GetNumAtoms():
+        logger.error(f"{smiles} failed")
+        raise ValueError(f"{smiles} failed")
+    for n in tree:
+        for attr in tree.nodes[n]        :
+            tree.nodes[n][attr] = str(tree.nodes[n][attr])
+    tree_path = os.path.join(folder, "tree.graphml")
+    tree.graph['root'] = root
+    nx.write_graphml(tree, tree_path)
+    plt.close(fig)
     # test_rhs = list(rules['(S)'])[0]
     # logger.info(test_rhs)
     # matches = re.findall('(\((?:\d+,)*\d+:(?:N)\))', test_rhs)
@@ -563,7 +630,7 @@ def _learn_grammar(smiles, args):
         fig.set_facecolor("white")
         fig.savefig(f"{folder}/rules.png")
         plt.close(fig)
-    logger.info(f"finish learning grammar rules for {smiles}")
+    logger.info(f"{folder} -- finish learning grammar rules for {smiles}")
     return g, tree
 
 
@@ -578,7 +645,9 @@ def grammar_inference(G, trees):
             for n in tree:
                 symbol = tree.nodes[n]["symbol"]
                 rule_str = tree.nodes[n]["rule"]
-                rule_idx = G.rule_idx_lookup[smi if smi not in bad_smis else bad_smis[smi]][symbol][rule_str]
+                if smi not in G.rule_idx_lookup:
+                    smi = bad_smis[smi]
+                rule_idx = G.rule_idx_lookup[smi][symbol][rule_str]                
                 counts[rule_idx] += 1
     G.hrg.set_counts(counts)
 
@@ -588,6 +657,7 @@ def learn_grammar(smiles_or_list, args):
         "global_logger",
         f"{wd}/data/{METHOD}_{DATASET}_{GRAMMAR}-{args.mol_dataset}-{args.seed}.log",
     )
+    
     if args.grammar_ckpt and os.path.exists(args.grammar_ckpt):
         G, trees = pickle.load(open(args.grammar_ckpt, 'rb'))
         exist_smiles = set([Chem.CanonSmiles(s) for s in G.mol_lookup])
@@ -624,7 +694,8 @@ def learn_grammar(smiles_or_list, args):
                 open(
                     args[0][1].grammar_ckpt, "wb+"
                 ),
-                )             
+                )
+                logger.info(f"dumped checkpoint: {len(trees)}")             
         return G, trees
 
     def multi_thread_execute(func, args, G=None, trees=None):
@@ -641,11 +712,13 @@ def learn_grammar(smiles_or_list, args):
             for future in concurrent.futures.as_completed(futures):
                 with lock:
                     g, tree = future.result()
+                    logger.info(f"{g.folder} completed")
                     trees.append(tree)
                     if G is None:
                         G = g
                     else:
-                        G = G.combine(g)                    
+                        G = G.combine(g)            
+                    logger.info(f"{g.folder} combined")        
                     if args[0][1].grammar_ckpt:
                         if len(trees) > 1:
                             if len(trees) != len(G.mol_lookup):
@@ -657,6 +730,7 @@ def learn_grammar(smiles_or_list, args):
                             args[0][1].grammar_ckpt, "wb+"
                         ),
                         )
+                        logger.info(f"dumped checkpoint: {len(trees)}")
         return G, trees
 
     if isinstance(smiles_or_list, list):
@@ -667,6 +741,7 @@ def learn_grammar(smiles_or_list, args):
         else:
             G, trees = multi_thread_execute(_learn_grammar, task_args, G, trees)
         # probabilistic grammar inference => populate counts
+        breakpoint()
         if len(trees) > 1:
             grammar_inference(G, {smi: [tree] for (smi, tree) in zip(G.mol_lookup, trees)})
         pickle.dump(

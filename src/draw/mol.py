@@ -12,6 +12,7 @@ from src.config import VISUALIZE
 import io
 import os
 from pathlib import Path
+from copy import deepcopy
 
 
 def GetBondPosition(mol, bond, return_atom_pos=False):
@@ -112,6 +113,7 @@ def _extract_subgraph(mol, selected_atoms, selected_bonds=None):
 
 
 
+
 def draw_smiles(smiles, ax=None, order=[], path="", label_atoms=True, label_atom_idx=False, label_bonds=True, maxFontSize=12, atomLabelFontSize=12, fontSize=15, dpi=500, width=-1, height=-1, label_bond_type=False):
     mol = Chem.MolFromSmiles(smiles)
     for j, a in enumerate(mol.GetAtoms()):
@@ -186,7 +188,7 @@ def draw_mol(mol, ax=None, bonds=None, return_drawer=False):
     return img    
 
 
-def draw_cliques(cg, mol, ax=None, cq=None, label=True, label_atoms=True, label_atom_idx=False):
+def draw_cliques(cg, mol, ax=None, cq=None, label=True, label_atoms=True, label_atom_idx=False, text_only=False):
     """
     This function draws the cliques in cq, highlighting them in mol.
     Parameters:
@@ -198,8 +200,9 @@ def draw_cliques(cg, mol, ax=None, cq=None, label=True, label_atoms=True, label_
             list of tuples
         label: whether to annotate the id as text
         label_atoms: whether to label atomic symbols
+        text_only: whether to return text only
     Output:
-        Image drawn
+        Image drawn or Textual Description (text_only)
     """
     for j, a in enumerate(mol.GetAtoms()):
         atom_label = f"{a.GetSymbol()}"
@@ -241,49 +244,83 @@ def draw_cliques(cg, mol, ax=None, cq=None, label=True, label_atoms=True, label_
             y /= len(cq)              
             label = f"e{e}"
             drawer.DrawString(label, Point2D(x, y))    
-    drawer.DrawMoleculeWithHighlights(mol, '', 
+    if text_only:
+        atoms = GetAtomsFromBonds(mol, list(highlight_bond_map))
+        mol = deepcopy(mol)
+        for atom in mol.GetAtoms():
+            atom.SetProp("molAtomMapNumber", str(atom.GetIdx()))
+        numbered_smi = Chem.MolToSmiles(mol)
+        motif_atoms = ','.join(map(str, sorted(atoms)))
+        ans = (numbered_smi, motif_atoms)
+        return ans
+    else:
+        drawer.DrawMoleculeWithHighlights(mol, '', 
                                         highlight_atom_map={}, 
                                         highlight_bond_map=highlight_bond_map, 
                                         highlight_radii={}, 
                                         highlight_linewidth_multipliers={})       
-    drawer.FinishDrawing()
-    # drawer.WriteDrawingText(os.path.join(dir_name, f'{i}.png'))
-    img_data = drawer.GetDrawingText()
-    image = io.BytesIO(img_data)
-    img = plt.imread(image)
-    if ax:        
-        ax.imshow(img)    
-    return img
+        drawer.FinishDrawing()
+        # drawer.WriteDrawingText(os.path.join(dir_name, f'{i}.png'))
+        img_data = drawer.GetDrawingText()
+        image = io.BytesIO(img_data)
+        img = plt.imread(image)
+        if ax:        
+            ax.imshow(img)    
+        return img
 
 
-def clique_drawing(cg, mol, path, isolate=False, scheme='zero'):
+def clique_drawing(cg, mol, path, isolate=False, scheme='zero', text_only=False):    
+    if text_only:
+        assert path is None
+        assert not VISUALIZE
     # draw_cliques(cg, mol)
     cliques = list(nx.find_cliques(cg))
     n = len(cliques)
     d = int(np.sqrt(n))
     h = (n+d-1) // d
-    fig, axes = plt.subplots(d, h)
-    axes = flatten(axes)
-    ppath = Path(path)
-    for ax in axes:
-        ax.axis("off")
-    white_shape = None
-    for i, (cq, ax) in enumerate(zip(cliques, axes)):
+    res = []
+    if not text_only:
+        fig, axes = plt.subplots(d, h)
+        axes = flatten(axes)
+        ppath = Path(path)
+        for ax in axes:
+            ax.axis("off")
+        white_shape = None
+        pack_args = enumerate(zip(cliques, axes))
+    else:
+        pack_args = enumerate(cliques)
+    for parg in pack_args:
+        if text_only:
+            i, cq = parg
+            ax = None
+        else:
+            i, (cq, ax) = parg
         if VISUALIZE:
             fig_i, fig_ax = plt.subplots()
             fig_ax.axis("off")
-        ax.set_title(str(i if scheme =='zero' else i+1))
+        if not text_only: 
+            ax.set_title(str(i if scheme =='zero' else i+1))
         if isolate: 
             cq_atoms = GetAtomsFromBonds(mol, cq)
             submol = _extract_subgraph(mol, selected_atoms=cq_atoms, selected_bonds=cq)
-            img = draw_mol(submol, ax=ax)
-            if i == 0 and len(axes) > len(cliques):
-                white_shape = img.shape
+            if text_only:
+                smi = Chem.MolToSmiles(submol)
+                res.append(smi)
+            else:
+                img = draw_mol(submol, ax=ax)
+                if i == 0 and len(axes) > len(cliques):
+                    white_shape = img.shape
             if VISUALIZE:
                 draw_mol(submol, ax=fig_ax)
         else:
-            img = draw_cliques(cg, mol, ax=ax, cq=(i, cq), label=False)
-            if i == 0 and len(axes) > len(cliques):
+            img = draw_cliques(cg, mol, ax=ax, cq=(i, cq), label=False, text_only=text_only)
+            if text_only:
+                orig_smiles, motif_atoms = img
+                if i == 0:
+                    res.append(f"Molecule: {orig_smiles}\n\nMotif {i}: {motif_atoms}")
+                else:
+                    res.append(f"Motif {i}: {motif_atoms}")
+            elif i == 0 and len(axes) > len(cliques):
                 white_shape = img.shape
             if VISUALIZE:
                 draw_cliques(cg, mol, ax=fig_ax, cq=(i, cq), label=False)        
@@ -292,13 +329,16 @@ def clique_drawing(cg, mol, path, isolate=False, scheme='zero'):
             path_i = path.replace(ppath.suffix, f"_{i}{ppath.suffix}")
             fig_i.savefig(path_i, bbox_inches="tight", dpi=500)
             plt.close(fig_i)
-    for i in range(len(cliques), len(axes)):
-        axes[i].imshow(np.ones(white_shape))
-    fig.set_facecolor("white")
-    fig.savefig(path, bbox_inches="tight", dpi=500)
-    print(os.path.abspath(path))
-    plt.close(fig)
-    return cliques
+    if not text_only:
+        for i in range(len(cliques), len(axes)):
+            axes[i].imshow(np.ones(white_shape))
+        fig.set_facecolor("white")
+        fig.savefig(path, bbox_inches="tight", dpi=500)
+        print(os.path.abspath(path))
+        plt.close(fig)
+        return cliques
+    else:
+        return cliques, res
 
 
 def draw_cycle(cyc, tree, mol, path, scheme='zero'):

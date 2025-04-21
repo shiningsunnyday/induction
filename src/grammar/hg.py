@@ -850,7 +850,7 @@ class Grammar(HRG):
         return list(smis)
 
     @staticmethod
-    def _multi_mp_execute(func, arg, num_samples, batch_size=10 * NUM_PROCS):
+    def _multi_mp_execute(func, arg, num_samples, batch_size=100 * NUM_PROCS):
         with mp.Manager() as manager:
             shared_dict = manager.dict()
             smis = []
