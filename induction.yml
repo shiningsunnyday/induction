@@ -1,73 +1,132 @@
-name: ckt
+name: induction
 channels:
+  - conda-forge
   - defaults
 dependencies:
   - _libgcc_mutex=0.1=main
   - _openmp_mutex=5.1=1_gnu
-  - ca-certificates=2024.3.11=h06a4308_0
-  - certifi=2022.12.7=py37h06a4308_0
+  - backcall=0.2.0=pyh9f0ad1d_0
+  - ca-certificates=2024.7.4=hbcca054_0
+  - certifi=2024.7.4=pyhd8ed1ab_0
+  - decorator=5.1.1=pyhd8ed1ab_0
+  - entrypoints=0.4=pyhd8ed1ab_0
+  - ipython=7.33.0=py37h89c1867_0
+  - ipython_genutils=0.2.0=pyhd8ed1ab_1
+  - jedi=0.19.1=pyhd8ed1ab_0
+  - jupyter_client=5.3.4=py37_0
+  - jupyter_core=4.5.0=py_0
   - ld_impl_linux-64=2.38=h1181459_1
   - libffi=3.4.4=h6a678d5_1
   - libgcc-ng=11.2.0=h1234567_1
   - libgomp=11.2.0=h1234567_1
+  - libsodium=1.0.18=h36c2ea0_1
   - libstdcxx-ng=11.2.0=h1234567_1
+  - matplotlib-inline=0.1.7=pyhd8ed1ab_0
   - ncurses=6.4=h6a678d5_0
   - openssl=1.1.1w=h7f8727e_0
+  - parso=0.8.4=pyhd8ed1ab_0
+  - pexpect=4.9.0=pyhd8ed1ab_0
+  - pickleshare=0.7.5=py_1003
   - pip=22.3.1=py37h06a4308_0
+  - prompt-toolkit=3.0.47=pyha770c72_0
+  - ptyprocess=0.7.0=pyhd3deb0d_0
+  - pygments=2.16.1=pyhd8ed1ab_0
   - python=3.7.16=h7a1cb2a_0
+  - python_abi=3.7=2_cp37m
   - readline=8.2=h5eee18b_0
   - setuptools=65.6.3=py37h06a4308_0
+  - six=1.16.0=pyh6c4a22f_0
   - sqlite=3.45.3=h5eee18b_0
   - tk=8.6.14=h39e8969_0
+  - wcwidth=0.1.9=pyh9f0ad1d_0
   - wheel=0.38.4=py37h06a4308_0
   - xz=5.4.6=h5eee18b_1
+  - zeromq=4.3.5=h6a678d5_0
   - zlib=1.2.13=h5eee18b_1
   - pip:
+      - aiohttp==3.8.6
+      - aiosignal==1.3.1
+      - async-timeout==4.0.3
+      - asynctest==0.13.0
+      - attrs==24.2.0
+      - black==23.3.0
       - charset-normalizer==3.3.2
+      - click==8.1.7
       - cycler==0.11.0
+      - debugpy==1.7.0
+      - fcd-torch==1.0.7
+      - filelock==3.12.2
       - fonttools==4.38.0
+      - frozenlist==1.3.3
       - gensim==4.2.0
       - googledrivedownloader==0.4
+      - graphviz==0.20.1
       - idna==3.7
       - igraph==0.10.8
       - importlib-metadata==4.13.0
+      - ipykernel==6.16.2
       - isodate==0.6.1
       - jinja2==3.1.4
       - joblib==1.3.2
+      - jupyter-client==7.4.9
+      - jupyter-core==4.12.0
       - kiwisolver==1.4.5
+      - littleutils==0.2.2
       - markupsafe==2.1.5
       - matplotlib==3.5.3
+      - molsets==0.3.1
+      - multidict==6.0.5
+      - mypy-extensions==1.0.0
+      - nest-asyncio==1.6.0
       - networkx==2.6.3
       - numpy==1.21.6
       - nvidia-cublas-cu11==11.10.3.66
       - nvidia-cuda-nvrtc-cu11==11.7.99
       - nvidia-cuda-runtime-cu11==11.7.99
       - nvidia-cudnn-cu11==8.5.0.96
+      - ogb==1.3.6
+      - openai==0.28.0
+      - opencv-python==4.11.0.86
+      - outdated==0.2.2
       - packaging==24.0
       - pandas==1.3.5
+      - pathspec==0.11.2
       - pillow==9.5.0
+      - platformdirs==4.0.0
+      - pomegranate==0.12.0
+      - psutil==6.0.0
+      - pyarrow==12.0.1
       - pyparsing==3.1.2
+      - pypdf2==3.0.1
       - python-dateutil==2.9.0.post0
-      - python-graphviz==0.20.1
       - python-igraph==0.10.8
       - python-louvain==0.16
       - pytz==2024.1
+      - pyyaml==6.0.1
+      - pyzmq==26.2.0
       - rdflib==6.3.2
+      - rdkit==2023.3.2
       - requests==2.31.0
       - scikit-learn==1.0.2
       - scipy==1.7.3
-      - six==1.16.0
+      - seaborn==0.12.2
+      - selfies==2.2.0
       - smart-open==7.0.4
       - texttable==1.7.0
       - threadpoolctl==3.1.0
+      - tomli==2.0.1
       - torch==1.13.1
       - torch-geometric==1.7.2
       - torch-scatter==2.1.1
       - torch-sparse==0.6.17
       - torchvision==0.14.1
+      - tornado==6.2
       - tqdm==4.66.4
+      - traitlets==5.9.0
+      - typed-ast==1.5.5
       - typing-extensions==4.7.1
       - urllib3==2.0.7
       - wrapt==1.16.0
+      - yarl==1.9.4
       - zipp==3.15.0
-prefix: /home/msun415/miniconda3/envs/ckt
+prefix: /home/msun415/miniconda3/envs/induction
