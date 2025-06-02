@@ -7,7 +7,7 @@ FILE_NAME: "data/api_mol_hg.txt"
 IMG_DIR: "data/api_mol_hg/"
 CACHE_DIR: "cache/api_mol_hg/"
 
-NUM_THREADS: 20
+NUM_THREADS: 100
 NUM_PROCS: 1
 VISUALIZE: false
 VERBOSE: true

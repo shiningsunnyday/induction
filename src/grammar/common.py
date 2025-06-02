@@ -36,7 +36,7 @@ def get_parser():
     # mol dataset args
     parser.add_argument(
         "--mol-dataset",
-        choices=["ptc","hopv","polymers_117", "isocyanates", "chain_extenders", "acrylates","moses", "molqa"],
+        choices=["ptc","hopv","polymers_117", "isocyanates", "chain_extenders", "acrylates","moses", "molqa"]+[f"molqa_{i}" for i in range(6)],
     )
     parser.add_argument(
         "--num-data-samples", type=int

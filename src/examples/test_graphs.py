@@ -336,7 +336,7 @@ def load_BN_graphs(path, num_samples, n_types=8, fmt='igraph', rand_seed=0, with
 
 def load_enas(args):
     num_samples = args.num_data_samples
-    data, graph_args = load_ENAS_graphs('D-VAE/data/final_structures6.txt', num_samples, n_types=6, fmt='igraph')
+    data, graph_args = load_ENAS_graphs('dagnn/dvae/data/final_structures6.txt', num_samples, n_types=6, fmt='igraph')
     whole_g = nx.DiGraph()
     gs = []
     gs_dict = {}
@@ -358,7 +358,7 @@ def load_enas(args):
 
 def load_bn(args):
     num_samples = args.num_data_samples
-    data, graph_args = load_BN_graphs('D-VAE/data/asia_200k.txt', num_samples, n_types=8, fmt='igraph')    
+    data, graph_args = load_BN_graphs('dagnn/dvae/data/asia_200k.txt', num_samples, n_types=8, fmt='igraph')    
     whole_g = nx.DiGraph()
     gs = []
     gs_dict = {}
@@ -377,15 +377,6 @@ def load_bn(args):
     whole_g = union(gs, gs_dict)    
     whole_g = MyGraph(whole_g)
     return whole_g, graph_args
-
-
-def load_ast(args):    
-    dataset = PygGraphPropPredDataset(name="ogbg-code2")
-    breakpoint()
-    
-
-def load_finance(args):
-    breakpoint()
 
 
 def load_ckt(args, load_all=False):

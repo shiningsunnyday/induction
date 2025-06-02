@@ -700,9 +700,7 @@ def learn_grammar(smiles_or_list, args):
 
     def multi_thread_execute(func, args, G=None, trees=None):
         if trees is None:
-            trees = []       
-        import threading 
-        lock = threading.Lock()
+            trees = []           
         with concurrent.futures.ThreadPoolExecutor(NUM_THREADS) as executor:
             # Submit tasks to the thread pool
             futures = [
@@ -710,27 +708,30 @@ def learn_grammar(smiles_or_list, args):
                 for arg in tqdm(args, desc="submitting generation tasks")
             ]
             for future in concurrent.futures.as_completed(futures):
-                with lock:
-                    g, tree = future.result()
-                    logger.info(f"{g.folder} completed")
-                    trees.append(tree)
-                    if G is None:
-                        G = g
-                    else:
-                        G = G.combine(g)            
-                    logger.info(f"{g.folder} combined")        
-                    if args[0][1].grammar_ckpt:
-                        if len(trees) > 1:
-                            if len(trees) != len(G.mol_lookup):
-                                breakpoint()
-                            assert len(trees) == len(G.mol_lookup)
-                        pickle.dump(
-                        (G, trees),
-                        open(
-                            args[0][1].grammar_ckpt, "wb+"
-                        ),
-                        )
-                        logger.info(f"dumped checkpoint: {len(trees)}")
+                try:
+                    g, tree = future.result()     # <-- will re-raise if the worker threw
+                except Exception:
+                    logger.exception(f"Worker failed, skipping this result")
+                    os._exit(1)
+                logger.info(f"{g.folder} completed")
+                trees.append(tree)
+                if G is None:
+                    G = g
+                else:
+                    G = G.combine(g)            
+                logger.info(f"{g.folder} combined")        
+                if args[0][1].grammar_ckpt:
+                    if len(trees) > 1:
+                        if len(trees) != len(G.mol_lookup):
+                            breakpoint()
+                        assert len(trees) == len(G.mol_lookup)                                
+                    pickle.dump(
+                    (G, trees),
+                    open(
+                        args[0][1].grammar_ckpt, "wb+"
+                    ),
+                    )
+                    logger.info(f"dumped checkpoint: {len(trees)}")
         return G, trees
 
     if isinstance(smiles_or_list, list):
@@ -741,7 +742,6 @@ def learn_grammar(smiles_or_list, args):
         else:
             G, trees = multi_thread_execute(_learn_grammar, task_args, G, trees)
         # probabilistic grammar inference => populate counts
-        breakpoint()
         if len(trees) > 1:
             grammar_inference(G, {smi: [tree] for (smi, tree) in zip(G.mol_lookup, trees)})
         pickle.dump(

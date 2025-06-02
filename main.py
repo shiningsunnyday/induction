@@ -9,7 +9,40 @@ import pickle
 from src.grammar.common import get_args
 from src.grammar.utils import *
 import os
+import sys
+import time
+import threading
 # from src.model import graph_regression, transformer_regression
+
+def start_ckpt_watchdog(ckpt_path: str, timeout_sec: int = 600, poll_interval: int = 60):
+    """
+    Monitors the modification time of `ckpt_path`. If the file isn't created
+    or hasn't been updated for `timeout_sec` seconds _since job start or
+    since last update_, the process will exit(1).
+    """
+    start_time = time.time()
+    def _watchdog():
+        # initialize to the later of job-start or first ckpt write
+        last_mtime = start_time
+        while True:
+            try:
+                if os.path.exists(ckpt_path):
+                    mtime = os.path.getmtime(ckpt_path)
+                    # if file mtime is newer than our marker, bump it
+                    if mtime > last_mtime:
+                        last_mtime = mtime
+                # if we’ve gone > timeout since last_mtime, bail out
+                if time.time() - last_mtime > timeout_sec:
+                    sys.stderr.write(
+                        f"[ckpt-watchdog] no update to {ckpt_path} for {timeout_sec}s, exiting.\n"
+                    )
+                    os._exit(1)
+            except Exception as e:
+                sys.stderr.write(f"[ckpt-watchdog] error: {e}\n")
+            time.sleep(poll_interval)
+
+    t = threading.Thread(target=_watchdog, daemon=True)
+    t.start()
 
 
 def load_data(args):
@@ -27,8 +60,6 @@ def load_data(args):
         g = load_enas(args)
     elif DATASET == "bn":
         g = load_bn(args)
-    elif DATASET == "ast":
-        g = load_ast(args)
     elif DATASET == "mol":
         g = load_mols(args)
     else:
@@ -66,4 +97,7 @@ def main(args):
 
 if __name__ == "__main__":
     args = get_args()
+    if args.grammar_ckpt:
+        # start monitoring your ckpt file:
+        start_ckpt_watchdog(args.grammar_ckpt, timeout_sec=5*60, poll_interval=60)    
     main(args)

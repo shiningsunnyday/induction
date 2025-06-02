@@ -898,9 +898,21 @@ def chordal_mol_graph(smiles):
     try:
         chordal_cg = my_complete_to_chordal(deepcopy(cg), mol)
     except KeyError:
-        logger.error(smiles)
+        logger.error(f"{smiles}: KeyError in custom completion", exc_info=True)
         sys.exit(1)
-    assert chordal.is_chordal(chordal_cg)
+
+    # wrap is_chordal so we turn ANY failure into a RuntimeError that names the SMILES
+    try:
+        is_ch = chordal.is_chordal(chordal_cg)
+    except Exception as e:
+        msg = f"Chordality check raised {type(e).__name__} for SMILES={smiles}"
+        logger.error(msg, exc_info=True)
+        raise RuntimeError(msg) from e
+
+    if not is_ch:
+        msg = f"Graph is not chordal for SMILES={smiles}"
+        logger.error(msg)
+        raise RuntimeError(msg)   
     return mol, chordal_cg, cg
     # chordal.chordal_graph_cliques(cg)
 
