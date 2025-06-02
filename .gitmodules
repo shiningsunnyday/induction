@@ -3,7 +3,7 @@
 	url = https://github.com/shiningsunnyday/HRG.git
 [submodule "my_data_efficient_grammar"]
 	path = my_data_efficient_grammar
-	url = https://github.com/gmh14/my_data_efficient_grammar.git
+	url = https://github.com/shiningsunnyday/my_data_efficient_grammar
 [submodule "CktGNN"]
 	path = CktGNN
 	url = https://github.com/shiningsunnyday/CktGNN.git
