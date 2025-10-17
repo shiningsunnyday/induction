@@ -9,6 +9,8 @@ plt.switch_backend('Agg')
 from typing import Dict
 from collections import defaultdict
 import numpy as np
+import pickle
+from copy import deepcopy
 
 
 class Hyperedge:
@@ -74,20 +76,6 @@ class HRG_rule:
                 node_map[e.id] = inv_match_info[e.id]
             else:
                 node_map[e.id] = he.nodes[i]
-        # for each node in rhs.ext, sample its adj atoms from he
-        # for e, n in zip(he.nodes, self.rhs.ext):
-        #     atom_cts = self.rhs.adj_atoms(n.id)
-        #     e_atoms = hg.adj_atoms(e, count=False)
-        #     for a, c in atom_cts.items():
-        #         to_del += list(np.random.choice(e_atoms[a], c, replace=False))
-        # breakpoint()
-        # if match_info is not None:
-        #     remove_edges = sorted([int(n[1:]) for n in match_info if n[0]=='h'], reverse=True)
-        #     for i in remove_edges:
-        #         if i > index:
-        #             i = i-1
-        #         hg.E[i].nodes # add this back!
-        #         hg.remove_hyperedge(i)
         for ei, e in enumerate(self.rhs.E):
             mapped_n = [node_map[n] for n in e.nodes]
             if match_info is not None:
@@ -103,17 +91,7 @@ class HRG_rule:
                         remove_edges.append(int(inv_match_info[f"h{ei}"][1:]))
                         hg.add_hyperedge(list(new_e_nodes), e.label, **e.kwargs)
                         continue
-            # if set(mapped_n) & set(he.nodes) == set(mapped_n):
-            #     continue
-            # old_edges = [i for i in range(len(hg.E)) if set(hg.E[i].nodes) == set(mapped_n)]
-            # if len(old_edges) > 1:
-            #     breakpoint()
-            # for i in sorted(old_edges, reverse=True):
-            #     hg.remove_hyperedge(i)
-            # any edges connecting only the anchors should be ignored
             hg.add_hyperedge(mapped_n, e.label, **e.kwargs)
-            # find any counterpart to remove
-        # remove edges consisting of only anchors
         for ei in sorted(list(set(remove_edges)), reverse=True):
             hg.remove_hyperedge(ei)
         return hg
@@ -266,11 +244,6 @@ class HG:
         self.E.append(edge)
         assert new_adj_edges.shape[1] == len(self.E)
         self.adj_edges = new_adj_edges
-        # import glob
-        # import re
-        # d = max([int(re.match('/home/msun415/test_(\d+).png', a).groups()[0]) if re.match('/home/msun415/test_(\d+).png', a) is not None else -1 for a in glob.glob(f'/home/msun415/test_*.png')])
-        # self.visualize(f'/home/msun415/test_{d+1}.png')
-        # print(f"add hyperedge, adj_edges shape {self.adj_edges.shape}, len(self.E) {len(self.E)}")
 
     def remove_hyperedge(self, index):
         self.adj_edges = np.delete(self.adj_edges, index, -1)
@@ -339,7 +312,218 @@ class HG:
         # print(os.path.abspath(path))
 
 
+def derive(A, H, hrg):
+    """
+    Algorithm 2.7.4 (Derive(A, H)) for growing HRGs:
+      - Find a rule A => R whose terminal part embeds into H (VR ⊆ VH, ET_R ⊆ EH).
+      - For each nonterminal edge e_i in R, carve out a "substantial" candidate Hi
+        from the remainder of H whose externals are att_R(e_i).
+      - Check H == R<e1/H1, ..., en/Hn> structurally (i.e., terminals match and the
+        remainder partitions across the Hi), and recurse: Derive(lab_R(e_i), Hi).
+    Returns True iff H ∈ L_A.
+    """
+    T = set(hrg.T)
+    N = set(hrg.N)
+
+    # Quick guard: H must be over T (no nonterminals present)
+    for he in H.E:
+        if he.label in N:
+            return False
+    # Utilities ---------------------------------------------------------------
+    def incident_edges(hg, node_id):
+        """Edge indices incident to node_id in hg."""
+        r = hg.node_index_lookup[node_id]
+        return np.argwhere(hg.adj_edges[r]).flatten().tolist()
+
+    def build_edge_index(hg):
+        """(label, frozenset(nodes)) -> [edge_indices] (multimap)."""
+        idx = defaultdict(list)
+        for i, e in enumerate(hg.E):
+            idx[(e.label, frozenset(e.nodes))].append(i)
+        return idx
+
+    def rule_split_edges(R):
+        """Split R's edges into terminals/nonterminals with their indices."""
+        term, nonterm = [], []
+        for i, e in enumerate(R.E):
+            (term if e.label in T else nonterm).append((i, e))
+        return term, nonterm
+
+    def nodes_R(R):
+        """Lists of external and internal node ids of R."""
+        ext_ids = [n.id for n in R.ext]
+        int_ids = [n.id for n in R.V if n.id not in ext_ids]
+        return ext_ids, int_ids
+
+    def find_terminal_embedding(R, H):
+        """
+        Find a node mapping m: nodes(R) -> nodes(H) such that
+        - m(e_k) = e_k for externals (type-consistent boundary),
+        - each terminal edge of R maps onto an existing edge of H (label+attachments).
+        Returns (m, used_terminal_edge_indices) or None.
+        """
+        ext_R, int_R = nodes_R(R)
+        # boundary must match in order and arity
+        if len(ext_R) != len(H.ext):
+            return None
+
+        # Fix externals: map R.ej -> H.ej (same names in this codebase)
+        m = {eid: eid for eid in ext_R}
+
+        # Prepare terminal constraints
+        term_R, _ = rule_split_edges(R)
+        H_index = build_edge_index(H)
+        H_internal_nodes = [n.id for n in H.V if not n.id.startswith("e")]
+
+        # Backtracking over internal nodes of R
+        def constraint_satisfied(partial_m):
+            # If a terminal edge is fully assigned, it must exist in H
+            for _, e in term_R:
+                if all(v in partial_m for v in e.nodes):
+                    key = (e.label, frozenset(partial_m[v] for v in e.nodes))
+                    if key not in H_index or not H_index[key]:
+                        return False
+            return True
+
+        int_list = list(int_R)
+        used_terminals_final = None  # filled on success
+        def backtrack(i):
+            nonlocal used_terminals_final
+            if i == len(int_list):
+                # Reserve concrete H edges for each terminal (respect multiplicity)
+                used = []
+                taken = set()
+                for _, e in term_R:
+                    key = (e.label, frozenset(m[v] for v in e.nodes))
+                    # pick an index not yet taken
+                    found = None
+                    for cand in H_index[key]:
+                        if cand not in taken:
+                            found = cand
+                            break
+                    if found is None:
+                        return False
+                    taken.add(found)
+                    used.append(found)
+                used_terminals_final = used
+                return True
+
+            var = int_list[i]
+            # Optional very mild pruning: prefer nodes adjacent to already-fixed externals if possible
+            candidates = H_internal_nodes
+            for cand in candidates:
+                if cand in m.values():
+                    continue  # injective mapping
+                m[var] = cand
+                if constraint_satisfied(m) and backtrack(i + 1):
+                    return True
+                del m[var]
+            return False
+        return (m, used_terminals_final) if backtrack(0) else None
+
+    def bfs_component_from_attachments(hg, seed_nodes, allowed_edges):
+        """
+        Collect the set of edges reachable from seed_nodes using only allowed_edges.
+        BFS on the node–edge bipartite incidence.
+        """
+        allowed = set(allowed_edges)
+        edge_comp = set()
+        q = list(seed_nodes)
+        seen_nodes = set(seed_nodes)
+        while q:
+            u = q.pop()
+            for ei in incident_edges(hg, u):
+                if ei not in allowed or ei in edge_comp:
+                    continue
+                edge_comp.add(ei)
+                for v in hg.E[ei].nodes:
+                    if v not in seen_nodes:
+                        seen_nodes.add(v)
+                        q.append(v)
+        return edge_comp
+
+    def induce_subhypergraph(hg, edge_indices, attachment_nodes):
+        """
+        Build a fresh HG consisting of the given edges, with externals = attachment_nodes
+        (order preserved). Node ids are remapped; externals become e0..ek-1.
+        """
+        k = len(attachment_nodes)
+        Hsub = HG(k, list(range(k)))  # creates k nodes and marks all as externals
+        old2new = {}
+
+        # map attachments in order
+        for j, old in enumerate(attachment_nodes):
+            old2new[old] = f"e{j}"
+
+        # helper to add (or reuse) an internal node
+        def add_or_get(old_id):
+            if old_id in old2new:
+                return old2new[old_id]
+            # copy label if available; otherwise empty
+            lbl = ""
+            try:
+                lbl = hg.V[hg.node_index_lookup[old_id]].label
+            except Exception:
+                pass
+            new_id = Hsub.add_node(lbl)
+            old2new[old_id] = new_id
+            return new_id
+
+        for ei in edge_indices:
+            e = hg.E[ei]
+            mapped_nodes = [add_or_get(x) for x in e.nodes]
+            Hsub.add_hyperedge(mapped_nodes, e.label, **e.kwargs)
+
+        return Hsub
+
+    # Main search over rules with LHS A ---------------------------------------
+    for r in hrg.rules:
+        if r.symbol != A:
+            continue
+        R = r.rhs
+        # Types must match (arity of externals)
+        if R.type != H.type:
+            continue
+        emb = find_terminal_embedding(R, H)
+        if emb is None:
+            continue
+        node_map, used_terminals = emb
+        # Partition the remainder of H across the nonterminals of R
+        term_R, nonterm_R = rule_split_edges(R)
+        remaining_edges = set(range(len(H.E))) - set(used_terminals)
+        Hi_list = []
+        consumed = set()
+        ok_partition = True
+        for (i_nt, e_nt) in nonterm_R:
+            # attachments of this nonterminal in H via the node_map
+            att_nodes = [node_map[u] for u in e_nt.nodes]
+            comp_edges = bfs_component_from_attachments(H, att_nodes, remaining_edges - consumed)
+            # "substantial" candidate must at least include the boundary (it may be empty only if H truly has no remainder through this A)
+            Hi = induce_subhypergraph(H, comp_edges, att_nodes)
+            Hi_list.append((e_nt.label, Hi))
+            consumed |= comp_edges
+        # After carving out all Hi, all remainder must be accounted for
+        if consumed != remaining_edges:
+            # Some edges left unassigned — this rule/embedding doesn't reconstruct H
+            continue
+        # Base case: no nonterminals on RHS — then H must equal the terminal cover we matched
+        if not nonterm_R:
+            # If we got here, terminals covered H exactly (remaining_edges empty by check above)
+            return True
+        # Recurse on each Hi
+        all_ok = True
+        for nt_label, Hi in Hi_list:
+            if not derive(nt_label, Hi, hrg):
+                all_ok = False
+                break
+        if all_ok:
+            return True
+    # No rule/embedding worked
+    return False
+
+
 if __name__ == "__main__":
+    folder = "api_test_hg"
     vocab = {"S": 2, "A": 4, "a": None, "b": None, "c": None}
     hrg = HRG(["S", "A"], ["a", "b", "c"], "S", vocab)
     rhs_1 = HG(4 + 2, range(4, 4 + 2))
@@ -348,38 +532,58 @@ if __name__ == "__main__":
     rhs_1.add_hyperedge(["n2", "n3"], "c")
     rhs_1.add_hyperedge(["n0", "n1", "n3", "e1"], "A")
     rule_1 = HRG_rule("S", rhs_1, vocab)
-    rhs_1.visualize(f"{wd}/data/api_mol_hg/rhs_rule_1.png")
+    rhs_1.visualize(f"{wd}/data/{folder}/rhs_rule_1.png")
     rhs_2 = HG(2 + 2, range(2, 2 + 2))
     rhs_2.add_hyperedge(["e0", "n0"], "a")
     rhs_2.add_hyperedge(["n0", "n1"], "b")
     rhs_2.add_hyperedge(["n1", "e1"], "c")
     rule_2 = HRG_rule("S", rhs_2, vocab)
-    rhs_2.visualize(f"{wd}/data/api_mol_hg/rhs_rule_2.png")
+    rhs_2.visualize(f"{wd}/data/{folder}/rhs_rule_2.png")
     rhs_3 = HG(3 + 4, range(3, 3 + 4))
     rhs_3.add_hyperedge(["e0", "n0"], "a")
     rhs_3.add_hyperedge(["n1", "e1"], "b")
     rhs_3.add_hyperedge(["e2", "n2"], "c")
     rhs_3.add_hyperedge(["n0", "n1", "n2", "e3"], "A")
     rule_3 = HRG_rule("A", rhs_3, vocab)
-    rhs_3.visualize(f"{wd}/data/api_mol_hg/rhs_rule_3.png")
+    rhs_3.visualize(f"{wd}/data/{folder}/rhs_rule_3.png")
     rhs_4 = HG(1 + 4, range(1, 1 + 4))
     rhs_4.add_hyperedge(["e0", "n0"], "a")
     rhs_4.add_hyperedge(["n0", "e1"], "b")
     rhs_4.add_hyperedge(["e2", "e3"], "c")
     rule_4 = HRG_rule("A", rhs_4, vocab)
-    rhs_4.visualize(f"{wd}/data/api_mol_hg/rhs_rule_4.png")
+    rhs_4.visualize(f"{wd}/data/{folder}/rhs_rule_4.png")
     hrg.add_rule(rule_1)
     hrg.add_rule(rule_2)
     hrg.add_rule(rule_3)
     hrg.add_rule(rule_4)
     hg = HG(0 + 2, range(0, 0 + 2))
     hg.add_hyperedge(["e0", "e1"], "S")
-    hg.visualize(f"{wd}/data/api_mol_hg/test_0.png")
+    hg.visualize(f"{wd}/data/{folder}/test_0.png")
     hg = rule_1(hg, ("S", 0))
-    hg.visualize(f"{wd}/data/api_mol_hg/test_1.png")
-    N = 2
+    hg.visualize(f"{wd}/data/{folder}/test_1.png")
+
+    N = 40 # n+1
     for i in range(N - 1):
         hg = rule_3(hg, ("A", 0))
-        hg.visualize(f"{wd}/data/api_mol_hg/test_{i+2}.png")
+        hg.visualize(f"{wd}/data/{folder}/test_{i+2}.png")
     hg = rule_4(hg, ("A", 0))
-    hg.visualize(f"{wd}/data/api_mol_hg/test_final.png")
+
+    print(derive("S", hg, hrg))
+
+    hg.visualize(f"{wd}/data/{folder}/test_final.png")    
+    n = 1
+    test_hg = HG(n + 2, range(n, n + 2))
+    test_hg.add_hyperedge(["e0", "n0"], "a")
+    test_hg.add_hyperedge(["n0", "e1"], "b")
+    test_hg.visualize(f"{wd}/data/{folder}/test_bad.png")
+
+    print(derive("S", test_hg, hrg))
+
+    n = 2
+    test_hg = HG(n + 2, range(n, n + 2))
+    test_hg.add_hyperedge(["e0", "n0"], "a")
+    test_hg.add_hyperedge(["n0", "n1"], "b")
+    test_hg.add_hyperedge(["n1", "e1"], "c")
+    test_hg.visualize(f"{wd}/data/{folder}/test_good.png")    
+
+    print(derive("S", test_hg, hrg))
