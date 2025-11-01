@@ -202,6 +202,10 @@ class HRG:
             data = json.load(f)
         return cls.from_dict(data)         
 
+    def visualize(self, path):
+        for i in range(len(self.rules)):
+            self.rules[i].rhs.visualize(f"{path}/rhs_rule_{i+1}.png")
+
 
 class Node:
     def __init__(self, id, label, **kwargs):
@@ -747,15 +751,14 @@ if __name__ == "__main__":
     rhs_1.add_hyperedge(["n0", "n1"], "a")
     rhs_1.add_hyperedge(["n1"], "A")
     rule_1 = HRG_rule("S", rhs_1, vocab)
-    rhs_1.visualize(f"{wd}/data/{folder}/rhs_rule_1.png")
     rhs_2 = HG(3 + 1, range(3, 3 + 1))
     rhs_2.add_hyperedge(["e0", "n0"], "b")
     rhs_2.add_hyperedge(["n0", "n1"], "c")
     rhs_2.add_hyperedge(["n1", "n2"], "a")
     rule_2 = HRG_rule("A", rhs_2, vocab)
-    rhs_2.visualize(f"{wd}/data/{folder}/rhs_rule_2.png")
     hrg.add_rule(rule_1)
-    hrg.add_rule(rule_2)    
+    hrg.add_rule(rule_2)
+    hrg.visualize(f"{wd}/data/{folder}")
 
     test_hg = HG(5 + 0, range(5, 5 + 0))
     test_hg.add_hyperedge(["n0", "n1"], "a")
