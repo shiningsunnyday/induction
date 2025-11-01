@@ -7,7 +7,7 @@ import networkx as nx
 import matplotlib.pyplot as plt
 plt.switch_backend('Agg') 
 from typing import Dict
-from collections import defaultdict
+from collections import defaultdict, namedtuple
 import numpy as np
 import pickle
 from copy import deepcopy
@@ -644,71 +644,6 @@ def derive(A, H, hrg):
 
     return False
 
-# if __name__ == "__main__":
-#     folder = "api_test_hg"
-#     vocab = {"S": 2, "A": 4, "a": None, "b": None, "c": None}
-#     hrg = HRG(["S", "A"], ["a", "b", "c"], "S", vocab)
-#     rhs_1 = HG(4 + 2, range(4, 4 + 2))
-#     rhs_1.add_hyperedge(["e0", "n0"], "a")
-#     rhs_1.add_hyperedge(["n1", "n2"], "b")
-#     rhs_1.add_hyperedge(["n2", "n3"], "c")
-#     rhs_1.add_hyperedge(["n0", "n1", "n3", "e1"], "A")
-#     rule_1 = HRG_rule("S", rhs_1, vocab)
-#     rhs_1.visualize(f"{wd}/data/{folder}/rhs_rule_1.png")
-#     rhs_2 = HG(2 + 2, range(2, 2 + 2))
-#     rhs_2.add_hyperedge(["e0", "n0"], "a")
-#     rhs_2.add_hyperedge(["n0", "n1"], "b")
-#     rhs_2.add_hyperedge(["n1", "e1"], "c")
-#     rule_2 = HRG_rule("S", rhs_2, vocab)
-#     rhs_2.visualize(f"{wd}/data/{folder}/rhs_rule_2.png")
-#     rhs_3 = HG(3 + 4, range(3, 3 + 4))
-#     rhs_3.add_hyperedge(["e0", "n0"], "a")
-#     rhs_3.add_hyperedge(["n1", "e1"], "b")
-#     rhs_3.add_hyperedge(["e2", "n2"], "c")
-#     rhs_3.add_hyperedge(["n0", "n1", "n2", "e3"], "A")
-#     rule_3 = HRG_rule("A", rhs_3, vocab)
-#     rhs_3.visualize(f"{wd}/data/{folder}/rhs_rule_3.png")
-#     rhs_4 = HG(1 + 4, range(1, 1 + 4))
-#     rhs_4.add_hyperedge(["e0", "n0"], "a")
-#     rhs_4.add_hyperedge(["n0", "e1"], "b")
-#     rhs_4.add_hyperedge(["e2", "e3"], "c")
-#     rule_4 = HRG_rule("A", rhs_4, vocab)
-#     rhs_4.visualize(f"{wd}/data/{folder}/rhs_rule_4.png")
-#     hrg.add_rule(rule_1)
-#     hrg.add_rule(rule_2)
-#     hrg.add_rule(rule_3)
-#     hrg.add_rule(rule_4)
-#     hg = HG(0 + 2, range(0, 0 + 2))
-#     hg.add_hyperedge(["e0", "e1"], "S")
-#     hg.visualize(f"{wd}/data/{folder}/test_0.png")
-#     hg = rule_1(hg, ("S", 0))
-#     hg.visualize(f"{wd}/data/{folder}/test_1.png")
-
-#     N = 40 # n+1
-#     for i in range(N - 1):
-#         hg = rule_3(hg, ("A", 0))
-#         hg.visualize(f"{wd}/data/{folder}/test_{i+2}.png")
-#     hg = rule_4(hg, ("A", 0))
-
-#     print(derive("S", hg, hrg))
-
-#     hg.visualize(f"{wd}/data/{folder}/test_final.png")    
-#     n = 1
-#     test_hg = HG(n + 2, range(n, n + 2))
-#     test_hg.add_hyperedge(["e0", "n0"], "a")
-#     test_hg.add_hyperedge(["n0", "e1"], "b")
-#     test_hg.visualize(f"{wd}/data/{folder}/test_bad.png")
-
-#     print(derive("S", test_hg, hrg))
-
-#     n = 2
-#     test_hg = HG(n + 2, range(n, n + 2))
-#     test_hg.add_hyperedge(["e0", "n0"], "a")
-#     test_hg.add_hyperedge(["n0", "n1"], "b")
-#     test_hg.add_hyperedge(["n1", "e1"], "c")
-#     test_hg.visualize(f"{wd}/data/{folder}/test_good.png")    
-
-#     print(derive("S", test_hg, hrg))
 
 def deep_equal_hg(h1: HG, h2: HG) -> bool:
     return h1.to_dict() == h2.to_dict()
@@ -739,35 +674,112 @@ def assert_hrg_equal(g1: HRG, g2: HRG):
         # RHS hypergraph equality
         assert_hg_equal(r1.rhs, r2.rhs, msg_prefix=f"HRG.rule[{i}].rhs")
 
+# unit tests for derive()
+
+class test_HRG1(HRG):
+    def __init__(self):
+        vocab = {"S": 2, "A": 4, "a": None, "b": None, "c": None}
+        HRG.__init__(self, ["S", "A"], ["a", "b", "c"], "S", vocab)
+        rhs_1 = HG(4 + 2, range(4, 4 + 2))
+        rhs_1.add_hyperedge(["e0", "n0"], "a")
+        rhs_1.add_hyperedge(["n1", "n2"], "b")
+        rhs_1.add_hyperedge(["n2", "n3"], "c")
+        rhs_1.add_hyperedge(["n0", "n1", "n3", "e1"], "A")
+        rule_1 = HRG_rule("S", rhs_1, vocab)
+        rhs_2 = HG(2 + 2, range(2, 2 + 2))
+        rhs_2.add_hyperedge(["e0", "n0"], "a")
+        rhs_2.add_hyperedge(["n0", "n1"], "b")
+        rhs_2.add_hyperedge(["n1", "e1"], "c")
+        rule_2 = HRG_rule("S", rhs_2, vocab)
+        rhs_3 = HG(3 + 4, range(3, 3 + 4))
+        rhs_3.add_hyperedge(["e0", "n0"], "a")
+        rhs_3.add_hyperedge(["n1", "e1"], "b")
+        rhs_3.add_hyperedge(["e2", "n2"], "c")
+        rhs_3.add_hyperedge(["n0", "n1", "n2", "e3"], "A")
+        rule_3 = HRG_rule("A", rhs_3, vocab)
+        rhs_4 = HG(1 + 4, range(1, 1 + 4))
+        rhs_4.add_hyperedge(["e0", "n0"], "a")
+        rhs_4.add_hyperedge(["n0", "e1"], "b")
+        rhs_4.add_hyperedge(["e2", "e3"], "c")
+        rule_4 = HRG_rule("A", rhs_4, vocab)
+        self.add_rule(rule_1)
+        self.add_rule(rule_2)
+        self.add_rule(rule_3)
+        self.add_rule(rule_4)
+
+    def test_hg1(self, N):
+        hg = HG(0 + 2, range(0, 0 + 2))
+        hg.add_hyperedge(["e0", "e1"], "S")
+        hg = self.rules[0](hg, ("S", 0))
+
+        for i in range(N - 1):
+            hg = self.rules[2](hg, ("A", 0))
+        hg = self.rules[3](hg, ("A", 0))
+
+        return hg
+
+    def test_hg2(self):
+        n = 1
+        hg = HG(n + 2, range(n, n + 2))
+        hg.add_hyperedge(["e0", "n0"], "a")
+        hg.add_hyperedge(["n0", "e1"], "b")
+
+        return hg
+
+    def test_hg3(self):
+        n = 2
+        hg = HG(n + 2, range(n, n + 2))
+        hg.add_hyperedge(["e0", "n0"], "a")
+        hg.add_hyperedge(["n0", "n1"], "b")
+        hg.add_hyperedge(["n1", "e1"], "c")
+
+        return hg
+
+    def test_hgs(self):
+        return [(self.test_hg1(10), True), (self.test_hg2(), False), (self.test_hg3(), True)]
+
+class test_HRG2(HRG):
+    def __init__(self):
+        vocab = {"S": 0, # []
+                 "A": 1, # []
+                 "a": None, "b": None, "c": None}
+        HRG.__init__(self, ["S", "A"], ["a", "b", "c"], "S", vocab)
+        rhs_1 = HG(2 + 0, range(2, 2 + 0))
+        rhs_1.add_hyperedge(["n0", "n1"], "a")
+        rhs_1.add_hyperedge(["n1"], "A")
+        rule_1 = HRG_rule("S", rhs_1, vocab)
+        rhs_2 = HG(3 + 1, range(3, 3 + 1))
+        rhs_2.add_hyperedge(["e0", "n0"], "b")
+        rhs_2.add_hyperedge(["n0", "n1"], "c")
+        rhs_2.add_hyperedge(["n1", "n2"], "a")
+        rule_2 = HRG_rule("A", rhs_2, vocab)
+        self.add_rule(rule_1)
+        self.add_rule(rule_2)
+
+    def test_hgs(self):
+        hg = HG(5 + 0, range(5, 5 + 0))
+        hg.add_hyperedge(["n0", "n1"], "a")
+        hg.add_hyperedge(["n1", "n2"], "c")
+        hg.add_hyperedge(["n2", "n3"], "b")
+        hg.add_hyperedge(["n4", "n3"], "a")
+
+        return [(hg, True)]
 
 if __name__ == "__main__":
     folder = "api_test_hg"
-    vocab = {"S": 0, # []
-             "A": 1, # []
-             "a": None, "b": None, "c": None}
-    # node_vocab = {"-", "=", "@", "#"}
-    hrg = HRG(["S", "A"], ["a", "b", "c"], "S", vocab)    
-    rhs_1 = HG(2 + 0, range(2, 2 + 0))
-    rhs_1.add_hyperedge(["n0", "n1"], "a")
-    rhs_1.add_hyperedge(["n1"], "A")
-    rule_1 = HRG_rule("S", rhs_1, vocab)
-    rhs_2 = HG(3 + 1, range(3, 3 + 1))
-    rhs_2.add_hyperedge(["e0", "n0"], "b")
-    rhs_2.add_hyperedge(["n0", "n1"], "c")
-    rhs_2.add_hyperedge(["n1", "n2"], "a")
-    rule_2 = HRG_rule("A", rhs_2, vocab)
-    hrg.add_rule(rule_1)
-    hrg.add_rule(rule_2)
-    hrg.visualize(f"{wd}/data/{folder}")
-
-    test_hg = HG(5 + 0, range(5, 5 + 0))
-    test_hg.add_hyperedge(["n0", "n1"], "a")
-    test_hg.add_hyperedge(["n1", "n2"], "c")
-    test_hg.add_hyperedge(["n2", "n3"], "b")
-    test_hg.add_hyperedge(["n4", "n3"], "a")
-    test_hg.visualize(f"{wd}/data/{folder}/test_good.png")
-
-    print(derive("S", test_hg, hrg))
+    Testcase = namedtuple("Testcase", ['name', 'fn', 'hrg'])
+    tests = [
+        Testcase(name="Test 1", fn="test1", hrg=test_HRG1),
+        Testcase(name="Test 2", fn="test2", hrg=test_HRG2)]
+    for test in tests:
+        hrg = test.hrg()
+        for i, (hg, success) in enumerate(hrg.test_hgs()):
+            if derive("S", hg, hrg) == success:
+                print(f'{test.name} graph {i+1}: pass')
+            else:
+                print(f'{test.name} graph {i+1}: FAIL')
+                hrg.visualize(f"{wd}/data/{folder}/{test.fn}")
+                hg.visualize(f"{wd}/data/{folder}/{test.fn}/hg{i}.png")
 
     hrg.to_json(f"{wd}/data/{folder}/test_cases/1/grammar.hrg")
     test_hg.to_json(f"{wd}/data/{folder}/test_cases/1/1.hg")
