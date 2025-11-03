@@ -676,6 +676,7 @@ def assert_hrg_equal(g1: HRG, g2: HRG):
 
 # unit tests for derive()
 
+# Example 2.2 from Drewes et al
 class test_HRG1(HRG):
     def __init__(self):
         vocab = {"S": 2, "A": 4, "a": None, "b": None, "c": None}
@@ -718,26 +719,26 @@ class test_HRG1(HRG):
 
         return hg
 
-    def test_hg2(self):
-        n = 1
+    def string_graph(self, str):
+        n = len(str)-1
         hg = HG(n + 2, range(n, n + 2))
-        hg.add_hyperedge(["e0", "n0"], "a")
-        hg.add_hyperedge(["n0", "e1"], "b")
-
-        return hg
-
-    def test_hg3(self):
-        n = 2
-        hg = HG(n + 2, range(n, n + 2))
-        hg.add_hyperedge(["e0", "n0"], "a")
-        hg.add_hyperedge(["n0", "n1"], "b")
-        hg.add_hyperedge(["n1", "e1"], "c")
+        hg.add_hyperedge(["e0", "n0"], str[0])
+        for i in range(1,n):
+            hg.add_hyperedge([f"n{i-1}", f"n{i}"], str[i])
+        hg.add_hyperedge([f"n{n-1}", "e1"], str[n])
 
         return hg
 
     def test_hgs(self):
-        return [(self.test_hg1(10), True), (self.test_hg2(), False), (self.test_hg3(), True)]
+        return [(self.test_hg1(10), True),
+                (self.string_graph("ab"), False),
+                (self.string_graph("abc"), True),
+                (self.string_graph("abcabc"), False),
+                (self.string_graph("aabbcc"), True),
+                (self.string_graph("abbc"), False),
+               ]
 
+# Test that all node matchings are being considered
 class test_HRG2(HRG):
     def __init__(self):
         vocab = {"S": 0, # []
