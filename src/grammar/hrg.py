@@ -766,8 +766,7 @@ class test_HRG2(HRG):
 
         return [(hg, True)]
 
-if __name__ == "__main__":
-    folder = "api_test_hg"
+def test_derive(folder):
     Testcase = namedtuple("Testcase", ['name', 'fn', 'hrg'])
     tests = [
         Testcase(name="Test 1", fn="test1", hrg=test_HRG1),
@@ -779,13 +778,24 @@ if __name__ == "__main__":
                 print(f'{test.name} graph {i+1}: pass')
             else:
                 print(f'{test.name} graph {i+1}: FAIL')
+                os.makedirs(f"{wd}/data/{folder}/{test.fn}", exist_ok=True)
                 hrg.visualize(f"{wd}/data/{folder}/{test.fn}")
                 hg.visualize(f"{wd}/data/{folder}/{test.fn}/hg{i}.png")
 
+def test_json(folder):
+    hrg=test_HRG2()
+    test_hg = hrg.test_hgs()[0][0]
     hrg.to_json(f"{wd}/data/{folder}/test_cases/1/grammar.hrg")
     test_hg.to_json(f"{wd}/data/{folder}/test_cases/1/1.hg")
     hrg_ = HRG.from_json(f"{wd}/data/{folder}/test_cases/1/grammar.hrg")    
     test_hg_ = HG.from_json(f"{wd}/data/{folder}/test_cases/1/1.hg")
     assert_hg_equal(test_hg, test_hg_)
     assert_hrg_equal(hrg, hrg_)
+    test_hg.visualize(f"{wd}/data/{folder}/test_good.png")
     test_hg_.visualize(f"{wd}/data/{folder}/test_good_.png")
+
+if __name__ == "__main__":
+    folder = "api_test_hg"
+
+    test_derive(folder)
+    test_json(folder)
