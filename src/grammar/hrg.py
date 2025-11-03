@@ -1,6 +1,6 @@
 import os
 import sys
-
+import json
 wd = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
 sys.path.append(wd)
 import networkx as nx
@@ -30,6 +30,41 @@ class HRG_rule:
         assert self.vocab[symbol] == rhs.type
         self.symbol = symbol
         self.rhs: HG = rhs
+    
+    @classmethod
+    def from_dict(cls, data, vocab=None):
+        """
+        Build an HRG_rule from a plain dict. If vocab is omitted, it is taken
+        from the dict (data['vocab']).
+        """
+        if vocab is None:
+            vocab = data["vocab"]
+        # reconstruct RHS hypergraph from dict
+        rhs = HG()
+        rhs.from_dict(data["rhs"])
+        return cls(data["symbol"], rhs, vocab)
+
+    def to_dict(self):
+        """
+        Convert this rule into a plain dict (JSON-serializable). We include the
+        vocab so a rule can be loaded standalone.
+        """
+        return {
+            "symbol": self.symbol,
+            "vocab": self.vocab,
+            "rhs": self.rhs.to_dict(),
+        }
+
+    # --- file-based JSON helpers ---
+    @classmethod
+    def from_json(cls, filename, vocab=None):
+        with open(filename, "r") as f:
+            data = json.load(f)
+        return cls.from_dict(data, vocab=vocab)
+
+    def to_json(self, filename):
+        with open(filename, "w") as f:
+            json.dump(self.to_dict(), f, indent=2)
 
     def __call__(self, hg, edge, match_info=None):
         if isinstance(edge, tuple):
@@ -136,6 +171,36 @@ class HRG:
     def combine_counts(self, other, remap_idx):
         for i in range(len(other.counts)):
             self.counts[remap_idx[i]] += other.counts[i]
+    
+    def to_dict(self):
+        return {
+            "N": self.N,
+            "T": self.T,
+            "S": self.S,
+            "vocab": self.vocab,
+            "counts": self.counts,
+            "rules": [r.to_dict() for r in self.rules],
+        }
+
+    @classmethod
+    def from_dict(cls, data):
+        hrg = cls(data["N"], data["T"], data["S"], data["vocab"])
+        for rdict in data.get("rules", []):
+            hrg.add_rule(HRG_rule.from_dict(rdict, vocab=hrg.vocab))
+        if "counts" in data:
+            hrg.set_counts(data["counts"])
+        return hrg
+
+    # ---- JSON convenience ----
+    def to_json(self, filename: str):
+        with open(filename, "w") as f:
+            json.dump(self.to_dict(), f, indent=2)
+
+    @classmethod
+    def from_json(cls, filename: str):
+        with open(filename, "r") as f:
+            data = json.load(f)
+        return cls.from_dict(data)         
 
 
 class Node:
@@ -310,6 +375,84 @@ class HG:
         fig.savefig(path)
         plt.close(fig)
         # print(os.path.abspath(path))
+
+    def from_dict(self, data):
+        """
+        Load the hypergraph from a dict produced by to_dict().
+        Rebuilds V/E/ext, node_index_lookup, and adj_edges.
+        """
+        # reset structures
+        self.V = []
+        self.E = []
+        self.ext = []
+        self.node_index_lookup = {}
+        self.adj_edges = np.zeros((0, 0))
+        self.mapping = {}
+
+        # nodes
+        for nd in data.get("V", []):
+            nid = nd["id"]
+            nlabel = nd.get("label", "")
+            nkwargs = nd.get("kwargs", {}) or {}
+            node = Node(nid, nlabel, **nkwargs)
+            self.V.append(node)
+            self.node_index_lookup[nid] = len(self.V) - 1
+
+        # adjacency matrix now has |V| rows, 0 columns
+        self.adj_edges = np.zeros((len(self.V), 0))
+
+        # externals (by id, in order)
+        for eid in data.get("ext", []):
+            # eid must already be in V
+            idx = self.node_index_lookup[eid]
+            self.ext.append(self.V[idx])
+
+        # edges (update adj_edges as we append)
+        for ed in data.get("E", []):
+            nodes = ed["nodes"]
+            label = ed["label"]
+            ekwargs = ed.get("kwargs", {}) or {}
+
+            # append edge
+            edge = Hyperedge(nodes, label, **ekwargs)
+            self.E.append(edge)
+
+            # expand adj_edges with one new column and mark incidences
+            new_adj = np.pad(self.adj_edges, [(0, 0), (0, 1)])
+            for nid in nodes:
+                r = self.node_index_lookup[nid]
+                new_adj[r, -1] = 1
+            self.adj_edges = new_adj
+
+        return self
+
+    def to_dict(self):
+        """
+        JSON-serializable representation of the hypergraph.
+        """
+        return {
+            "V": [
+                {"id": n.id, "label": n.label, "kwargs": n.kwargs}
+                for n in self.V
+            ],
+            "E": [
+                {"nodes": e.nodes, "label": e.label, "kwargs": e.kwargs}
+                for e in self.E
+            ],
+            "ext": [n.id for n in self.ext],
+        }
+
+    @classmethod
+    def from_json(cls, filename: str):
+        with open(filename, "r") as f:
+            data = json.load(f)
+        obj = cls()
+        obj.from_dict(data)
+        return obj
+
+    def to_json(self, filename):
+        with open(filename, "w") as f:
+            json.dump(self.to_dict(), f, indent=2)
 
 
 def derive(A, H, hrg):
@@ -563,6 +706,34 @@ def derive(A, H, hrg):
 
 #     print(derive("S", test_hg, hrg))
 
+def deep_equal_hg(h1: HG, h2: HG) -> bool:
+    return h1.to_dict() == h2.to_dict()
+
+def assert_hg_equal(h1: HG, h2: HG, msg_prefix="HG"):
+    d1, d2 = h1.to_dict(), h2.to_dict()
+    assert d1 == d2, (
+        f"{msg_prefix} mismatch\n"
+        f"  V equal:   {d1.get('V') == d2.get('V')}\n"
+        f"  E equal:   {d1.get('E') == d2.get('E')}\n"
+        f"  ext equal: {d1.get('ext') == d2.get('ext')}\n"
+        f"diff V: {d1.get('V')}\nvs\n{d2.get('V')}\n"
+        f"diff E: {d1.get('E')}\nvs\n{d2.get('E')}\n"
+        f"diff ext: {d1.get('ext')}\nvs\n{d2.get('ext')}\n"
+    )
+
+def assert_hrg_equal(g1: HRG, g2: HRG):
+    # quick fields
+    assert g1.N == g2.N, f"N mismatch: {g1.N} vs {g2.N}"
+    assert g1.T == g2.T, f"T mismatch: {g1.T} vs {g2.T}"
+    assert g1.S == g2.S, f"S mismatch: {g1.S} vs {g2.S}"
+    assert g1.vocab == g2.vocab, f"vocab mismatch"
+    assert g1.counts == g2.counts, f"counts mismatch: {g1.counts} vs {g2.counts}"
+    assert len(g1.rules) == len(g2.rules), f"rules length mismatch"
+
+    for i, (r1, r2) in enumerate(zip(g1.rules, g2.rules)):
+        assert r1.symbol == r2.symbol, f"rule {i} symbol mismatch: {r1.symbol} vs {r2.symbol}"
+        # RHS hypergraph equality
+        assert_hg_equal(r1.rhs, r2.rhs, msg_prefix=f"HRG.rule[{i}].rhs")
 
 
 if __name__ == "__main__":
@@ -571,7 +742,7 @@ if __name__ == "__main__":
              "A": 1, # []
              "a": None, "b": None, "c": None}
     # node_vocab = {"-", "=", "@", "#"}
-    hrg = HRG(["S", "A"], ["a", "b", "c"], "S", vocab)
+    hrg = HRG(["S", "A"], ["a", "b", "c"], "S", vocab)    
     rhs_1 = HG(2 + 0, range(2, 2 + 0))
     rhs_1.add_hyperedge(["n0", "n1"], "a")
     rhs_1.add_hyperedge(["n1"], "A")
@@ -584,7 +755,7 @@ if __name__ == "__main__":
     rule_2 = HRG_rule("A", rhs_2, vocab)
     rhs_2.visualize(f"{wd}/data/{folder}/rhs_rule_2.png")
     hrg.add_rule(rule_1)
-    hrg.add_rule(rule_2)
+    hrg.add_rule(rule_2)    
 
     test_hg = HG(5 + 0, range(5, 5 + 0))
     test_hg.add_hyperedge(["n0", "n1"], "a")
@@ -594,3 +765,11 @@ if __name__ == "__main__":
     test_hg.visualize(f"{wd}/data/{folder}/test_good.png")
 
     print(derive("S", test_hg, hrg))
+
+    hrg.to_json(f"{wd}/data/{folder}/test_cases/1/grammar.hrg")
+    test_hg.to_json(f"{wd}/data/{folder}/test_cases/1/1.hg")
+    hrg_ = HRG.from_json(f"{wd}/data/{folder}/test_cases/1/grammar.hrg")    
+    test_hg_ = HG.from_json(f"{wd}/data/{folder}/test_cases/1/1.hg")
+    assert_hg_equal(test_hg, test_hg_)
+    assert_hrg_equal(hrg, hrg_)
+    test_hg_.visualize(f"{wd}/data/{folder}/test_good_.png")

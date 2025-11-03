@@ -1,0 +1,64 @@
+{
+  "V": [
+    {
+      "id": "n0",
+      "label": "",
+      "kwargs": {}
+    },
+    {
+      "id": "n1",
+      "label": "",
+      "kwargs": {}
+    },
+    {
+      "id": "n2",
+      "label": "",
+      "kwargs": {}
+    },
+    {
+      "id": "n3",
+      "label": "",
+      "kwargs": {}
+    },
+    {
+      "id": "n4",
+      "label": "",
+      "kwargs": {}
+    }
+  ],
+  "E": [
+    {
+      "nodes": [
+        "n0",
+        "n1"
+      ],
+      "label": "a",
+      "kwargs": {}
+    },
+    {
+      "nodes": [
+        "n1",
+        "n2"
+      ],
+      "label": "c",
+      "kwargs": {}
+    },
+    {
+      "nodes": [
+        "n2",
+        "n3"
+      ],
+      "label": "b",
+      "kwargs": {}
+    },
+    {
+      "nodes": [
+        "n4",
+        "n3"
+      ],
+      "label": "a",
+      "kwargs": {}
+    }
+  ],
+  "ext": []
+}
