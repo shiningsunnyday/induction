@@ -773,14 +773,12 @@ def test_derive(folder):
         Testcase(name="Test 2", fn="test2", hrg=test_HRG2)]
     for test in tests:
         hrg = test.hrg()
+        os.makedirs(f"{wd}/data/{folder}/{test.fn}", exist_ok=True)
+        hrg.visualize(f"{wd}/data/{folder}/{test.fn}")
         for i, (hg, success) in enumerate(hrg.test_hgs()):
-            if derive("S", hg, hrg) == success:
-                print(f'{test.name} graph {i+1}: pass')
-            else:
-                print(f'{test.name} graph {i+1}: FAIL')
-                os.makedirs(f"{wd}/data/{folder}/{test.fn}", exist_ok=True)
-                hrg.visualize(f"{wd}/data/{folder}/{test.fn}")
-                hg.visualize(f"{wd}/data/{folder}/{test.fn}/hg{i}.png")
+            hg.visualize(f"{wd}/data/{folder}/{test.fn}/hg{i}.png")
+            status = 'pass' if derive("S", hg, hrg) == success else 'FAIL'
+            print(f'{test.name} graph {i+1}: {status}')
 
 def test_json(folder):
     hrg=test_HRG2()
