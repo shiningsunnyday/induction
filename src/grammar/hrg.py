@@ -894,20 +894,19 @@ class test_HRG_cycle(HRG):
         self.add_rule(rule_2)
         self.add_rule(rule_3)
 
-    def test_hgs(self):
-        hg1 = HG(4 + 0, range(4, 4 + 0))
-        hg1.add_hyperedge(["n0", "n1"], "a")
-        hg1.add_hyperedge(["n1", "n2"], "b")
-        hg1.add_hyperedge(["n2", "n3"], "a")
-        hg1.add_hyperedge(["n3", "n0"], "b")
+    def cycle_graph(self, str):
+        n = len(str)
+        hg = HG(n + 0, range(n, n + 0))
+        for i in range(n):
+            hg.add_hyperedge([f"n{i}", f"n{(i+1)%n}"], str[i])
 
-        hg2 = HG(0 + 0, range(0, 0 + 0))
-        hg2.add_hyperedge([], "S")
-        hg2 = self.rules[0](hg2, ("S", 0))
-        hg2 = self.rules[2](hg2, ("A", 0))        
-        hg2 = self.rules[2](hg2, ("A", 0))
+        return hg
+
+
+    def test_hgs(self):
+        tests = [("abab", False), ("ababab", True), ("bababa", True), ("aabbab", False)]
         
-        return [(hg1, False), (hg2, True)]
+        return [(self.cycle_graph(str), success) for str, success in tests]
 
 def test_derive(folder):
     Testcase = namedtuple("Testcase", ['name', 'fn', 'hrg'])
@@ -924,7 +923,7 @@ def test_derive(folder):
         for i, (hg, success) in enumerate(hrg.test_hgs()):
             hg.visualize(f"{wd}/data/{folder}/{test.fn}/hg{i}.png")
             status = 'pass' if derive("S", hg, hrg) == success else 'FAIL'
-            print(f'{test.name} graph {i+1}: {status}')
+            print(f'{test.name} graph {i}: {status}')
 
 def test_json(folder):
     hrg=test_HRG2()
