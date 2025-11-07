@@ -461,19 +461,22 @@ class HG:
 
 def derive(A, H, hrg):
     """
-    Algorithm 2.7.4 (Derive(A,H)) for growing HRGs, extended to enumerate
-    *all* terminal embeddings of a rule A => R into H.
+    Algorithm 2.7.4 for growing HRGs, corrected to enumerate:
+      (i) all terminal embeddings of A => R into H, and
+      (ii) for each embedding, all consistent partitions of the remaining edges
+           among the RHS nonterminals, with closure and disjointness constraints.
     Returns True iff H ∈ L_A.
     """
+
     T = set(hrg.T)
     N = set(hrg.N)
 
-    # H must be over terminals only (no nonterminals left)
+    # H must be terminal-only at this point
     for he in H.E:
         if he.label in N:
             return False
 
-    # ---------- helpers ----------
+    # ---------- small utilities ----------
     def incident_edges(hg, node_id):
         r = hg.node_index_lookup[node_id]
         return np.argwhere(hg.adj_edges[r]).flatten().tolist()
@@ -495,19 +498,13 @@ def derive(A, H, hrg):
         int_ids = [n.id for n in R.V if n.id not in ext_ids]
         return ext_ids, int_ids
 
+    # ---------- enumerate ALL terminal embeddings ----------
     def find_terminal_embeddings(R, H):
-        """
-        Enumerate all embeddings (m, used_terminal_edge_indices) such that:
-          - m maps R's nodes to H's nodes with externals fixed positionally,
-          - for every terminal edge of R, H has a matching edge (label+attachments),
-          - used_terminal_edge_indices picks *distinct* concrete H edges for multiplicity.
-        Yields tuples (m, used_indices_list) for every valid embedding.
-        """
         ext_R, int_R = nodes_R(R)
         if len(ext_R) != len(H.ext):
             return  # no embeddings
 
-        # Fix externals to externals (ids like e0,e1,... are aligned in this codebase)
+        # Fix externals positionally: e0->e0, e1->e1, ...
         m = {eid: eid for eid in ext_R}
 
         term_R, _ = rule_split_edges(R)
@@ -516,7 +513,7 @@ def derive(A, H, hrg):
         int_list = list(int_R)
 
         def constraint_ok(partial):
-            # any fully-instantiated terminal edge must exist in H
+            # Any fully-instantiated terminal edge must exist in H
             for _, e in term_R:
                 if all(v in partial for v in e.nodes):
                     key = (e.label, frozenset(partial[v] for v in e.nodes))
@@ -525,10 +522,6 @@ def derive(A, H, hrg):
             return True
 
         def choose_terminals(k, taken, mapping):
-            """
-            Backtrack to choose a *distinct* H edge index for each terminal edge
-            (handles multiplicities / parallel edges).
-            """
             if k == len(term_R):
                 yield list(taken)
                 return
@@ -544,62 +537,141 @@ def derive(A, H, hrg):
 
         def backtrack_nodes(i):
             if i == len(int_list):
-                # All internal nodes assigned; now enumerate distinct terminal-edge choices
-                yield from ((dict(m), used) for used in choose_terminals(0, set(), m))
+                for used in choose_terminals(0, set(), m):
+                    yield (dict(m), used)
                 return
             var = int_list[i]
             for cand in H_internal_nodes:
-                if cand in m.values():  # injective mapping
+                if cand in m.values():  # injective
                     continue
                 m[var] = cand
                 if constraint_ok(m):
                     yield from backtrack_nodes(i + 1)
                 del m[var]
 
-        # Start enumeration (handles also the case of zero internal nodes)
         yield from backtrack_nodes(0)
 
-    def bfs_component_from_attachments(hg, seed_nodes, allowed_edges):
-        allowed = set(allowed_edges)
-        edge_comp = set()
-        q = list(seed_nodes)
-        seen_nodes = set(seed_nodes)
-        while q:
-            u = q.pop()
-            for ei in incident_edges(hg, u):
-                if ei not in allowed or ei in edge_comp:
+    # ---------- enumerate ALL consistent partitions for a fixed embedding ----------
+    def enumerate_partitions_for_embedding(R, H, node_map, used_terminals):
+        """
+        Yields one partition per solution:
+          mapping bucket b (0..n-1) -> set of edge indices assigned to H_b,
+        where buckets correspond to nonterminals of R in order.
+        """
+        term_R, nonterm_R = rule_split_edges(R)
+        buckets = [e_nt for (_, e_nt) in nonterm_R]
+        n_buckets = len(buckets)
+
+        remaining = sorted(set(range(len(H.E))) - set(used_terminals))
+        remaining_set = set(remaining)
+
+        # Mapped rule nodes in H (no Hi may touch other mapped rule nodes)
+        R_nodes_H = set(node_map[v.id] for v in R.V)
+
+        # For each bucket, its allowed boundary (attachments) in H (as a set)
+        att_lists = [[node_map[u] for u in e_nt.nodes] for (_, e_nt) in nonterm_R]
+        att_sets = [set(lst) for lst in att_lists]
+
+        # Precompute incident edges restricted to 'remaining'
+        node_to_edges = defaultdict(list)
+        for ei in remaining:
+            for v in H.E[ei].nodes:
+                node_to_edges[v].append(ei)
+
+        # State for backtracking
+        assignment = {}                     # edge_idx -> bucket
+        internal_nodes = [set() for _ in range(n_buckets)]  # per-bucket internal nodes
+
+        def allowed_buckets_for_edge(ei):
+            nodes = set(H.E[ei].nodes)
+            # Boundary nodes = nodes that correspond to mapped rule nodes
+            boundary = nodes & R_nodes_H
+
+            # If touches an internal node of some bucket, it must go to that bucket
+            forced = None
+            for b in range(n_buckets):
+                if nodes & internal_nodes[b]:
+                    if forced is None:
+                        forced = b
+                    elif forced != b:
+                        return set()  # conflicts with two buckets' interiors
+
+            if forced is not None:
+                return {forced} if boundary <= att_sets[forced] else set()
+
+            # Otherwise, any bucket whose attachments cover all boundary nodes
+            return {b for b in range(n_buckets) if boundary <= att_sets[b]}
+
+        def force_assign(ei, b, trail_edges, trail_nodes):
+            """Assign edge ei to bucket b and propagate closure through new internal nodes."""
+            if ei in assignment:
+                return assignment[ei] == b
+
+            # Boundary feasibility
+            allowed = allowed_buckets_for_edge(ei)
+            if b not in allowed:
+                return False
+
+            assignment[ei] = b
+            trail_edges.append(ei)
+
+            nodes = set(H.E[ei].nodes)
+            # Any node not a mapped rule node becomes internal to bucket b
+            new_internal = [v for v in nodes if v not in R_nodes_H]
+            for v in new_internal:
+                if v not in internal_nodes[b]:
+                    internal_nodes[b].add(v)
+                    trail_nodes.append((b, v))
+                    # Closure: all edges incident to this internal node must also be in b
+                    for ej in node_to_edges[v]:
+                        if ej in remaining_set and ej not in assignment:
+                            if not force_assign(ej, b, trail_edges, trail_nodes):
+                                return False
+                        elif ej in assignment and assignment[ej] != b:
+                            return False
+            return True
+
+        def choose_next_edge():
+            """Heuristic: pick an unassigned edge with smallest domain."""
+            best, best_cands = None, None
+            for ei in remaining:
+                if ei in assignment:
                     continue
-                edge_comp.add(ei)
-                for v in hg.E[ei].nodes:
-                    if v not in seen_nodes:
-                        seen_nodes.add(v)
-                        q.append(v)
-        return edge_comp
+                cands = allowed_buckets_for_edge(ei)
+                if not cands:
+                    return ei, set()
+                if best is None or len(cands) < len(best_cands):
+                    best, best_cands = ei, cands
+                    if len(best_cands) == 1:
+                        break
+            return best, best_cands
 
-    def induce_subhypergraph(hg, edge_indices, attachment_nodes):
-        k = len(attachment_nodes)
-        Hsub = HG(k, list(range(k)))  # creates k nodes and marks them all as externals
-        old2new = {attachment_nodes[j]: f"e{j}" for j in range(k)}
+        def backtrack():
+            # All edges assigned → yield the partition
+            if len(assignment) == len(remaining):
+                buckets_edges = [set() for _ in range(n_buckets)]
+                for ei, b in assignment.items():
+                    buckets_edges[b].add(ei)
+                yield buckets_edges
+                return
 
-        def add_or_get(old_id):
-            if old_id in old2new:
-                return old2new[old_id]
-            lbl = ""
-            try:
-                lbl = hg.V[hg.node_index_lookup[old_id]].label
-            except Exception:
-                pass
-            new_id = Hsub.add_node(lbl)
-            old2new[old_id] = new_id
-            return new_id
+            ei, cands = choose_next_edge()
+            if not cands:
+                return
 
-        for ei in edge_indices:
-            e = hg.E[ei]
-            mapped_nodes = [add_or_get(x) for x in e.nodes]
-            Hsub.add_hyperedge(mapped_nodes, e.label, **e.kwargs)
-        return Hsub
+            for b in sorted(cands):
+                trail_edges, trail_nodes = [], []
+                if force_assign(ei, b, trail_edges, trail_nodes):
+                    yield from backtrack()
+                # undo
+                for eidx in reversed(trail_edges):
+                    assignment.pop(eidx, None)
+                for (bb, v) in reversed(trail_nodes):
+                    internal_nodes[bb].remove(v)
 
-    # ---------- try every rule/embedding ----------
+        yield from backtrack()
+
+    # ---------- main loop over rules and embeddings ----------
     for r in hrg.rules:
         if r.symbol != A:
             continue
@@ -608,39 +680,52 @@ def derive(A, H, hrg):
             continue
 
         for node_map, used_terminals in find_terminal_embeddings(R, H):
-            term_R, nonterm_R = rule_split_edges(R)
+            # Try *all* consistent partitions of the remaining edges
+            for buckets_edges in enumerate_partitions_for_embedding(R, H, node_map, used_terminals):
+                _, nonterm_R = rule_split_edges(R)
 
-            remaining_edges = set(range(len(H.E))) - set(used_terminals)
+                # Build Hi for each nonterminal in order
+                Hi_list = []
+                ok = True
+                for idx, ((_, e_nt), edge_set) in enumerate(zip(nonterm_R, buckets_edges)):
+                    att_nodes = [node_map[u] for u in e_nt.nodes]
+                    # Induce Hi with externals = att_nodes (order preserved)
+                    # (We re-use the induce_subhypergraph logic inline for clarity)
+                    k = len(att_nodes)
+                    Hi = HG(k, list(range(k)))
+                    old2new = {att_nodes[j]: f"e{j}" for j in range(k)}
 
-            Hi_list = []
-            consumed = set()
-            ok_partition = True
+                    def add_or_get(old_id):
+                        if old_id in old2new:
+                            return old2new[old_id]
+                        lbl = ""
+                        try:
+                            lbl = H.V[H.node_index_lookup[old_id]].label
+                        except Exception:
+                            pass
+                        new_id = Hi.add_node(lbl)
+                        old2new[old_id] = new_id
+                        return new_id
 
-            for (_, e_nt) in nonterm_R:
-                att_nodes = [node_map[u] for u in e_nt.nodes]
-                comp_edges = bfs_component_from_attachments(
-                    H, att_nodes, remaining_edges - consumed
-                )
-                Hi = induce_subhypergraph(H, comp_edges, att_nodes)
-                Hi_list.append((e_nt.label, Hi))
-                consumed |= comp_edges
+                    for ei in edge_set:
+                        e = H.E[ei]
+                        mapped_nodes = [add_or_get(x) for x in e.nodes]
+                        Hi.add_hyperedge(mapped_nodes, e.label, **e.kwargs)
 
-            # All remaining edges must be accounted for by the union of Hi
-            if consumed != remaining_edges:
-                continue
+                    Hi_list.append((e_nt.label, Hi))
 
-            # Base case: no nonterminals on RHS
-            if not nonterm_R:
-                return True
+                # Base case: if RHS had no nonterminals, we already matched H via terminals
+                if not Hi_list:
+                    return True
 
-            # Recurse
-            all_ok = True
-            for nt_label, Hi in Hi_list:
-                if not derive(nt_label, Hi, hrg):
-                    all_ok = False
-                    break
-            if all_ok:
-                return True
+                # Recurse on each Hi
+                all_ok = True
+                for nt_label, Hi in Hi_list:
+                    if not derive(nt_label, Hi, hrg):
+                        all_ok = False
+                        break
+                if all_ok:
+                    return True
 
     return False
 
@@ -819,9 +904,9 @@ class test_HRG_cycle(HRG):
         hg2 = HG(0 + 0, range(0, 0 + 0))
         hg2.add_hyperedge([], "S")
         hg2 = self.rules[0](hg2, ("S", 0))
+        hg2 = self.rules[2](hg2, ("A", 0))        
         hg2 = self.rules[2](hg2, ("A", 0))
-        hg2 = self.rules[2](hg2, ("A", 0))
-
+        
         return [(hg1, False), (hg2, True)]
 
 def test_derive(folder):
