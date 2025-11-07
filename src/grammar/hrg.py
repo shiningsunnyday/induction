@@ -676,6 +676,25 @@ def assert_hrg_equal(g1: HRG, g2: HRG):
 
 # unit tests for derive()
 
+# minimal HRG
+class test_HRG_empty(HRG):
+    def __init__(self):
+        vocab = {"S": 0, "a": None}
+        HRG.__init__(self, ["S"], ["a"], "S", vocab)
+        rhs = HG(0 + 0, range(0, 0 + 0))
+        rhs.add_hyperedge([], "a")
+        rule = HRG_rule("S", rhs, vocab)
+        self.add_rule(rule)
+
+    def test_hgs(self):
+        hg1 = HG(0 + 0, range(0, 0 + 0))
+        hg1.add_hyperedge([], "a")
+
+        hg2 = HG(1 + 0, range(1, 1 + 0))
+        hg2.add_hyperedge(["n0"], "a")
+
+        return [(hg1, True), (hg2, False)]
+
 # Example 2.2 from Drewes et al
 class test_HRG1(HRG):
     def __init__(self):
@@ -766,11 +785,53 @@ class test_HRG2(HRG):
 
         return [(hg, True)]
 
+# cycles
+class test_HRG_cycle(HRG):
+    def __init__(self):
+        vocab = {"S": 0, "A": 2, "a": None, "b": None}
+        HRG.__init__(self, ["S", "A"], ["a", "b"], "S", vocab)
+        rhs_1 = HG(4 + 0, range(4, 4 + 0))
+        rhs_1.add_hyperedge(["n0", "n1"], "A")
+        rhs_1.add_hyperedge(["n1", "n2"], "A")
+        rhs_1.add_hyperedge(["n2", "n3"], "a")
+        rhs_1.add_hyperedge(["n3", "n0"], "b")
+        rule_1 = HRG_rule("S", rhs_1, vocab)
+        rhs_2 = HG(2 + 2, range(2, 2 + 2))
+        rhs_2.add_hyperedge(["e0", "n0"], "a")
+        rhs_2.add_hyperedge(["n0", "n1"], "b")
+        rhs_2.add_hyperedge(["n1", "e1"], "A")
+        rule_2 = HRG_rule("A", rhs_2, vocab)
+        rhs_3 = HG(1 + 2, range(1, 1 + 2))
+        rhs_3.add_hyperedge(["e0", "n0"], "a")
+        rhs_3.add_hyperedge(["n0", "e1"], "b")
+        rule_3 = HRG_rule("A", rhs_3, vocab)
+        self.add_rule(rule_1)
+        self.add_rule(rule_2)
+        self.add_rule(rule_3)
+
+    def test_hgs(self):
+        hg1 = HG(4 + 0, range(4, 4 + 0))
+        hg1.add_hyperedge(["n0", "n1"], "a")
+        hg1.add_hyperedge(["n1", "n2"], "b")
+        hg1.add_hyperedge(["n2", "n3"], "a")
+        hg1.add_hyperedge(["n3", "n0"], "b")
+
+        hg2 = HG(0 + 0, range(0, 0 + 0))
+        hg2.add_hyperedge([], "S")
+        hg2 = self.rules[0](hg2, ("S", 0))
+        hg2 = self.rules[2](hg2, ("A", 0))
+        hg2 = self.rules[2](hg2, ("A", 0))
+
+        return [(hg1, False), (hg2, True)]
+
 def test_derive(folder):
     Testcase = namedtuple("Testcase", ['name', 'fn', 'hrg'])
     tests = [
-        Testcase(name="Test 1", fn="test1", hrg=test_HRG1),
-        Testcase(name="Test 2", fn="test2", hrg=test_HRG2)]
+        Testcase(name="Test 0 (empty)", fn="empty", hrg=test_HRG_empty),
+        Testcase(name="Test 1 (drewes)", fn="test1", hrg=test_HRG1),
+        Testcase(name="Test 2", fn="test2", hrg=test_HRG2),
+        Testcase(name="Test 3 (cycles)", fn="test3", hrg=test_HRG_cycle),
+        ]
     for test in tests:
         hrg = test.hrg()
         os.makedirs(f"{wd}/data/{folder}/{test.fn}", exist_ok=True)
