@@ -908,6 +908,92 @@ class test_HRG_cycle(HRG):
         
         return [(self.cycle_graph(str), success) for str, success in tests]
 
+# Habel Chapter I, Example 3.4 modified in the handling of double bonds
+class test_HRG_rubber(HRG):
+    def __init__(self):
+        vocab = {"RUBBER": 0, "SECTION1": 1, "SECTION2": 1, "CHAIN": 2, "SECTION": 2, "CH3": 1, "CH2": 2, "CH": 2, "C": None, "H": None}
+        HRG.__init__(self, ["RUBBER", "SECTION1", "SECTION2", "CHAIN", "SECTION", "CH3", "CH2", "CH"], ["C", "H"], "RUBBER", vocab)
+        rhs_1 = HG(2 + 0, range(2, 2 + 0))
+        rhs_1.add_hyperedge(["n0"], "SECTION1")
+        rhs_1.add_hyperedge(["n0", "n1"], "CHAIN")
+        rhs_1.add_hyperedge(["n1"], "SECTION2")
+        rule_1 = HRG_rule("RUBBER", rhs_1, vocab)
+        rhs_2 = HG(1 + 0, range(1, 1 + 0))
+        rhs_2.add_hyperedge(["n0"], "SECTION1")
+        rhs_2.add_hyperedge(["n0"], "SECTION2")
+        rule_2 = HRG_rule("RUBBER", rhs_2, vocab)
+        rhs_3 = HG(1 + 2, range(1, 1 + 2))
+        rhs_3.add_hyperedge(["e0", "n0"], "SECTION")
+        rhs_3.add_hyperedge(["n0", "e1"], "CHAIN")
+        rule_3 = HRG_rule("CHAIN", rhs_3, vocab)
+        rhs_4 = HG(0 + 2, range(0, 0 + 2))
+        rhs_4.add_hyperedge(["e0", "e1"], "SECTION")
+        rule_4 = HRG_rule("CHAIN", rhs_4, vocab)
+        rhs_5 = HG(4 + 1, range(4, 4 + 1))
+        rhs_5.add_hyperedge(["n0"], "CH3")
+        rhs_5.add_hyperedge(["n1"], "CH3")
+        rhs_5.add_hyperedge(["n0", "n1", "n2"], "C")
+        rhs_5.add_hyperedge(["n2", "n3"], "CH")
+        rhs_5.add_hyperedge(["n3", "e0"], "CH2")
+        rule_5 = HRG_rule("SECTION1", rhs_5, vocab)
+        rhs_6 = HG(4 + 2, range(4, 4 + 2))
+        rhs_6.add_hyperedge(["e0", "n0"], "CH2")
+        rhs_6.add_hyperedge(["n1"], "CH3")
+        rhs_6.add_hyperedge(["n0", "n1", "n2"], "C")
+        rhs_6.add_hyperedge(["n2", "n3"], "CH")
+        rhs_6.add_hyperedge(["n3", "e1"], "CH2")
+        rule_6 = HRG_rule("SECTION", rhs_6, vocab)
+        rhs_7 = HG(4 + 1, range(4, 4 + 1))
+        rhs_7.add_hyperedge(["e0", "n0"], "CH2")
+        rhs_7.add_hyperedge(["n1"], "CH3")
+        rhs_7.add_hyperedge(["n0", "n1", "n2"], "C")
+        rhs_7.add_hyperedge(["n2", "n3"], "CH")
+        rhs_7.add_hyperedge(["n3"], "CH3")
+        rule_7 = HRG_rule("SECTION2", rhs_7, vocab)
+        rhs_8 = HG(1 + 1, range(1, 1 + 1))
+        rhs_8.add_hyperedge(["e0", "n0"], "CH2")
+        rhs_8.add_hyperedge(["n0"], "H")
+        rule_8 = HRG_rule("CH3", rhs_8, vocab)
+        rhs_9 = HG(2 + 2, range(2, 2 + 2))
+        rhs_9.add_hyperedge(["e0", "e1", "n0", "n1"], "C")
+        rhs_9.add_hyperedge(["n0"], "H")
+        rhs_9.add_hyperedge(["n1"], "H")
+        rule_9 = HRG_rule("CH2", rhs_9, vocab)
+        rhs_10 = HG(1 + 2, range(1, 1 + 2))
+        rhs_10.add_hyperedge(["e0", "e1", "n0"], "C")
+        rhs_10.add_hyperedge(["n0"], "H")
+        rule_10 = HRG_rule("CH", rhs_10, vocab)
+
+        self.add_rule(rule_1)
+        self.add_rule(rule_2)
+        self.add_rule(rule_3)
+        self.add_rule(rule_4)
+        self.add_rule(rule_5)
+        self.add_rule(rule_6)
+        self.add_rule(rule_7)
+        self.add_rule(rule_8)
+        self.add_rule(rule_9)
+        self.add_rule(rule_10)
+
+    def test_hgs(self):
+        hg = HG(0 + 0, range(0, 0 + 0))
+        hg.add_hyperedge([], "RUBBER")
+        hg = self.rules[0](hg, ("RUBBER", 0))
+        hg = self.rules[2](hg, ("CHAIN", 0))
+        hg = self.rules[3](hg, ("CHAIN", 0))
+        hg = self.rules[4](hg, ("SECTION1", 0))
+        hg = self.rules[5](hg, ("SECTION", 0))
+        hg = self.rules[5](hg, ("SECTION", 0))
+        hg = self.rules[6](hg, ("SECTION2", 0))
+        for i in range(6):
+            hg = self.rules[7](hg, ("CH3", 0))
+        for i in range(12):
+            hg = self.rules[8](hg, ("CH2", 0))
+        for i in range(4):
+            hg = self.rules[9](hg, ("CH", 0))
+
+        return [(hg, True)]
+
 def test_derive(folder):
     Testcase = namedtuple("Testcase", ['name', 'fn', 'hrg'])
     tests = [
@@ -915,6 +1001,7 @@ def test_derive(folder):
         Testcase(name="Test 1 (drewes)", fn="test1", hrg=test_HRG1),
         Testcase(name="Test 2", fn="test2", hrg=test_HRG2),
         Testcase(name="Test 3 (cycles)", fn="test3", hrg=test_HRG_cycle),
+        Testcase(name="Test 4 (rubber)", fn="test4", hrg=test_HRG_rubber),
         ]
     for test in tests:
         hrg = test.hrg()
@@ -922,7 +1009,7 @@ def test_derive(folder):
         hrg.visualize(f"{wd}/data/{folder}/{test.fn}")
         for i, (hg, success) in enumerate(hrg.test_hgs()):
             hg.visualize(f"{wd}/data/{folder}/{test.fn}/hg{i}.png")
-            status = 'pass' if derive("S", hg, hrg) == success else 'FAIL'
+            status = 'pass' if derive(hrg.S, hg, hrg) == success else 'FAIL'
             print(f'{test.name} graph {i}: {status}')
 
 def test_json(folder):
